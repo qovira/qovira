@@ -21,9 +21,11 @@ type healthzBody struct {
 // It does NOT start a listener — it only builds the handler for unit tests.
 // A fresh events.NewBus() is injected so the server compiles and routes
 // correctly; SSE-specific behaviour is tested in events_test.go.
+// No middleware is passed so route-level behaviour is tested in isolation.
 func newServerHandler(t *testing.T, version string) http.Handler {
 	t.Helper()
-	srv := httpx.NewServer("127.0.0.1:0", version, events.NewBus())
+	router := httpx.NewRouter()
+	srv := httpx.NewServer("127.0.0.1:0", version, router, events.NewBus())
 	return srv.Handler
 }
 
@@ -33,7 +35,8 @@ func TestNewServer_Addr(t *testing.T) {
 	t.Parallel()
 
 	const addr = "127.0.0.1:8080"
-	srv := httpx.NewServer(addr, "v1.2.3", events.NewBus())
+	router := httpx.NewRouter()
+	srv := httpx.NewServer(addr, "v1.2.3", router, events.NewBus())
 	if srv.Addr != addr {
 		t.Errorf("Addr = %q, want %q", srv.Addr, addr)
 	}
@@ -44,7 +47,8 @@ func TestNewServer_Addr(t *testing.T) {
 func TestNewServer_ReadHeaderTimeout(t *testing.T) {
 	t.Parallel()
 
-	srv := httpx.NewServer("127.0.0.1:0", "dev", events.NewBus())
+	router := httpx.NewRouter()
+	srv := httpx.NewServer("127.0.0.1:0", "dev", router, events.NewBus())
 	if srv.ReadHeaderTimeout == 0 {
 		t.Error("ReadHeaderTimeout is zero; gosec G112 requires a non-zero value")
 	}
@@ -364,7 +368,8 @@ func TestIntegration_ServerBindsAndAnswersHealthz(t *testing.T) {
 	t.Parallel()
 
 	const version = "v0.0.0-integration"
-	srv := httpx.NewServer("127.0.0.1:0", version, events.NewBus())
+	router := httpx.NewRouter()
+	srv := httpx.NewServer("127.0.0.1:0", version, router, events.NewBus())
 
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()

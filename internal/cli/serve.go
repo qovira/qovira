@@ -3,13 +3,29 @@ package cli
 import (
 	"context"
 	"errors"
-	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
+	"github.com/qovira/qovira/internal/app"
 	"github.com/qovira/qovira/internal/config"
+	"github.com/qovira/qovira/internal/httpx"
+	"github.com/qovira/qovira/internal/logging"
 	"github.com/qovira/qovira/internal/store"
 )
+
+// denyAllValidator is the temporary TokenValidator injected until the Identity
+// & Auth slice lands with a concrete implementation. Every token validation
+// attempt returns a non-nil error, causing AuthMiddleware to respond 401 for
+// all protected routes. Replace this injection point when the real validator
+// is available.
+type denyAllValidator struct{}
+
+func (denyAllValidator) ValidateToken(_ context.Context, _ string) (store.Principal, error) {
+	return store.Principal{}, errors.New("token validation not yet implemented")
+}
 
 func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -25,14 +41,19 @@ func newServeCmd() *cobra.Command {
 				return err
 			}
 
-			s, err := openAndMigrate(cmd.Context(), cfg)
+			logger := logging.NewLogger(os.Stdout, *cfg)
+
+			var validator httpx.TokenValidator = denyAllValidator{}
+
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+
+			a, err := app.New(ctx, cfg, logger, validator, version)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = s.Close() }()
 
-			// HTTP server start is wired in a later issue.
-			return errors.New("serve: not yet implemented")
+			return a.Run(ctx)
 		},
 	}
 
@@ -41,37 +62,4 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("config", "", "path to config file (default: auto-discovered)")
 
 	return cmd
-}
-
-// openAndMigrate opens the store and, when cfg.AutoMigrate is true, runs all
-// pending migrations against the write pool. It is extracted so the boot
-// sequence can be exercised in tests without starting an HTTP server.
-//
-// On success the returned *store.Store is open and the caller is responsible
-// for closing it. On error the store is already closed before this function
-// returns.
-func openAndMigrate(ctx context.Context, cfg *config.Config) (s *store.Store, err error) {
-	s, err = store.Open(store.Config{
-		Path: store.DBPath(cfg.DataDir),
-		Key:  string(cfg.MasterKey),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("serve: open store: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			_ = s.Close()
-			s = nil
-		}
-	}()
-
-	if cfg.AutoMigrate {
-		runner := store.NewRunner()
-		if err = runner.Up(ctx, s.Writer()); err != nil {
-			err = fmt.Errorf("serve: auto-migrate: %w", err)
-			return
-		}
-	}
-
-	return s, nil
 }

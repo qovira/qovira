@@ -31,6 +31,17 @@ const defaultReadPoolSize = 4
 // "sqlite3" driver registered by the library's own init().
 const driverName = "qovira-sqlcipher"
 
+// ErrWritePoolClose is the sentinel wrapped into the error returned by
+// (*Store).Close when the write pool fails to close. Use errors.Is to detect
+// it — Close wraps both the sentinel and the underlying error so both are
+// identifiable after the call.
+var ErrWritePoolClose = errors.New("store: close write pool")
+
+// ErrReadPoolClose is the sentinel wrapped into the error returned by
+// (*Store).Close when the read pool fails to close. Symmetric counterpart to
+// ErrWritePoolClose.
+var ErrReadPoolClose = errors.New("store: close read pool")
+
 var registerOnce sync.Once
 
 // register ensures the named driver is registered exactly once. sql.Register
@@ -107,16 +118,21 @@ func (s *Store) Reader() *sql.DB { return s.readDB }
 // failure (which may indicate uncheckpointed WAL data) from a read-pool
 // failure. The errors are independently wrapped so they remain identifiable
 // after errors.Join.
+//
+// A write-pool failure is detectable via errors.Is(err, ErrWritePoolClose);
+// a read-pool failure via errors.Is(err, ErrReadPoolClose). Each wraps both
+// the sentinel and the underlying error (Go 1.20+ multi-%w) so the root cause
+// is accessible via errors.Unwrap.
 func (s *Store) Close() error {
 	writeErr := s.writeDB.Close()
 	readErr := s.readDB.Close()
 
 	var werr, rerr error
 	if writeErr != nil {
-		werr = fmt.Errorf("store: close write pool: %w", writeErr)
+		werr = fmt.Errorf("%w: %w", ErrWritePoolClose, writeErr)
 	}
 	if readErr != nil {
-		rerr = fmt.Errorf("store: close read pool: %w", readErr)
+		rerr = fmt.Errorf("%w: %w", ErrReadPoolClose, readErr)
 	}
 	return errors.Join(werr, rerr)
 }
