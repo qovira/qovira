@@ -51,7 +51,7 @@ func tableExists(t *testing.T, db *sql.DB, name string) bool {
 }
 
 // TestRunnerUp_CreatesSchema verifies that Runner.Up applies migrations and
-// creates the expected schema objects (the instance table and the goose
+// creates the expected schema objects (instance, user_data, and the goose
 // version table).
 func TestRunnerUp_CreatesSchema(t *testing.T) {
 	t.Parallel()
@@ -66,13 +66,18 @@ func TestRunnerUp_CreatesSchema(t *testing.T) {
 	if !tableExists(t, s.Writer(), "instance") {
 		t.Error("instance table not found after Up")
 	}
+	if !tableExists(t, s.Writer(), "user_data") {
+		t.Error("user_data table not found after Up")
+	}
 	if !tableExists(t, s.Writer(), "goose_db_version") {
 		t.Error("goose_db_version table not found after Up")
 	}
 }
 
 // TestRunnerDown_RevertsSchema verifies that Runner.Down rolls back the last
-// applied migration, removing the instance table.
+// applied migration. With two migrations in the chain (00001_instance,
+// 00002_scoping_exemplar), a single Down call reverts migration 2 — dropping
+// the user_data table — while leaving migration 1 (instance) intact.
 func TestRunnerDown_RevertsSchema(t *testing.T) {
 	t.Parallel()
 
@@ -82,15 +87,20 @@ func TestRunnerDown_RevertsSchema(t *testing.T) {
 	if err := runner.Up(context.Background(), s.Writer()); err != nil {
 		t.Fatalf("Runner.Up: %v", err)
 	}
-	if !tableExists(t, s.Writer(), "instance") {
-		t.Fatal("instance table must exist before Down")
+	if !tableExists(t, s.Writer(), "user_data") {
+		t.Fatal("user_data table must exist before Down")
 	}
 
 	if err := runner.Down(context.Background(), s.Writer()); err != nil {
 		t.Fatalf("Runner.Down: %v", err)
 	}
-	if tableExists(t, s.Writer(), "instance") {
-		t.Error("instance table still present after Down; expected it to be dropped")
+	// Migration 2 (user_data) must be gone.
+	if tableExists(t, s.Writer(), "user_data") {
+		t.Error("user_data table still present after Down; expected it to be dropped")
+	}
+	// Migration 1 (instance) must still be applied.
+	if !tableExists(t, s.Writer(), "instance") {
+		t.Error("instance table absent after single Down; only migration 2 should have been rolled back")
 	}
 }
 
@@ -152,12 +162,12 @@ func TestRunnerUpDownStatus_RoundTrip(t *testing.T) {
 		t.Errorf("after Up: expected applied state in status output, got:\n%s", afterUp.String())
 	}
 
-	// Down.
+	// Down: reverts migration 2 (user_data). Migration 1 (instance) stays.
 	if err := runner.Down(ctx, s.Writer()); err != nil {
 		t.Fatalf("Runner.Down: %v", err)
 	}
 
-	// Status must show pending (not applied) for migration 1.
+	// Status must show at least one pending migration (migration 2 was rolled back).
 	var afterDown strings.Builder
 	if err := runner.Status(ctx, s.Writer(), &afterDown); err != nil {
 		t.Fatalf("Status after Down: %v", err)
@@ -165,8 +175,13 @@ func TestRunnerUpDownStatus_RoundTrip(t *testing.T) {
 	if !strings.Contains(afterDown.String(), string(goose.StatePending)) {
 		t.Errorf("after Down: expected pending state in status output, got:\n%s", afterDown.String())
 	}
-	if tableExists(t, s.Writer(), "instance") {
-		t.Error("instance table must be absent after Down")
+	// Migration 2's table must be absent.
+	if tableExists(t, s.Writer(), "user_data") {
+		t.Error("user_data table must be absent after Down (migration 2 rolled back)")
+	}
+	// Migration 1 (instance) must remain applied.
+	if !tableExists(t, s.Writer(), "instance") {
+		t.Error("instance table must remain present — only migration 2 was rolled back")
 	}
 }
 

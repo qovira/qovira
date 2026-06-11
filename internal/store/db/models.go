@@ -8,3 +8,10 @@ type Instance struct {
 	ID        int64
 	CreatedAt string
 }
+
+type UserDatum struct {
+	ID        string
+	UserID    string
+	Value     string
+	CreatedAt string
+}

@@ -9,7 +9,19 @@ import (
 )
 
 type Querier interface {
+	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
 	GetInstance(ctx context.Context) (Instance, error)
+	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
+	// Scoped queries for the user_data exemplar table.
+	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
+	// comes from and is limited to the bound Scope. This pattern is the template
+	// that real domain tables must follow; the CI guard in scopeguard.go enforces
+	// it at build time.
+	//
+	// Parameters use sqlc named params (@name) per the house convention; the
+	// generated Params structs carry typed fields (ID, UserID, Value).
+	InsertUserData(ctx context.Context, arg InsertUserDataParams) error
+	ListUserData(ctx context.Context, userID string) ([]UserDatum, error)
 }
 
 var _ Querier = (*Queries)(nil)
