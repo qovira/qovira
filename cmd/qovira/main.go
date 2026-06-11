@@ -1,12 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/qovira/qovira/internal/cli"
 )
 
 func main() {
-	// Placeholder: will become os.Exit(cli.Execute()) in QOV-35.
-	fmt.Fprintln(os.Stderr, "qovira: not yet implemented")
-	os.Exit(1)
+	os.Exit(cli.Execute())
 }
