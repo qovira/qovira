@@ -36,7 +36,8 @@ func newRootCmd() *cobra.Command {
 		Long: `Qovira stores and protects your personal data with end-to-end encryption.
 
 Use "qovira serve" to start the HTTP server, "qovira migrate" to manage the
-database schema, and "qovira version" to print build information.`,
+database schema, "qovira healthcheck" to probe the local server, and
+"qovira version" to print build information.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -44,6 +45,7 @@ database schema, and "qovira version" to print build information.`,
 	root.AddCommand(
 		newServeCmd(),
 		newMigrateCmd(),
+		newHealthcheckCmd(),
 		newVersionCmd(),
 	)
 

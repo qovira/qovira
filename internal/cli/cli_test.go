@@ -27,7 +27,7 @@ func runCmd(t *testing.T, args ...string) (string, string, error) {
 func TestRootHelp(t *testing.T) {
 	t.Parallel()
 
-	want := []string{"serve", "migrate", "version"}
+	want := []string{"serve", "migrate", "healthcheck", "version"}
 
 	out, _, err := runCmd(t, "--help")
 	if err != nil {
@@ -148,6 +148,13 @@ func TestCommandWiring(t *testing.T) {
 			errMsg:  "master_key",
 		},
 		{
+			// Without QOVIRA_MASTER_KEY set the config loader fails fast.
+			name:    "healthcheck without master key returns config error",
+			args:    []string{"healthcheck"},
+			wantErr: true,
+			errMsg:  "master_key",
+		},
+		{
 			// Without QOVIRA_MASTER_KEY set the config loader fails fast with
 			// an aggregated validation error before any migration runs.
 			name:    "migrate up without master key returns config error",
@@ -204,6 +211,7 @@ func TestExecuteExitCode(t *testing.T) {
 		{"version exits 0 with no stderr", []string{"version"}, 0, false},
 		{"unknown command exits 1 with diagnostic", []string{"nonexistent"}, 1, true},
 		{"serve stub exits 1 with diagnostic", []string{"serve"}, 1, true},
+		{"healthcheck without config exits 1 with diagnostic", []string{"healthcheck"}, 1, true},
 	}
 
 	for _, tc := range cases {
