@@ -5,18 +5,25 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/qovira/qovira/internal/events"
 )
 
 // NewServer constructs an *http.Server ready to listen on addr. It builds the
-// full request handler (health check, API base, SSE placeholder, SPA) and
-// sets sane timeouts. addr and version are plain strings — the composition
+// full request handler (health check, API base, per-user SSE stream, SPA) and
+// sets sane timeouts. addr, version, and bus are plain values — the composition
 // root passes its config values here; this package does not import
 // internal/config or internal/cli.
 //
+// The /events route is a real per-user SSE stream authenticated by the
+// principal placed in context by the auth middleware. It is intentionally NOT
+// public — the composition root must exclude /events from the isPublic
+// predicate passed to AuthMiddleware.
+//
 // NewServer does NOT start the listener or implement graceful shutdown. The
 // serve command owns the lifecycle.
-func NewServer(addr, version string) *http.Server {
-	mux := buildMux(version)
+func NewServer(addr, version string, bus events.Bus) *http.Server {
+	mux := buildMux(version, bus)
 
 	return &http.Server{
 		Addr:              addr,
@@ -34,10 +41,10 @@ func NewServer(addr, version string) *http.Server {
 //  1. GET /healthz — unauthenticated health check, no middleware.
 //  2. /api/v1/{path} — API catch-all; unknown paths return a JSON 404 problem.
 //     Real endpoints are registered here by later slices.
-//  3. /events — SSE placeholder, reserved for all methods so the SPA fallback
-//     cannot intercept it.
+//  3. /events — per-user SSE stream; bare all-methods pattern so the SPA
+//     fallback cannot intercept it. Method and auth guards are in the handler.
 //  4. / (everything else) — embedded SPA with SPA-fallback to index.html.
-func buildMux(version string) *http.ServeMux {
+func buildMux(version string, bus events.Bus) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// 1. Health check — unauthenticated, no middleware.
@@ -50,11 +57,10 @@ func buildMux(version string) *http.ServeMux {
 		http.HandlerFunc(apiNotFoundHandler),
 	))
 
-	// 3. SSE placeholder — reserved for ALL methods (a bare pattern, not
-	// method-scoped) so the mux always matches /events before the SPA fallback
-	// and never serves it HTML, whatever the verb. The body is intentionally
-	// minimal; the real SSE handler lands in a later slice.
-	mux.HandleFunc("/events", eventsPlaceholderHandler)
+	// 3. SSE stream — bare all-methods pattern (no "GET " prefix) so the mux
+	// always matches /events before the SPA fallback for any verb. The handler
+	// enforces GET and requires an authenticated principal in context.
+	mux.HandleFunc("/events", eventsHandler(bus))
 
 	// 4. SPA fallback — serves the embedded SvelteKit build for all remaining
 	// paths, with SPA fallback to index.html for unknown routes.
@@ -97,12 +103,4 @@ func apiNotFoundHandler(w http.ResponseWriter, r *http.Request) {
 		Detail: "The requested API resource does not exist.",
 		Code:   "not_found",
 	})
-}
-
-// eventsPlaceholderHandler is the SSE route stub. The real implementation
-// (per-user event stream) lands in a later slice; this placeholder ensures
-// /events is matched by the mux and never swallowed by the SPA fallback.
-func eventsPlaceholderHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.WriteHeader(http.StatusOK)
 }
