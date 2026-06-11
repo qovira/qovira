@@ -6,11 +6,16 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 type Querier interface {
+	// Delete a setting by key.  No-op when the key does not exist.
+	DeleteSetting(ctx context.Context, settingKey string) error
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
 	GetInstance(ctx context.Context) (Instance, error)
+	// Retrieve a single setting row by its exact key.
+	GetSetting(ctx context.Context, settingKey string) (Setting, error)
 	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
 	// Scoped queries for the user_data exemplar table.
 	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
@@ -21,7 +26,15 @@ type Querier interface {
 	// Parameters use sqlc named params (@name) per the house convention; the
 	// generated Params structs carry typed fields (ID, UserID, Value).
 	InsertUserData(ctx context.Context, arg InsertUserDataParams) error
+	// List all settings whose key starts with @prefix, ordered by key. The caller
+	// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
+	// those escapes literal, so a prefix containing '_' or '%' matches literally
+	// rather than as a wildcard.
+	ListSettingsByPrefix(ctx context.Context, prefix sql.NullString) ([]Setting, error)
 	ListUserData(ctx context.Context, userID string) ([]UserDatum, error)
+	// Upsert a setting by key.  Inserts a new row or replaces value and
+	// updated_at when the key already exists.
+	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error
 }
 
 var _ Querier = (*Queries)(nil)

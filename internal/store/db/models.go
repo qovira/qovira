@@ -9,6 +9,12 @@ type Instance struct {
 	CreatedAt string
 }
 
+type Setting struct {
+	SettingKey string
+	Value      string
+	UpdatedAt  string
+}
+
 type UserDatum struct {
 	ID        string
 	UserID    string

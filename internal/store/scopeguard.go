@@ -29,6 +29,10 @@ import (
 var systemTables = map[string]bool{
 	"instance":         true,
 	"goose_db_version": true,
+	// settings is system-owned (no user_id column) — instance-global operational
+	// config that is readable and writable by any authenticated subsystem, not
+	// bound to a specific user.
+	"settings": true,
 }
 
 // Violation describes a query that is missing a user_id predicate.
