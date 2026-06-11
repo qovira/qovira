@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sync"
 
 	sqlite3 "github.com/omnilium/go-sqlcipher"
@@ -136,6 +138,14 @@ func Open(cfg Config) (*Store, error) {
 	// at-rest-encryption product.
 	if cfg.Key == "" {
 		return nil, errors.New("store: encryption key is required")
+	}
+
+	// Create the parent directory if it does not exist. SQLite's open call does
+	// not create parent directories; a missing dir causes an "unable to open
+	// database file" error on a clean install. 0o700 is used because this
+	// directory holds the encrypted database and should not be world-readable.
+	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o700); err != nil {
+		return nil, fmt.Errorf("store: create data directory: %w", err)
 	}
 
 	register()

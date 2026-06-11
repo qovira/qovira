@@ -370,6 +370,37 @@ func TestSpecialCharPath(t *testing.T) {
 	}
 }
 
+// TestOpenCreatesParentDir verifies that Open creates a missing nested
+// parent directory rather than failing with a "no such file or directory"
+// error. SQLite's open call does not create parent directories, so store.Open
+// must do it before attempting to open the pools.
+func TestOpenCreatesParentDir(t *testing.T) {
+	t.Parallel()
+
+	// Deliberately use a path whose intermediate directories do not yet exist.
+	base := t.TempDir()
+	dbPath := filepath.Join(base, "a", "b", "c", "qovira.db")
+
+	s, err := store.Open(store.Config{
+		Path:         dbPath,
+		Key:          "a-sufficiently-long-passphrase-for-sqlcipher",
+		ReadPoolSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("Open with missing parent dir: %v", err)
+	}
+	defer func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("store.Close: %v", err)
+		}
+	}()
+
+	// The database file must exist at the intended path.
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Errorf("database file not found at %q after Open: %v", dbPath, err)
+	}
+}
+
 // TestCloseSymmetric verifies that Close is symmetric — both the write and
 // read pool errors, when present, are individually wrapped with their
 // respective "store: close write pool" / "store: close read pool" prefixes and

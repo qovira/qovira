@@ -18,10 +18,13 @@ LDFLAGS := -X '$(PKG).version=$(VERSION)' \
 
 GOFLAGS := -trimpath
 
-.PHONY: build test race lint clean
+.PHONY: build generate test race lint clean
 
 build:
 	CGO_ENABLED=$(CGO_ENABLED) go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/qovira
+
+generate:
+	go tool sqlc generate
 
 test:
 	CGO_ENABLED=$(CGO_ENABLED) go test ./...

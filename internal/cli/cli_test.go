@@ -148,22 +148,24 @@ func TestCommandWiring(t *testing.T) {
 			errMsg:  "master_key",
 		},
 		{
-			name:    "migrate up stub returns error",
+			// Without QOVIRA_MASTER_KEY set the config loader fails fast with
+			// an aggregated validation error before any migration runs.
+			name:    "migrate up without master key returns config error",
 			args:    []string{"migrate", "up"},
 			wantErr: true,
-			errMsg:  "not yet implemented",
+			errMsg:  "master_key",
 		},
 		{
-			name:    "migrate status stub returns error",
+			name:    "migrate status without master key returns config error",
 			args:    []string{"migrate", "status"},
 			wantErr: true,
-			errMsg:  "not yet implemented",
+			errMsg:  "master_key",
 		},
 		{
-			name:    "migrate down stub returns error",
+			name:    "migrate down without master key returns config error",
 			args:    []string{"migrate", "down"},
 			wantErr: true,
-			errMsg:  "not yet implemented",
+			errMsg:  "master_key",
 		},
 	}
 
