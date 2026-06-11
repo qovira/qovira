@@ -7,15 +7,9 @@ import (
 	"strings"
 )
 
-// systemTables is the allowlist of tables that are system-owned and therefore
-// exempt from the user_id predicate requirement. SELECT/UPDATE/DELETE queries
-// against these tables are allowed without a WHERE user_id clause.
+// systemTables is the allowlist of tables that are system-owned and therefore exempt from the user_id predicate requirement. SELECT/UPDATE/DELETE queries against these tables are allowed without a WHERE user_id clause.
 //
-// Maintenance: as sibling specs add domain tables, add them to this package's
-// scope guard test (scopeguard_test.go) — but do NOT add them here unless they
-// are genuinely system-owned (i.e. they have no user_id column and are not
-// per-user data). User-owned tables must carry a user_id predicate in every
-// SELECT/UPDATE/DELETE query; the guard is the backstop, not the DB.
+// Maintenance: as sibling specs add domain tables, add them to this package's scope guard test (scopeguard_test.go) — but do NOT add them here unless they are genuinely system-owned (i.e. they have no user_id column and are not per-user data). User-owned tables must carry a user_id predicate in every SELECT/UPDATE/DELETE query; the guard is the backstop, not the DB.
 //
 // Reviewed exemption mechanism: if a query is intentionally complex (e.g.
 // a JOIN or subquery that the heuristic cannot verify) and has been reviewed
@@ -29,9 +23,7 @@ import (
 var systemTables = map[string]bool{
 	"instance":         true,
 	"goose_db_version": true,
-	// settings is system-owned (no user_id column) — instance-global operational
-	// config that is readable and writable by any authenticated subsystem, not
-	// bound to a specific user.
+	// settings is system-owned (no user_id column) — instance-global operational config that is readable and writable by any authenticated subsystem, not bound to a specific user.
 	"settings": true,
 }
 
@@ -45,14 +37,9 @@ type Violation struct {
 	Statement string
 }
 
-// ScanQueryViolations scans all *.sql files in queriesFS for user-owned table
-// queries that lack a verified user_id predicate on the target table. It
-// returns one Violation per offending query block.
+// ScanQueryViolations scans all *.sql files in queriesFS for user-owned table queries that lack a verified user_id predicate on the target table. It returns one Violation per offending query block.
 //
-// The guard fails closed: any query shape it cannot confidently verify as
-// scoping the target table (JOIN, subquery, UNION, WITH/CTE, missing WHERE) is
-// flagged as a violation. Only simple single-source queries with a top-level
-// WHERE user_id predicate on the target table pass.
+// The guard fails closed: any query shape it cannot confidently verify as scoping the target table (JOIN, subquery, UNION, WITH/CTE, missing WHERE) is flagged as a violation. Only simple single-source queries with a top-level WHERE user_id predicate on the target table pass.
 //
 // Exemptions:
 //   - Blocks against tables in systemTables (system-owned, no user_id column).
@@ -93,15 +80,13 @@ func ScanQueryViolations(queriesFS fs.FS) ([]Violation, error) {
 	return violations, nil
 }
 
-// scanFile splits a SQL file into query blocks (on "-- name: ") and checks
-// each block.
+// scanFile splits a SQL file into query blocks (on "-- name: ") and checks each block.
 func scanFile(filename, content string) []Violation {
 	const marker = "-- name: "
 	var violations []Violation
 
 	blocks := strings.Split(content, marker)
-	// blocks[0] is everything before the first "-- name: " (file-level comments, blank lines).
-	// We only process blocks[1:].
+	// blocks[0] is everything before the first "-- name: " (file-level comments, blank lines). We only process blocks[1:].
 	for _, block := range blocks[1:] {
 		name := extractQueryName(block)
 		stmt := extractStatementType(block)
@@ -135,8 +120,7 @@ func scanFile(filename, content string) []Violation {
 	return violations
 }
 
-// extractQueryName returns the query name from the start of a block (the text
-// following "-- name: " up to the first whitespace or colon).
+// extractQueryName returns the query name from the start of a block (the text following "-- name: " up to the first whitespace or colon).
 func extractQueryName(block string) string {
 	// block starts with e.g. "GetInstance :one\nSELECT ..."
 	name := block
@@ -146,10 +130,7 @@ func extractQueryName(block string) string {
 	return name
 }
 
-// extractStatementType returns the SQL statement keyword (SELECT, UPDATE,
-// DELETE, INSERT, WITH) from the first keyword of the statement body — the
-// line(s) after the "-- name: ..." annotation. This avoids misclassification
-// when e.g. a DELETE block contains a SELECT subquery.
+// extractStatementType returns the SQL statement keyword (SELECT, UPDATE, DELETE, INSERT, WITH) from the first keyword of the statement body — the line(s) after the "-- name: ..." annotation. This avoids misclassification when e.g. a DELETE block contains a SELECT subquery.
 func extractStatementType(block string) string {
 	// Skip the annotation line ("GetFoo :one\n") and find the body.
 	body := block
@@ -174,10 +155,7 @@ func extractStatementType(block string) string {
 	return ""
 }
 
-// extractTargetTable extracts the primary table name from a query block based
-// on the statement type. It uses a line-by-line scan that handles both
-// same-line clauses (e.g. "SELECT id FROM items") and multi-line clauses
-// (e.g. "FROM\n  items").
+// extractTargetTable extracts the primary table name from a query block based on the statement type. It uses a line-by-line scan that handles both same-line clauses (e.g. "SELECT id FROM items") and multi-line clauses (e.g. "FROM\n  items").
 func extractTargetTable(block, stmt string) string {
 	lines := strings.Split(block, "\n")
 	for _, line := range lines {
@@ -213,8 +191,7 @@ func extractTargetTable(block, stmt string) string {
 // reLineComment matches a SQL line comment and everything after it on the line.
 var reLineComment = regexp.MustCompile(`--[^\n]*`)
 
-// stripLineComments removes SQL line comments (-- ...) from s, preserving
-// newlines so that line-based WHERE detection still works correctly.
+// stripLineComments removes SQL line comments (-- ...) from s, preserving newlines so that line-based WHERE detection still works correctly.
 func stripLineComments(s string) string {
 	return reLineComment.ReplaceAllStringFunc(s, func(_ string) string {
 		// Keep a newline placeholder so surrounding line structure is intact.
@@ -222,9 +199,7 @@ func stripLineComments(s string) string {
 	})
 }
 
-// verifyUserIDScoping reports whether the query block has a verified user_id
-// predicate on the target table. It returns (message, true) when the block
-// passes and (message, false) when it should be flagged.
+// verifyUserIDScoping reports whether the query block has a verified user_id predicate on the target table. It returns (message, true) when the block passes and (message, false) when it should be flagged.
 //
 // Fail-closed rules (in order):
 //  1. WITH/CTE at the statement level → flag (cannot verify target).
@@ -263,8 +238,7 @@ func verifyUserIDScoping(block, target string) (string, bool) {
 		return "cannot verify user_id scoping of target " + target + "; JOIN queries must be simplified or exempted", false
 	}
 
-	// Rule 4: subquery in the text (a SELECT inside the block other than at the
-	// top-level SELECT position).
+	// Rule 4: subquery in the text (a SELECT inside the block other than at the top-level SELECT position).
 	if hasSubquery(stripped) {
 		return "cannot verify user_id scoping of target " + target + "; subquery/IN(SELECT) must be simplified or exempted", false
 	}
@@ -280,8 +254,7 @@ func verifyUserIDScoping(block, target string) (string, bool) {
 	return checkUserIDInWhere(whereClause, target)
 }
 
-// containsWholeWordUpper reports whether upper (already uppercased) contains
-// the keyword kw as a whole word (not a substring of another identifier).
+// containsWholeWordUpper reports whether upper (already uppercased) contains the keyword kw as a whole word (not a substring of another identifier).
 func containsWholeWordUpper(upper, kw string) bool {
 	idx := 0
 	for {
@@ -305,14 +278,9 @@ func isIdentChar(r rune) bool {
 		(r >= '0' && r <= '9') || r == '_'
 }
 
-// hasSubquery reports whether stripped contains a subquery — detected by the
-// patterns IN(SELECT, IN (SELECT, EXISTS(SELECT, EXISTS (SELECT, or =(SELECT,
-// which are the only ways a correlated subquery appears in a WHERE clause in
-// Qovira's query style.
+// hasSubquery reports whether stripped contains a subquery — detected by the patterns IN(SELECT, IN (SELECT, EXISTS(SELECT, EXISTS (SELECT, or =(SELECT, which are the only ways a correlated subquery appears in a WHERE clause in Qovira's query style.
 //
-// For SELECT statements a second SELECT also signals a subquery (e.g.
-// "SELECT ... FROM (SELECT ...)"), but the WHERE-clause patterns above cover
-// all the cases we care about for INSERT/UPDATE/DELETE as well.
+// For SELECT statements a second SELECT also signals a subquery (e.g. "SELECT ... FROM (SELECT ...)"), but the WHERE-clause patterns above cover all the cases we care about for INSERT/UPDATE/DELETE as well.
 func hasSubquery(stripped string) bool {
 	upper := strings.ToUpper(stripped)
 	// Common subquery introduction patterns.
@@ -336,10 +304,7 @@ func hasSubquery(stripped string) bool {
 	return false
 }
 
-// findWhereClause locates the WHERE keyword in the uppercased block text as a
-// whole-word match, tolerating newlines and tabs as surrounding whitespace.
-// Returns the byte offset into the original (non-uppercased) stripped text, or
-// -1 if not found.
+// findWhereClause locates the WHERE keyword in the uppercased block text as a whole-word match, tolerating newlines and tabs as surrounding whitespace. Returns the byte offset into the original (non-uppercased) stripped text, or -1 if not found.
 func findWhereClause(upper string) int {
 	const kw = "WHERE"
 	idx := 0
@@ -359,8 +324,7 @@ func findWhereClause(upper string) int {
 	}
 }
 
-// isWhitespaceOrPunct reports whether r is a whitespace character or a
-// punctuation character that can legally precede or follow a keyword.
+// isWhitespaceOrPunct reports whether r is a whitespace character or a punctuation character that can legally precede or follow a keyword.
 func isWhitespaceOrPunct(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '(' || r == ')'
 }
@@ -372,8 +336,7 @@ func isWhitespaceOrPunct(r rune) bool {
 //	[2] "user_id" itself
 var reUserIDToken = regexp.MustCompile(`(?i)(?:([a-zA-Z_][a-zA-Z0-9_]*)\.)?(\buser_id\b)`)
 
-// checkUserIDInWhere examines the WHERE clause text (still with original case,
-// comments already stripped) for a user_id predicate on the target table.
+// checkUserIDInWhere examines the WHERE clause text (still with original case, comments already stripped) for a user_id predicate on the target table.
 //
 // Accepts:
 //   - bare "user_id = ..." (no qualifier) → target must be the only table

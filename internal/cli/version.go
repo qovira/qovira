@@ -6,9 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Build-info variables injected via -ldflags -X at compile time.
-// Defaults to human-readable sentinel values so the binary is still usable
-// without a full release build (e.g. during local development).
+// Build-info variables injected via -ldflags -X at compile time. Defaults to human-readable sentinel values so the binary is still usable without a full release build (e.g. during local development).
 var (
 	version = "dev"
 	commit  = "none"
