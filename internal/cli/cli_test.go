@@ -139,10 +139,13 @@ func TestCommandWiring(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "serve stub returns error",
+			// Without QOVIRA_MASTER_KEY set the config loader fails fast with
+			// an aggregated validation error before reaching the "not yet
+			// implemented" sentinel — that is the desired fail-fast behaviour.
+			name:    "serve without master key returns config error",
 			args:    []string{"serve"},
 			wantErr: true,
-			errMsg:  "not yet implemented",
+			errMsg:  "master_key",
 		},
 		{
 			name:    "migrate up stub returns error",
