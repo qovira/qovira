@@ -1,0 +1,40 @@
+# Build output
+/qovira
+/dist/
+
+# Go workspace / module cache artefacts
+/vendor/
+*.test
+*.out
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editor / OS artefacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Test / profiling output
+coverage.out
+coverage.html
+*.prof
+cpu.out
+mem.out
+
+# golangci-lint cache
+.golangci-lint/
+
+# Local SQLCipher / SQLite database files (and WAL sidecars)
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3

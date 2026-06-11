@@ -1,0 +1,40 @@
+# golangci-lint v2 configuration
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - misspell
+    - gocritic
+    - revive
+    - bodyclose
+    - exhaustive
+    - prealloc
+    - unconvert
+    - gosec
+    - nilnil
+
+  exclusions:
+    presets:
+      - comments
+      - std-error-handling
+      - common-false-positives
+    warn-unused: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/qovira
