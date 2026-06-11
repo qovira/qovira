@@ -13,7 +13,7 @@ func newMigrateCmd() *cobra.Command {
 	migrate := &cobra.Command{
 		Use:   "migrate",
 		Short: "Manage database schema migrations",
-		Long:  "Run or inspect goose migrations against the Qovira SQLCipher database.",
+		Long:  "Run or inspect migrations against the Qovira database.",
 		// Require a subcommand; print usage when called bare.
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
@@ -32,9 +32,7 @@ func newMigrateCmd() *cobra.Command {
 	return migrate
 }
 
-// migrateConfig loads configuration from the --config flag on cmd (or its
-// parent, since the flag is persistent) and opens the store. The caller is
-// responsible for closing the returned *store.Store.
+// migrateConfig loads configuration from the --config flag on cmd (or its parent, since the flag is persistent) and opens the store. The caller is responsible for closing the returned *store.Store.
 func migrateConfig(cmd *cobra.Command) (*config.Config, *store.Store, error) {
 	cfgPath, _ := cmd.Flags().GetString("config")
 

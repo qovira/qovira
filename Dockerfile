@@ -95,7 +95,7 @@ FROM gcr.io/distroless/base-debian12:nonroot@sha256:4ae8d0163a6f04d96f36e41324d7
 ARG VERSION=dev
 ARG COMMIT=none
 LABEL org.opencontainers.image.title="qovira" \
-      org.opencontainers.image.description="Qovira — private encrypted life-data vault" \
+      org.opencontainers.image.description="A private, self-hostable personal assistant — reminders, notes, calendar, and quick answers, organized by AI on a server you own and a model you choose." \
       org.opencontainers.image.vendor="OMNILIUM ADVANCED CYBERNETICS SRL" \
       org.opencontainers.image.source="https://github.com/qovira/qovira" \
       org.opencontainers.image.revision="${COMMIT}" \

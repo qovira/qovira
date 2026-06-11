@@ -16,11 +16,7 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// denyAllValidator is the temporary TokenValidator injected until the Identity
-// & Auth slice lands with a concrete implementation. Every token validation
-// attempt returns a non-nil error, causing AuthMiddleware to respond 401 for
-// all protected routes. Replace this injection point when the real validator
-// is available.
+// denyAllValidator is the temporary TokenValidator injected until the Identity & Auth slice lands with a concrete implementation. Every token validation attempt returns a non-nil error, causing AuthMiddleware to respond 401 for all protected routes. Replace this injection point when the real validator is available.
 type denyAllValidator struct{}
 
 func (denyAllValidator) ValidateToken(_ context.Context, _ string) (store.Principal, error) {
@@ -30,8 +26,8 @@ func (denyAllValidator) ValidateToken(_ context.Context, _ string) (store.Princi
 func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the Qovira HTTP server",
-		Long:  "Start the Qovira HTTP API server (the Docker entrypoint for the application).",
+		Short: "Start the Qovira server",
+		Long:  "Start the Qovira server — the JSON API, the realtime event stream, and the bundled web UI. This is the container entrypoint for the application.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfgPath, _ := cmd.Flags().GetString("config")
@@ -57,8 +53,7 @@ func newServeCmd() *cobra.Command {
 		},
 	}
 
-	// Reserve the --config flag so later slices can populate it without
-	// breaking the flag surface.
+	// Reserve the --config flag so later slices can populate it without breaking the flag surface.
 	cmd.Flags().String("config", "", "path to config file (default: auto-discovered)")
 
 	return cmd
