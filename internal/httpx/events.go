@@ -11,15 +11,10 @@ import (
 	"github.com/qovira/qovira/internal/events"
 )
 
-// heartbeatInterval is how often a ping frame is sent to keep proxies and
-// load-balancers from closing idle SSE connections. 25 s is a common proxy
-// idle timeout floor; adjust via a package-level var so integration tests can
-// keep the 25 s constant without waiting.
-var heartbeatInterval = 25 * time.Second
+// heartbeatInterval is how often a ping frame is sent to keep proxies and load-balancers from closing idle SSE connections. It is a package-level var (not a const) so integration tests can shorten it without waiting on the real interval.
+var heartbeatInterval = 10 * time.Second
 
-// eventsHandler returns an http.HandlerFunc that bridges one HTTP request to a
-// per-user subscription on the in-memory event bus. It is unexported, matching
-// the package's unexported-handler style (cf. apiNotFoundHandler, healthzHandler).
+// eventsHandler returns an http.HandlerFunc that bridges one HTTP request to a per-user subscription on the in-memory event bus. It is unexported, matching the package's unexported-handler style (cf. apiNotFoundHandler, healthzHandler).
 //
 // The handler:
 //   - Rejects non-GET with 405 (the mux route is a bare all-methods pattern).
@@ -34,9 +29,7 @@ var heartbeatInterval = 25 * time.Second
 //     need not be globally unique.
 func eventsHandler(bus events.Bus) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Guard the method — the mux pattern is bare (all methods), so we
-		// enforce GET here. HEAD could be treated as GET-without-body, but a
-		// plain 405 is simpler and correct.
+		// Guard the method — the mux pattern is bare (all methods), so we enforce GET here. HEAD could be treated as GET-without-body, but a plain 405 is simpler and correct.
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
 			WriteProblem(w, r, Problem{
@@ -48,10 +41,7 @@ func eventsHandler(bus events.Bus) http.HandlerFunc {
 			return
 		}
 
-		// Fail closed on auth: the auth middleware must have run and placed a
-		// principal with a non-empty UserID in context. If not, return 401.
-		// This is what makes the "requires Authorization: Bearer" criterion hold —
-		// there is no URL-credential fallback.
+		// Fail closed on auth: the auth middleware must have run and placed a principal with a non-empty UserID in context. If not, return 401. This is what makes the "requires Authorization: Bearer" criterion hold — there is no URL-credential fallback.
 		principal, ok := PrincipalFromContext(r.Context())
 		if !ok || principal.UserID == "" {
 			WriteProblem(w, r, Problem{
@@ -63,24 +53,21 @@ func eventsHandler(bus events.Bus) http.HandlerFunc {
 			return
 		}
 
-		// Subscribe before writing any response so that if the ResponseController
-		// cannot flush we can still clean up cleanly.
+		// Subscribe before writing any response so that if the ResponseController cannot flush we can still clean up cleanly.
 		stream, cancel := bus.Subscribe(principal.UserID)
 		defer cancel()
 
 		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
 
-		// Set SSE response headers and commit the 200 status line.
-		// Connection is a hop-by-hop header that HTTP/2 rejects; omit it.
+		// Set SSE response headers and commit the 200 status line. Connection is a hop-by-hop header that HTTP/2 rejects; omit it.
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.WriteHeader(http.StatusOK)
 
 		rc := http.NewResponseController(w)
 
-		// Flush immediately after the status line so the client knows the stream
-		// is open. A ResponseWriter that can't flush cannot do SSE — end cleanly.
+		// Flush immediately after the status line so the client knows the stream is open. A ResponseWriter that can't flush cannot do SSE — end cleanly.
 		if err := rc.Flush(); err != nil {
 			if !errors.Is(err, errors.ErrUnsupported) {
 				slog.Error("httpx: events: initial flush failed", "err", err, "userID", principal.UserID)
@@ -88,22 +75,14 @@ func eventsHandler(bus events.Bus) http.HandlerFunc {
 			return
 		}
 
-		// Disable the per-response write deadline so the SSE stream can outlive
-		// the server's global WriteTimeout (60 s). The server timeout is correct
-		// for normal request/response handlers; this streaming route is the
-		// deliberate exception that opts out by clearing the deadline to zero.
+		// Disable the per-response write deadline so the SSE stream can outlive the server's global WriteTimeout (60 s). The server timeout is correct for normal request/response handlers; this streaming route is the deliberate exception that opts out by clearing the deadline to zero.
 		if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, errors.ErrUnsupported) {
-			// A writer that can't clear its deadline can't sustain a long-lived
-			// stream; log and end gracefully rather than getting force-closed at
-			// the server's WriteTimeout.
+			// A writer that can't clear its deadline can't sustain a long-lived stream; log and end gracefully rather than getting force-closed at the server's WriteTimeout.
 			slog.WarnContext(r.Context(), "httpx: cannot disable write deadline for SSE stream", "err", err)
 			return
 		}
 
-		// eventID is the per-stream monotonic sequence number. It starts at 1 and
-		// increments with each event frame. The id is used for client-side
-		// deduplication only; no replay buffer exists server-side so it need not
-		// be globally unique.
+		// eventID is the per-stream monotonic sequence number. It starts at 1 and increments with each event frame. The id is used for client-side deduplication only; no replay buffer exists server-side so it need not be globally unique.
 		var eventID uint64
 
 		for {
@@ -114,8 +93,7 @@ func eventsHandler(bus events.Bus) http.HandlerFunc {
 
 			case event, ok := <-stream:
 				if !ok {
-					// The bus closed this channel — slow-consumer eviction or
-					// explicit shutdown. Exit cleanly; the client should reconnect.
+					// The bus closed this channel — slow-consumer eviction or explicit shutdown. Exit cleanly; the client should reconnect.
 					return
 				}
 				eventID++
@@ -146,8 +124,7 @@ func eventsHandler(bus events.Bus) http.HandlerFunc {
 //	data: <json>
 //	(blank line)
 //
-// If JSON marshalling fails the event is logged and skipped (returning nil so
-// the stream continues) — a single bad payload should not kill the connection.
+// If JSON marshalling fails the event is logged and skipped (returning nil so the stream continues) — a single bad payload should not kill the connection.
 func writeSSEEvent(w http.ResponseWriter, event events.Event, eventID uint64) error {
 	data, err := json.Marshal(event.Data)
 	if err != nil {
@@ -162,8 +139,7 @@ func writeSSEEvent(w http.ResponseWriter, event events.Event, eventID uint64) er
 	return err
 }
 
-// writeSSEPing writes an SSE ping frame — a named ping event with an empty
-// data field — to keep proxies and load-balancers from closing idle connections:
+// writeSSEPing writes an SSE ping frame — a named ping event with an empty data field — to keep proxies and load-balancers from closing idle connections:
 //
 //	event: ping
 //	data:
