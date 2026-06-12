@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"iter"
 )
 
@@ -222,65 +221,21 @@ func buildWireRequest(req ChatRequest, model string) ([]byte, error) {
 // Two-phase error model:
 //   - A non-nil error returned directly (setup error) means the request was
 //     never accepted: the gateway is unconfigured, the request could not be
-//     built, or the upstream rejected it (non-2xx). In this case the returned
-//     iterator is nil.
+//     built, or the upstream rejected it (non-2xx after exhausting retries).
+//     In this case the returned iterator is nil.
 //   - A nil error with a non-nil iterator means the upstream accepted the
-//     request (2xx). Subsequent errors — transport breaks, malformed SSE —
-//     surface as the error value in each (Chunk, error) yield from the
-//     iterator. The iterator always yields at most one non-nil error, after
-//     which ranging over it terminates.
+//     request (2xx). Subsequent errors — transport breaks, malformed SSE,
+//     idle or first-token timeouts — surface as the error value in each
+//     (Chunk, error) yield from the iterator. The iterator always yields at
+//     most one non-nil error, after which ranging over it terminates.
+//
+// Chat applies resilience policies (pre-first-token retry with jittered
+// backoff, first-token timeout, idle timeout) as configured by the Gateway's
+// [ResilienceConfig].
 //
 // The caller must range over the iterator to completion (or break early) to
 // ensure the response body is closed. The body is closed automatically when
 // the iterator is exhausted or the consumer breaks.
 func (g *Gateway) Chat(ctx context.Context, req ChatRequest) (iter.Seq2[Chunk, error], error) {
-	resolved, err := g.resolve(ctx, RoleChat)
-	if err != nil {
-		return nil, err
-	}
-
-	endpointURL, err := chatEndpointURL(resolved.BaseURL)
-	if err != nil {
-		return nil, err
-	}
-
-	body, err := buildWireRequest(req, resolved.Model)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := g.postJSON(ctx, endpointURL, resolved.APIKey, body) //nolint:bodyclose // body is owned and closed by the streaming iterator below; non-2xx path closes explicitly via drainClose.
-	if err != nil {
-		return nil, err
-	}
-
-	// Non-2xx: classify and return as a setup error.
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Read up to 8 KiB of the error body for classification, then close.
-		limitedBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
-		drainClose(resp.Body)
-		return nil, ClassifyResponse(resp.StatusCode, resp.Header, limitedBody)
-	}
-
-	// 2xx: return a streaming iterator that reads the response body
-	// incrementally. The iterator owns the body and is responsible for closing
-	// it (via defer drainClose) regardless of whether the consumer ranges to
-	// completion or breaks early.
-	seq := func(yield func(Chunk, error) bool) {
-		defer drainClose(resp.Body)
-
-		streamErr := streamSSE(resp.Body, func(c Chunk) bool {
-			return yield(c, nil)
-		})
-		if streamErr != nil {
-			// The consumer is still ranging here: streamSSE only returns a
-			// non-nil error on a scan/parse failure, never on a consumer stop
-			// (which returns nil). Discard the result explicitly — this is the
-			// last yield, and guarding it keeps a future edit from appending a
-			// call after the runtime has been told to stop (a rangefunc panic).
-			_ = yield(Chunk{}, fmt.Errorf("%w: %w", ErrUpstreamProtocol, streamErr))
-		}
-	}
-
-	return seq, nil
+	return g.chatWithResilience(ctx, req, g.resilienceCfg)
 }

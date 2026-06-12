@@ -21,8 +21,9 @@ import (
 //
 // Construct a Gateway via [New]; the zero value is not valid.
 type Gateway struct {
-	settings   settingsReader
-	httpClient *http.Client
+	settings      settingsReader
+	httpClient    *http.Client
+	resilienceCfg ResilienceConfig
 }
 
 // New constructs a Gateway backed by the provided [store.SettingsStore].
@@ -31,12 +32,13 @@ type Gateway struct {
 //
 // The internal HTTP client is intentionally constructed without a wall-clock
 // Timeout: streaming responses are legitimately long-lived, and per-request
-// deadlines are managed via the context passed to each call. The QOV-63
-// resilience slice will add pre-first-token and idle timeout policies around
-// the dial seam.
+// deadlines are managed via the context passed to each call. The resilience
+// layer in [chatWithResilience] applies first-token and idle timeout policies
+// on top of the dial seam, using [ResilienceConfig] values set here.
 func New(ss *store.SettingsStore) *Gateway {
 	return &Gateway{
-		settings:   ss.Namespace("model_gateway"),
-		httpClient: newHTTPClient(),
+		settings:      ss.Namespace("model_gateway"),
+		httpClient:    newHTTPClient(),
+		resilienceCfg: defaultResilienceConfig(),
 	}
 }

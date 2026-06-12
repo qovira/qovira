@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeSettings is a pure in-memory settingsReader for use in tests.
@@ -41,9 +42,32 @@ func (fs *fakeSettings) set(key, value string) {
 
 // newGatewayWithFake constructs a Gateway backed by the provided fakeSettings.
 // It bypasses New (which requires a *store.SettingsStore) so that tests stay
-// CGO-free.
+// CGO-free. The gateway uses the resilience defaults (which include real sleep)
+// unless overridden with withTestResilienceConfig.
 func newGatewayWithFake(fs settingsReader) *Gateway {
-	return &Gateway{settings: fs, httpClient: newHTTPClient()}
+	return &Gateway{settings: fs, httpClient: newHTTPClient(), resilienceCfg: defaultResilienceConfig()}
+}
+
+// testResilienceConfig returns a ResilienceConfig suitable for unit tests:
+// tiny timeouts and a no-op sleep function so retries are deterministic and
+// complete in microseconds rather than seconds.
+func testResilienceConfig() ResilienceConfig {
+	noSleep := func(time.Duration) {}
+	return ResilienceConfig{
+		FirstTokenTimeout: 50 * time.Millisecond,
+		IdleTimeout:       50 * time.Millisecond,
+		MaxAttempts:       3,
+		BaseBackoff:       time.Microsecond,
+		sleepFn:           noSleep,
+	}
+}
+
+// newTestGateway builds a Gateway with testResilienceConfig (fast, no sleep).
+func newTestGateway(t *testing.T, fs settingsReader) *Gateway {
+	t.Helper()
+	gw := newGatewayWithFake(fs)
+	gw.resilienceCfg = testResilienceConfig()
+	return gw
 }
 
 // fullPrimary returns the fake settings keys that represent a fully-configured

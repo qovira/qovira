@@ -17,8 +17,9 @@ const chatCompletionsPath = "chat/completions"
 // newHTTPClient constructs the shared *http.Client for the Gateway.
 //
 // No wall-clock Timeout is set: streaming chat responses are legitimately
-// long-lived and cancellation is handled via context. QOV-63 will layer
-// pre-first-token and idle timeout policies on top via the dial seam.
+// long-lived and cancellation is handled via context. The resilience layer
+// ([chatWithResilience]) layers first-token and idle timeout policies on top
+// via derived cancellable contexts.
 func newHTTPClient() *http.Client {
 	return &http.Client{}
 }

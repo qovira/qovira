@@ -14,8 +14,8 @@ import (
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // newChatGateway builds a Gateway whose settings point at the provided
-// httptest.Server URL and uses the default HTTP client. The test is cleaned up
-// automatically via t.Cleanup.
+// httptest.Server URL and uses the fast test resilience config (no real sleep,
+// tiny timeouts). The test is cleaned up automatically via t.Cleanup.
 func newChatGateway(t *testing.T, srv *httptest.Server) *Gateway {
 	t.Helper()
 	fs := newFakeSettings(
@@ -23,7 +23,7 @@ func newChatGateway(t *testing.T, srv *httptest.Server) *Gateway {
 		"primary.apiKey", "sk-test",
 		"primary.model", "gpt-test",
 	)
-	return newGatewayWithFake(fs)
+	return newTestGateway(t, fs)
 }
 
 // collectChunks drives an iter.Seq2[Chunk, error] to completion and returns
