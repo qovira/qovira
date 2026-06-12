@@ -83,6 +83,10 @@ curl http://localhost:8080/healthz
 docker exec <container> /usr/local/bin/qovira healthcheck
 ```
 
+## Contributing
+
+Contributions are welcome — read [CONTRIBUTING.md](./CONTRIBUTING.md) first, and please follow the [Code of Conduct](./CODE_OF_CONDUCT.md). Open an issue before sending a PR, especially for anything touching the API surface, the storage schema, or the security model. The master key is always supplied at runtime and never baked into the image, and Qovira does not phone home — contributions need to respect both.
+
 ## License
 
 [AGPL-3.0-only](./LICENSE) © OMNILIUM ADVANCED CYBERNETICS SRL
