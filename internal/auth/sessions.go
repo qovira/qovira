@@ -85,20 +85,49 @@ type Session struct {
 // Session timestamps against time.Now() must truncate their own values too, or
 // accept that DB-roundtripped times have second precision.
 func sessionFromRow(row db.Session) (Session, error) {
-	createdAt, err := time.Parse(time.RFC3339, row.CreatedAt)
+	createdAt, lastUsedAt, err := parseSessionTimes(row.CreatedAt, row.LastUsedAt)
 	if err != nil {
-		return Session{}, fmt.Errorf("auth: parse session created_at %q: %w", row.CreatedAt, err)
-	}
-	lastUsedAt, err := time.Parse(time.RFC3339, row.LastUsedAt)
-	if err != nil {
-		return Session{}, fmt.Errorf("auth: parse session last_used_at %q: %w", row.LastUsedAt, err)
+		return Session{}, err
 	}
 	return Session{
 		ID:         row.ID,
 		UserID:     row.UserID,
-		CreatedAt:  createdAt.UTC(),
-		LastUsedAt: lastUsedAt.UTC(),
+		CreatedAt:  createdAt,
+		LastUsedAt: lastUsedAt,
 	}, nil
+}
+
+// sessionFromJoinRow converts a [db.GetSessionWithUserByTokenHashRow] (the
+// result of the joined session+user query) into a [Session] for use by Resolve.
+// Only the timestamp fields are needed; the caller reads UserID and Role
+// directly from the row.
+func sessionFromJoinRow(row db.GetSessionWithUserByTokenHashRow) (Session, error) {
+	createdAt, lastUsedAt, err := parseSessionTimes(row.CreatedAt, row.LastUsedAt)
+	if err != nil {
+		return Session{}, err
+	}
+	return Session{
+		ID:         row.ID,
+		UserID:     row.UserID,
+		CreatedAt:  createdAt,
+		LastUsedAt: lastUsedAt,
+	}, nil
+}
+
+// parseSessionTimes parses the created_at and last_used_at RFC 3339 strings a
+// session row carries and returns them normalized to UTC. It is the single
+// parse site both row-conversion helpers delegate to so the timestamp contract
+// (RFC 3339, UTC, second precision) stays in lockstep across query shapes.
+func parseSessionTimes(createdAt, lastUsedAt string) (time.Time, time.Time, error) {
+	created, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("auth: parse session created_at %q: %w", createdAt, err)
+	}
+	lastUsed, err := time.Parse(time.RFC3339, lastUsedAt)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("auth: parse session last_used_at %q: %w", lastUsedAt, err)
+	}
+	return created.UTC(), lastUsed.UTC(), nil
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
@@ -306,6 +335,56 @@ func (ss *Sessions) DeleteAllOtherForUser(ctx context.Context, userID, keepSessi
 		return fmt.Errorf("auth: delete other sessions for user: %w", err)
 	}
 	return nil
+}
+
+// ── Resolve ───────────────────────────────────────────────────────────────────
+
+// Resolve validates the plaintext bearer token and, on success, returns the
+// authenticated [store.Principal].  It is the single-entry point for the auth
+// middleware: it hashes the token, runs the joined session+user query on the
+// read pool, applies the dual-timeout check, and issues a throttled bump.
+//
+// Error semantics:
+//   - [ErrSessionNotFound] when the token is unknown or the session has expired
+//     (callers should treat both as "unauthenticated").
+//   - Any other non-nil error is an infrastructure failure.
+//
+// On expiry Resolve performs a best-effort [DeleteByToken] (ignoring its error)
+// so the row is cleaned up without blocking the response.
+//
+// On success Resolve calls [Sessions.Bump] to slide the idle window; a bump
+// failure is silently ignored (logged by the caller if desired) and must never
+// fail the resolution.
+func (ss *Sessions) Resolve(ctx context.Context, token string, now time.Time) (store.Principal, error) {
+	hashArr := sha256.Sum256([]byte(token))
+	row, err := ss.readQ.GetSessionWithUserByTokenHash(ctx, hashArr[:])
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.Principal{}, ErrSessionNotFound
+		}
+		return store.Principal{}, fmt.Errorf("auth: resolve session: %w", err)
+	}
+
+	// Reconstruct a Session so we can reuse the existing Valid/Bump logic rather
+	// than duplicating the timeout and throttle calculations here.
+	sess, err := sessionFromJoinRow(row)
+	if err != nil {
+		return store.Principal{}, err
+	}
+
+	if !ss.Valid(sess, now) {
+		// Best-effort cleanup: ignore the error — it must not surface to the caller.
+		_ = ss.DeleteByToken(ctx, token)
+		return store.Principal{}, ErrSessionNotFound
+	}
+
+	// Best-effort throttled bump: a failure must not fail the resolution.
+	_, _ = ss.Bump(ctx, sess, now)
+
+	return store.Principal{
+		UserID: row.UserID,
+		Role:   row.Role,
+	}, nil
 }
 
 // ── PurgeExpired ──────────────────────────────────────────────────────────────

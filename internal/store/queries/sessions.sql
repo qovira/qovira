@@ -19,6 +19,16 @@ SELECT id, user_id, token_hash, created_at, last_used_at
 FROM sessions
 WHERE token_hash = @token_hash;
 
+-- name: GetSessionWithUserByTokenHash :one
+-- scopeguard:allow-unscoped: resolved before any Principal exists, keyed by the bearer
+-- token_hash capability; no user_id predicate is possible at this pre-auth lookup stage.
+-- The JOIN to users retrieves the role in one read so the middleware can construct a
+-- store.Principal without a second DB round-trip.
+SELECT sessions.id, sessions.user_id, sessions.created_at, sessions.last_used_at, users.role
+FROM sessions
+JOIN users ON sessions.user_id = users.id
+WHERE sessions.token_hash = @token_hash;
+
 -- name: BumpSessionLastUsedByID :execrows
 UPDATE sessions SET last_used_at = @last_used_at WHERE id = @id AND user_id = @user_id;
 

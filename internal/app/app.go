@@ -43,23 +43,42 @@ type Module interface {
 	Tools() []capability.Tool
 }
 
-// isPublicRoute reports whether the request targets a route that must be reachable without an authenticated Bearer
-// token. The auth middleware uses this predicate; all other cross-cutting middleware (recover, request-id, log,
+// isPublicRoute reports whether the request targets a route that must be reachable without authentication.
+// The auth middleware uses this predicate; all other cross-cutting middleware (recover, request-id, log,
 // security-headers) run for every request including public ones.
 //
-// Public: /healthz, and any path served by the embedded SPA (/ and paths that do not start with /api/v1 or /events).
-// Protected: /api/v1 (and any sub-path), /events.
+// Explicitly public routes (reviewed list — add new public routes here with a comment):
+//   - /healthz — liveness probe; must be reachable by the container runtime.
+//   - POST /api/v1/auth/login — credential exchange; must be reachable before a session exists.
+//     (Onboarding / bootstrap routes that require unauthenticated access will join this list
+//     once their spec is finalised; do NOT invent their paths here ahead of that work.)
+//   - SPA paths — anything that is not /api/v1/… or /events is served by the embedded SPA
+//     and is therefore public (asset delivery; auth lives inside the SPA).
+//
+// Protected: /api/v1/… (all paths, except the explicit per-method exemptions above), /events.
 func isPublicRoute(r *http.Request) bool {
 	path := r.URL.Path
+
+	// Liveness probe — always public.
 	if path == "/healthz" {
 		return true
 	}
+
+	// SSE stream — always protected.
 	if path == "/events" {
 		return false
 	}
-	if path == "/api/v1" || len(path) > len("/api/v1") && path[:len("/api/v1/")] == "/api/v1/" {
+
+	// Per-method API exemptions: login is public only for POST.
+	if path == "/api/v1/auth/login" && r.Method == http.MethodPost {
+		return true
+	}
+
+	// All other /api/v1/… paths are protected.
+	if path == "/api/v1" || (len(path) > len("/api/v1") && path[:len("/api/v1/")] == "/api/v1/") {
 		return false
 	}
+
 	// Everything else (SPA paths, static assets) is public.
 	return true
 }
@@ -81,20 +100,30 @@ type App struct {
 // package's version var) so that /healthz always reflects the real release version rather than a hard-coded "dev"
 // sentinel.
 //
+// newValidator is a constructor that receives the opened [*store.Store] and
+// returns the [httpx.TokenValidator] used by the auth middleware. This
+// two-phase design lets callers (e.g. serve.go) build an Authenticator that
+// holds a reference to the store without exposing the store before it is fully
+// initialised. Pass a func that wraps auth.NewAuthenticator for production; for
+// tests any fake that satisfies the interface works:
+//
+//	func(s *store.Store) httpx.TokenValidator { return myFakeValidator{} }
+//
 // Order:
 //  1. Open the encrypted store (store.Open).
-//  2. If cfg.AutoMigrate, run all pending migrations against the write pool.
-//  3. Construct the in-memory event bus.
-//  4. Construct the capability registry.
-//  5. Construct the HTTP router.
-//  6. For each module: mount routes onto the router, register tools in the
+//  2. Call newValidator(s) to build the token validator.
+//  3. If cfg.AutoMigrate, run all pending migrations against the write pool.
+//  4. Construct the in-memory event bus.
+//  5. Construct the capability registry.
+//  6. Construct the HTTP router.
+//  7. For each module: mount routes onto the router, register tools in the
 //     registry.
-//  7. Build the HTTP server with the StandardChain middleware.
+//  8. Build the HTTP server with the StandardChain middleware.
 func New(
 	ctx context.Context,
 	cfg *config.Config,
 	logger *slog.Logger,
-	validator httpx.TokenValidator,
+	newValidator func(*store.Store) httpx.TokenValidator,
 	version string,
 	modules ...Module,
 ) (_ *App, err error) {
@@ -113,7 +142,10 @@ func New(
 		}
 	}()
 
-	// Step 2: run migrations on boot when requested.
+	// Step 2: build the token validator now that the store is open.
+	validator := newValidator(s)
+
+	// Step 3: run migrations on boot when requested.
 	if cfg.AutoMigrate {
 		runner := store.NewRunner()
 		if err = runner.Up(ctx, s.Writer()); err != nil {
@@ -121,23 +153,23 @@ func New(
 		}
 	}
 
-	// Step 3: in-memory event bus.
+	// Step 4: in-memory event bus.
 	bus := events.NewBus()
 
-	// Step 4: capability registry.
+	// Step 5: capability registry.
 	reg := capability.NewRegistry()
 
-	// Step 5: HTTP router.
+	// Step 6: HTTP router.
 	router := httpx.NewRouter()
 
-	// Step 6: module registration loop. The slice is empty at this point in the project's life — the seam is what
+	// Step 7: module registration loop. The slice is empty at this point in the project's life — the seam is what
 	// ships. Sibling modules call New with themselves in the variadic list.
 	for _, m := range modules {
 		m.Routes(router)
 		reg.Add(m.Name(), m.Tools())
 	}
 
-	// Step 7: build the HTTP server with the standard middleware chain.
+	// Step 8: build the HTTP server with the standard middleware chain.
 	// The connection context (connCtx) is a cancelable parent given to every request via srv.BaseContext. Cancelling
 	// it before srv.Shutdown is called causes long-lived SSE handlers to return (they select on r.Context().Done()),
 	// so Shutdown drains quickly rather than waiting for the full timeout.

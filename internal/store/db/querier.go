@@ -41,6 +41,11 @@ type Querier interface {
 	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
 	// predicate is possible or meaningful at this lookup stage.
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (Session, error)
+	// scopeguard:allow-unscoped: resolved before any Principal exists, keyed by the bearer
+	// token_hash capability; no user_id predicate is possible at this pre-auth lookup stage.
+	// The JOIN to users retrieves the role in one read so the middleware can construct a
+	// store.Principal without a second DB round-trip.
+	GetSessionWithUserByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionWithUserByTokenHashRow, error)
 	// Retrieve a single setting row by its exact key.
 	GetSetting(ctx context.Context, settingKey string) (Setting, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)

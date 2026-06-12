@@ -130,6 +130,38 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (
 	return i, err
 }
 
+const getSessionWithUserByTokenHash = `-- name: GetSessionWithUserByTokenHash :one
+SELECT sessions.id, sessions.user_id, sessions.created_at, sessions.last_used_at, users.role
+FROM sessions
+JOIN users ON sessions.user_id = users.id
+WHERE sessions.token_hash = ?1
+`
+
+type GetSessionWithUserByTokenHashRow struct {
+	ID         string
+	UserID     string
+	CreatedAt  string
+	LastUsedAt string
+	Role       string
+}
+
+// scopeguard:allow-unscoped: resolved before any Principal exists, keyed by the bearer
+// token_hash capability; no user_id predicate is possible at this pre-auth lookup stage.
+// The JOIN to users retrieves the role in one read so the middleware can construct a
+// store.Principal without a second DB round-trip.
+func (q *Queries) GetSessionWithUserByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionWithUserByTokenHashRow, error) {
+	row := q.db.QueryRowContext(ctx, getSessionWithUserByTokenHash, tokenHash)
+	var i GetSessionWithUserByTokenHashRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.Role,
+	)
+	return i, err
+}
+
 const purgeExpiredSessions = `-- name: PurgeExpiredSessions :execrows
 DELETE FROM sessions
 WHERE last_used_at < ?1

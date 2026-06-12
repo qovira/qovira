@@ -22,6 +22,7 @@ package httpx
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -31,6 +32,23 @@ import (
 	"time"
 
 	"github.com/qovira/qovira/internal/store"
+)
+
+// Session cookie and CSRF constants. Exported so the auth handler (login) and
+// client-side code generators can reference the same names without
+// string-literal duplication.
+const (
+	// SessionCookieName is the __Host- prefixed cookie that carries the Qovira
+	// session token. The __Host- prefix enforces Secure, no Domain, and Path=/.
+	SessionCookieName = "__Host-qovira_session"
+
+	// CSRFCookieName is the non-HttpOnly cookie whose value the browser-side
+	// JavaScript reads and echoes as the CSRF-Token request header.
+	CSRFCookieName = "qovira_csrf"
+
+	// CSRFHeaderName is the request header that must match CSRFCookieName for
+	// unsafe (non-GET) cookie-authenticated requests.
+	CSRFHeaderName = "CSRF-Token"
 )
 
 // TokenValidator is the seam for token validation. The concrete implementation is provided by the Identity & Auth
@@ -282,17 +300,26 @@ func SecurityHeadersMiddleware() Middleware {
 	}
 }
 
-// AuthMiddleware validates the Bearer token from the Authorization header and, on success, places the resolved
-// store.Principal in the request context via ContextWithPrincipal.
+// AuthMiddleware authenticates each non-public request and places the resolved
+// [store.Principal] in the request context via [ContextWithPrincipal].
 //
-// Routes for which isPublic(r) returns true are passed through without any token check — no Principal is placed in
-// context for those routes.
+// Token extraction order (cookie wins when both are present):
+//  1. Session cookie [SessionCookieName] — the primary browser path.
+//  2. Authorization: Bearer <token> header — the API / programmatic path.
 //
-// On missing or invalid token for a non-public route, the middleware writes a 401 problem+json response and does not
-// call next.
+// CSRF double-submit (cookie-authenticated requests only):
+// When the token was extracted via cookie AND the HTTP method is unsafe
+// (POST, PATCH, or DELETE), the [CSRFHeaderName] request header must be
+// present and must equal the [CSRFCookieName] cookie value (compared via
+// [crypto/subtle.ConstantTimeCompare]).  A missing or mismatched CSRF header
+// results in a 403 problem+json response with code "csrf_failed".  GET
+// requests and Bearer-authenticated requests are exempt.
 //
-// The concrete token validation is deferred to the Identity & Auth slice; this middleware only defines the seam
-// (TokenValidator interface) and wires it in.
+// Routes for which isPublic(r) returns true pass through without any token
+// check; no Principal is placed in context for those routes.
+//
+// On missing or invalid token for a non-public route, the middleware writes a
+// 401 problem+json response with code "unauthenticated" and does not call next.
 func AuthMiddleware(validator TokenValidator, isPublic func(*http.Request) bool) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -301,12 +328,21 @@ func AuthMiddleware(validator TokenValidator, isPublic func(*http.Request) bool)
 				return
 			}
 
-			token := bearerToken(r)
+			// Cookie-first extraction: prefer the session cookie, fall back to
+			// the Authorization: Bearer header.
+			viaCookie := false
+			token := sessionCookie(r)
+			if token != "" {
+				viaCookie = true
+			} else {
+				token = bearerToken(r)
+			}
+
 			if token == "" {
 				WriteProblem(w, r, Problem{
 					Title:  "Authentication required",
 					Status: http.StatusUnauthorized,
-					Detail: "A valid Bearer token is required. Provide an Authorization: Bearer <token> header.",
+					Detail: "Provide a session cookie or an Authorization: Bearer <token> header.",
 					Code:   "unauthenticated",
 				})
 				return
@@ -323,10 +359,63 @@ func AuthMiddleware(validator TokenValidator, isPublic func(*http.Request) bool)
 				return
 			}
 
+			// CSRF double-submit check: required for cookie-authenticated unsafe
+			// methods only. Bearer-authed requests and safe methods are exempt.
+			if viaCookie && isUnsafeMethod(r.Method) {
+				if !csrfValid(r) {
+					WriteProblem(w, r, Problem{
+						Title:  "CSRF validation failed",
+						Status: http.StatusForbidden,
+						Detail: "The CSRF-Token header is missing or does not match the session cookie.",
+						Code:   "csrf_failed",
+					})
+					return
+				}
+			}
+
 			ctx := ContextWithPrincipal(r.Context(), principal)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// sessionCookie returns the value of the [SessionCookieName] cookie, or an
+// empty string when the cookie is absent or empty.
+func sessionCookie(r *http.Request) string {
+	c, err := r.Cookie(SessionCookieName)
+	if err != nil || c.Value == "" {
+		return ""
+	}
+	return c.Value
+}
+
+// isUnsafeMethod reports whether method requires CSRF protection. Only POST,
+// PATCH, and DELETE are considered unsafe for this check (GET and HEAD are
+// safe; PUT is uncommon in Qovira's PATCH-first API but would be unsafe too —
+// extend if needed).
+func isUnsafeMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// csrfValid returns true when the CSRF-Token request header matches the
+// qovira_csrf cookie value via constant-time comparison. Returns false when
+// either the header or the cookie is absent, or when they differ.
+func csrfValid(r *http.Request) bool {
+	headerVal := r.Header.Get(CSRFHeaderName)
+	if headerVal == "" {
+		return false
+	}
+	c, err := r.Cookie(CSRFCookieName)
+	if err != nil || c.Value == "" {
+		return false
+	}
+	// Constant-time comparison to prevent timing attacks.
+	return subtle.ConstantTimeCompare([]byte(headerVal), []byte(c.Value)) == 1
 }
 
 // bearerToken extracts the token value from an "Authorization: Bearer <token>" header. Returns an empty string if the
