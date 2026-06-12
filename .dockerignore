@@ -1,0 +1,50 @@
+# Version control
+.git
+.github
+
+# Documentation (not needed in build context)
+*.md
+LICENSE
+
+# Go build output — the Dockerfile builds the binary inside the container
+/qovira
+/dist/
+/vendor/
+*.test
+*.out
+
+# Environment and secrets — never in the build context
+.env
+.env.*
+
+# Local data and databases
+/data/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Editor and OS artefacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Test / profiling output
+coverage.out
+coverage.html
+*.prof
+cpu.out
+mem.out
+
+# Linter cache
+.golangci-lint/
+
+# NOTE: internal/httpx/webdist/ is intentionally NOT excluded.
+# The Go embed directive (//go:embed all:webdist) in internal/httpx/spa.go
+# requires the webdist directory to be present in the build context.
