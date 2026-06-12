@@ -1,8 +1,10 @@
 package authhttp_test
 
-// Handler-level tests for the authhttp module: login, logout-one, logout-all.
+// Handler-level tests for the authhttp module: login, logout-one, logout-all,
+// and the self-service me endpoints (GET /api/v1/me, PATCH /api/v1/me,
+// POST /api/v1/me/password).
 // Tests seed a real SQLCipher store (same harness as internal/auth/*_test.go).
-// Protected logout handlers receive their Principal via httpx.ContextWithPrincipal.
+// Protected handlers receive their Principal via httpx.ContextWithPrincipal.
 
 import (
 	"bytes"
@@ -22,6 +24,7 @@ import (
 	"github.com/qovira/qovira/internal/config"
 	"github.com/qovira/qovira/internal/httpx"
 	"github.com/qovira/qovira/internal/store"
+	"github.com/qovira/qovira/internal/store/db"
 )
 
 // ── test harness ──────────────────────────────────────────────────────────────
@@ -580,3 +583,522 @@ func discardLogger() *slog.Logger {
 type discardWriter struct{}
 
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+// ── GET /api/v1/me ────────────────────────────────────────────────────────────
+
+// meResponse mirrors the wire shape of the me endpoints.
+type meResponse struct {
+	User userJSON `json:"user"`
+}
+
+// serveMe fires a GET /api/v1/me request with the principal injected into context.
+func serveMe(t *testing.T, mod *authhttp.Module, principal store.Principal) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	ctx := httpx.ContextWithPrincipal(r.Context(), principal)
+	ctx = httpx.ContextWithRequestID(ctx, "test-req-id")
+	r = r.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	mod.MeHandler()(rr, r)
+	return rr
+}
+
+// TestMe_Get_Returns200WithUserBody verifies GET /api/v1/me returns 200 and
+// the user record as {"user": {...}} in camelCase JSON.
+func TestMe_Get_Returns200WithUserBody(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	const pw = "correct-horse"
+	u := createUser(t, s, "me-get@example.com", pw)
+	mod := buildModule(t, s, nil)
+
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+	rr := serveMe(t, mod, principal)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var resp meResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal me response: %v; body=%s", err, rr.Body)
+	}
+
+	// Verify the user fields are correct and camelCase.
+	if resp.User.ID != u.ID {
+		t.Errorf("user.id = %q, want %q", resp.User.ID, u.ID)
+	}
+	if resp.User.Email != u.Email {
+		t.Errorf("user.email = %q, want %q", resp.User.Email, u.Email)
+	}
+	if resp.User.DisplayName != u.DisplayName {
+		t.Errorf("user.displayName = %q, want %q", resp.User.DisplayName, u.DisplayName)
+	}
+	if resp.User.Role != string(u.Role) {
+		t.Errorf("user.role = %q, want %q", resp.User.Role, u.Role)
+	}
+	if resp.User.Timezone != u.Timezone {
+		t.Errorf("user.timezone = %q, want %q", resp.User.Timezone, u.Timezone)
+	}
+	if resp.User.Locale != u.Locale {
+		t.Errorf("user.locale = %q, want %q", resp.User.Locale, u.Locale)
+	}
+	if resp.User.Language != u.Language {
+		t.Errorf("user.language = %q, want %q", resp.User.Language, u.Language)
+	}
+
+	// Verify JSON keys are camelCase by inspecting raw body.
+	raw := rr.Body.String()
+	for _, key := range []string{"displayName", "email", "role", "timezone", "locale", "language"} {
+		if !strings.Contains(raw, `"`+key+`"`) {
+			t.Errorf("response body missing camelCase key %q; body=%s", key, raw)
+		}
+	}
+}
+
+// TestMe_Get_UserIDFromPrincipal verifies that the user ID comes from the
+// Principal in context, not from any request parameter.
+func TestMe_Get_UserIDFromPrincipal(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	u1 := createUser(t, s, "principal-a@example.com", "correct-horse")
+	u2 := createUser(t, s, "principal-b@example.com", "correct-horse")
+	mod := buildModule(t, s, nil)
+
+	// Request with u1's principal — must return u1's record.
+	principal1 := store.Principal{UserID: u1.ID, Role: string(u1.Role)}
+	rr := serveMe(t, mod, principal1)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body)
+	}
+	var resp meResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.User.ID != u1.ID {
+		t.Errorf("returned user.id = %q, want u1's id %q", resp.User.ID, u1.ID)
+	}
+	if resp.User.ID == u2.ID {
+		t.Error("returned u2's record when u1 was the principal")
+	}
+}
+
+// ── PATCH /api/v1/me ──────────────────────────────────────────────────────────
+
+// servePatchMe fires a PATCH /api/v1/me request with the given JSON body.
+func servePatchMe(t *testing.T, mod *authhttp.Module, principal store.Principal, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	r := httptest.NewRequest(http.MethodPatch, "/api/v1/me", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	ctx := httpx.ContextWithPrincipal(r.Context(), principal)
+	ctx = httpx.ContextWithRequestID(ctx, "test-req-id")
+	r = r.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	mod.UpdateMeHandler()(rr, r)
+	return rr
+}
+
+// TestUpdateMe_MergeSemantics verifies that PATCH /api/v1/me changes only the
+// provided fields and leaves omitted ones unchanged.
+func TestUpdateMe_MergeSemantics(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	u := createUser(t, s, "patch-merge@example.com", "correct-horse")
+	mod := buildModule(t, s, nil)
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+
+	// Send only displayName; timezone, locale, language must be unchanged.
+	newDisplayName := "Updated Name"
+	body := map[string]any{"displayName": newDisplayName}
+	rr := servePatchMe(t, mod, principal, body)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body)
+	}
+
+	var resp meResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
+	}
+	if resp.User.DisplayName != newDisplayName {
+		t.Errorf("displayName = %q, want %q", resp.User.DisplayName, newDisplayName)
+	}
+	// Omitted fields must retain original values.
+	if resp.User.Timezone != u.Timezone {
+		t.Errorf("timezone changed unexpectedly: got %q, want %q", resp.User.Timezone, u.Timezone)
+	}
+	if resp.User.Locale != u.Locale {
+		t.Errorf("locale changed unexpectedly: got %q, want %q", resp.User.Locale, u.Locale)
+	}
+	if resp.User.Language != u.Language {
+		t.Errorf("language changed unexpectedly: got %q, want %q", resp.User.Language, u.Language)
+	}
+
+	// Verify by reading back from the store — not just the response body.
+	hasher := auth.NewHasher(fastParams)
+	svc := auth.NewService(s, hasher, fastPolicy)
+	stored, err := svc.GetUserByID(context.Background(), u.ID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored.DisplayName != newDisplayName {
+		t.Errorf("stored displayName = %q, want %q", stored.DisplayName, newDisplayName)
+	}
+	if stored.Timezone != u.Timezone {
+		t.Errorf("stored timezone changed: got %q, want %q", stored.Timezone, u.Timezone)
+	}
+}
+
+// TestUpdateMe_CannotChangeRoleOrEmail verifies that sending "role" or "email"
+// keys in the PATCH body does not change those fields.
+func TestUpdateMe_CannotChangeRoleOrEmail(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	u := createUser(t, s, "patch-role@example.com", "correct-horse")
+	mod := buildModule(t, s, nil)
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+
+	// Attempt to set role and email via the body — these keys are simply unknown
+	// to the handler's body struct and are dropped silently by encoding/json.
+	body := map[string]any{
+		"role":        "admin",
+		"email":       "attacker@evil.example",
+		"displayName": "Legit Change",
+	}
+	rr := servePatchMe(t, mod, principal, body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body)
+	}
+
+	var resp meResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.User.Role != string(u.Role) {
+		t.Errorf("role changed: got %q, want %q", resp.User.Role, u.Role)
+	}
+	if resp.User.Email != u.Email {
+		t.Errorf("email changed: got %q, want %q", resp.User.Email, u.Email)
+	}
+	if resp.User.DisplayName != "Legit Change" {
+		t.Errorf("displayName = %q, want Legit Change", resp.User.DisplayName)
+	}
+}
+
+// TestUpdateMe_MalformedJSON_Returns400 verifies malformed body → 400.
+func TestUpdateMe_MalformedJSON_Returns400(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	u := createUser(t, s, "patch-malformed@example.com", "correct-horse")
+	mod := buildModule(t, s, nil)
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+
+	r := httptest.NewRequest(http.MethodPatch, "/api/v1/me", strings.NewReader("{bad json"))
+	r.Header.Set("Content-Type", "application/json")
+	ctx := httpx.ContextWithPrincipal(r.Context(), principal)
+	ctx = httpx.ContextWithRequestID(ctx, "test-req-id")
+	r = r.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	mod.UpdateMeHandler()(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+	var p problemBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &p); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
+	}
+	if p.Code != "malformed_body" {
+		t.Errorf("code = %q, want malformed_body", p.Code)
+	}
+}
+
+// ── POST /api/v1/me/password ──────────────────────────────────────────────────
+
+// changePasswordBody is the wire shape for POST /api/v1/me/password.
+// G117: test fixture struct, not production secret handling.
+type changePasswordBody struct { //nolint:gosec // G117: test fixture struct
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
+// serveChangePassword fires a POST /api/v1/me/password request with the caller's
+// session token injected as a cookie (so SessionTokenFromRequest can find it).
+func serveChangePassword(
+	t *testing.T,
+	mod *authhttp.Module,
+	principal store.Principal,
+	sessionToken string,
+	body changePasswordBody,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/me/password", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: httpx.SessionCookieName, Value: sessionToken}) //nolint:gosec // G124: test request
+	ctx := httpx.ContextWithPrincipal(r.Context(), principal)
+	ctx = httpx.ContextWithRequestID(ctx, "test-req-id")
+	r = r.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	mod.ChangePasswordHandler()(rr, r)
+	return rr
+}
+
+// TestChangePassword_HappyPath verifies the full success flow:
+//   - Returns 204.
+//   - The new password now verifies against the stored hash.
+//   - The old password no longer verifies.
+//   - OTHER sessions are revoked; the caller's session still resolves.
+func TestChangePassword_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	const oldPW = "correct-horse"
+	const newPW = "new-correct-horse"
+	u := createUser(t, s, "pw-change@example.com", oldPW)
+	mod := buildModule(t, s, nil)
+
+	sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
+	now := time.Now().UTC()
+
+	// Mint two sessions: the caller's and another device's.
+	callerToken, _, _, err := sessions.Mint(context.Background(), u.ID, now)
+	if err != nil {
+		t.Fatalf("mint caller session: %v", err)
+	}
+	otherToken, _, _, err := sessions.Mint(context.Background(), u.ID, now)
+	if err != nil {
+		t.Fatalf("mint other session: %v", err)
+	}
+
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+	rr := serveChangePassword(t, mod, principal, callerToken, changePasswordBody{
+		CurrentPassword: oldPW,
+		NewPassword:     newPW,
+	})
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body)
+	}
+
+	// Verify the new hash is stored by reading the raw row.
+	hasher := auth.NewHasher(fastParams)
+	q := db.New(s.Reader())
+	row, err := q.GetUserByID(context.Background(), u.ID)
+	if err != nil {
+		t.Fatalf("get stored row: %v", err)
+	}
+	newOK, err := hasher.Verify(row.PasswordHash, newPW)
+	if err != nil {
+		t.Fatalf("verify new password: %v", err)
+	}
+	if !newOK {
+		t.Error("new password does not verify against stored hash")
+	}
+	oldOK, err := hasher.Verify(row.PasswordHash, oldPW)
+	if err != nil {
+		t.Fatalf("verify old password: %v", err)
+	}
+	if oldOK {
+		t.Error("old password still verifies — it should have been replaced")
+	}
+
+	// The caller's session must still be resolvable.
+	if _, err := sessions.Lookup(context.Background(), callerToken); err != nil {
+		t.Errorf("caller session was revoked; want it to remain: %v", err)
+	}
+	// The other session must be gone.
+	if _, err := sessions.Lookup(context.Background(), otherToken); err == nil {
+		t.Error("other session was NOT revoked after password change")
+	}
+}
+
+// TestChangePassword_WrongCurrentPassword_Returns422 verifies that a wrong
+// current password produces 422 with code "validation_failed" and the pointer
+// "/currentPassword".
+func TestChangePassword_WrongCurrentPassword_Returns422(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	const oldPW = "correct-horse"
+	u := createUser(t, s, "pw-wrong-current@example.com", oldPW)
+	mod := buildModule(t, s, nil)
+
+	sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
+	callerToken, _, _, err := sessions.Mint(context.Background(), u.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("mint session: %v", err)
+	}
+
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+	rr := serveChangePassword(t, mod, principal, callerToken, changePasswordBody{
+		CurrentPassword: "totally-wrong-password",
+		NewPassword:     "new-valid-horse-password",
+	})
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body = %s", rr.Code, rr.Body)
+	}
+
+	var prob struct {
+		Code   string `json:"code"`
+		Errors []struct {
+			Pointer string `json:"pointer"`
+			Detail  string `json:"detail"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &prob); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
+	}
+	if prob.Code != "validation_failed" {
+		t.Errorf("code = %q, want validation_failed", prob.Code)
+	}
+	if len(prob.Errors) == 0 {
+		t.Fatal("errors[] is empty, want at least one entry")
+	}
+	if prob.Errors[0].Pointer != "/currentPassword" {
+		t.Errorf("errors[0].pointer = %q, want /currentPassword", prob.Errors[0].Pointer)
+	}
+	if rr.Header().Get("Content-Type") != "application/problem+json" {
+		t.Errorf("Content-Type = %q, want application/problem+json", rr.Header().Get("Content-Type"))
+	}
+}
+
+// TestChangePassword_WeakNewPassword_Returns422 verifies that a policy-violating
+// new password produces 422 with code "validation_failed" and pointer "/newPassword",
+// even when the current password is correct.
+func TestChangePassword_WeakNewPassword_Returns422(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	const oldPW = "correct-horse"
+	u := createUser(t, s, "pw-weak-new@example.com", oldPW)
+	mod := buildModule(t, s, nil)
+
+	sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
+	callerToken, _, _, err := sessions.Mint(context.Background(), u.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("mint session: %v", err)
+	}
+
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+	// fastPolicy has MinLen=8; send a 3-char new password to trigger ErrPasswordTooShort.
+	rr := serveChangePassword(t, mod, principal, callerToken, changePasswordBody{
+		CurrentPassword: oldPW,
+		NewPassword:     "short",
+	})
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body = %s", rr.Code, rr.Body)
+	}
+
+	var prob struct {
+		Code   string `json:"code"`
+		Errors []struct {
+			Pointer string `json:"pointer"`
+			Detail  string `json:"detail"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &prob); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
+	}
+	if prob.Code != "validation_failed" {
+		t.Errorf("code = %q, want validation_failed", prob.Code)
+	}
+	if len(prob.Errors) == 0 {
+		t.Fatal("errors[] is empty, want at least one entry")
+	}
+	if prob.Errors[0].Pointer != "/newPassword" {
+		t.Errorf("errors[0].pointer = %q, want /newPassword", prob.Errors[0].Pointer)
+	}
+}
+
+// TestChangePassword_WrongCurrentBeforeWeakNew_Returns422WithCurrentPasswordPointer
+// verifies that a wrong current password is reported (not the weak new password)
+// when both current and new passwords are invalid, confirming the ordering mandated
+// by the issue spec.
+func TestChangePassword_WrongCurrentBeforeWeakNew_Returns422WithCurrentPasswordPointer(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	const oldPW = "correct-horse"
+	u := createUser(t, s, "pw-ordering@example.com", oldPW)
+	mod := buildModule(t, s, nil)
+
+	sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
+	callerToken, _, _, err := sessions.Mint(context.Background(), u.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("mint session: %v", err)
+	}
+
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+	// Both current and new are wrong — current error must be reported first.
+	rr := serveChangePassword(t, mod, principal, callerToken, changePasswordBody{
+		CurrentPassword: "totally-wrong-password",
+		NewPassword:     "sh", // also too short
+	})
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body = %s", rr.Code, rr.Body)
+	}
+
+	var prob struct {
+		Code   string `json:"code"`
+		Errors []struct {
+			Pointer string `json:"pointer"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &prob); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
+	}
+	if len(prob.Errors) == 0 {
+		t.Fatal("errors[] empty")
+	}
+	if prob.Errors[0].Pointer != "/currentPassword" {
+		t.Errorf("errors[0].pointer = %q, want /currentPassword (wrong-current must be reported before weak-new)", prob.Errors[0].Pointer)
+	}
+}
+
+// TestChangePassword_MalformedJSON_Returns400 verifies malformed body → 400.
+func TestChangePassword_MalformedJSON_Returns400(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	u := createUser(t, s, "pw-malformed@example.com", "correct-horse")
+	mod := buildModule(t, s, nil)
+
+	sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
+	callerToken, _, _, err := sessions.Mint(context.Background(), u.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("mint session: %v", err)
+	}
+
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/me/password", strings.NewReader("{bad json"))
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: httpx.SessionCookieName, Value: callerToken}) //nolint:gosec // G124: test request
+	ctx := httpx.ContextWithPrincipal(r.Context(), store.Principal{UserID: u.ID, Role: string(u.Role)})
+	ctx = httpx.ContextWithRequestID(ctx, "test-req-id")
+	r = r.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	mod.ChangePasswordHandler()(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+	var p problemBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &p); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
+	}
+	if p.Code != "malformed_body" {
+		t.Errorf("code = %q, want malformed_body", p.Code)
+	}
+}

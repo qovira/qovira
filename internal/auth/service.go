@@ -288,6 +288,70 @@ func (s *Service) userRowByEmail(ctx context.Context, email string) (db.User, er
 	return row, nil
 }
 
+// ── userRowByID ───────────────────────────────────────────────────────────────
+
+// userRowByID fetches the raw [db.User] row (including PasswordHash) for the
+// given user ID.  It is package-private and used only by [Service.ChangePassword]
+// so the hash is never reachable through a public method.
+// Returns [sql.ErrNoRows] when no row matches.
+func (s *Service) userRowByID(ctx context.Context, userID string) (db.User, error) {
+	row, err := s.readQ.GetUserByID(ctx, userID)
+	if err != nil {
+		return db.User{}, err
+	}
+	return row, nil
+}
+
+// ── ChangePassword ────────────────────────────────────────────────────────────
+
+// ChangePassword verifies the caller's current password, validates the new one
+// against the policy, and updates the stored hash.  Session revocation is the
+// caller's responsibility — this method has no concept of a current session ID.
+//
+// Order of operations:
+//  1. Load the raw DB row by userID; [sql.ErrNoRows] → [ErrUserNotFound].
+//  2. [Hasher.Verify] the stored PHC against currentPassword.
+//     Mismatch → [ErrInvalidCredentials].
+//     Malformed-PHC / infrastructure error from Verify → wrapped error (not
+//     [ErrInvalidCredentials]; the caller can distinguish by checking
+//     errors.Is(err, ErrInvalidCredentials)).
+//  3. [Policy.ValidatePassword] on newPassword; failure → the policy sentinel
+//     unchanged ([ErrPasswordTooShort] or [ErrPasswordTooLong]).
+//  4. [Hasher.Hash] the new password and call [Service.UpdatePasswordHash].
+//
+// The ordering of steps 2 before 3 is intentional: a wrong current password is
+// reported even when the new password is also policy-violating.
+func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+	row, err := s.userRowByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("auth: change password lookup: %w", err)
+	}
+
+	ok, err := s.hasher.Verify(row.PasswordHash, currentPassword)
+	if err != nil {
+		// Malformed PHC or infrastructure error — wrap and return; the caller
+		// checks errors.Is(err, ErrInvalidCredentials) and this is NOT that.
+		return fmt.Errorf("auth: verify current password hash: %w", err)
+	}
+	if !ok {
+		return ErrInvalidCredentials
+	}
+
+	if err := s.policy.ValidatePassword(newPassword); err != nil {
+		return err
+	}
+
+	newPHC, err := s.hasher.Hash(newPassword)
+	if err != nil {
+		return fmt.Errorf("auth: hash new password: %w", err)
+	}
+
+	return s.UpdatePasswordHash(ctx, userID, newPHC)
+}
+
 // ── Authenticate ──────────────────────────────────────────────────────────────
 
 // Authenticate validates email/password credentials and returns the safe [User]
