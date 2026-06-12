@@ -1,0 +1,236 @@
+package gateway
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+)
+
+// ErrMalformedStream is returned by ParseSSE when a data line contains text
+// that is not valid JSON, or when a single line exceeds maxSSELineBytes. The
+// caller (a later call-slice) is responsible for mapping this onto a broader
+// gateway error type.
+var ErrMalformedStream = errors.New("gateway: malformed SSE stream")
+
+// maxSSELineBytes caps the size of a single SSE data line. One line carries an
+// entire chunk's JSON, and a tool call streaming a large arguments payload can
+// produce a line well past bufio.Scanner's 64 KiB default — so the default
+// would misclassify a valid stream as malformed and silently drop data. The
+// cap is raised generously while staying bounded, so a runaway or hostile
+// stream still can't force unbounded buffering.
+const maxSSELineBytes = 4 << 20 // 4 MiB
+
+// Chunk is one unit of streamed output from the model. Exactly one of
+// TextDelta, ToolCall, or Done is meaningful per chunk — they are never set
+// simultaneously.
+//
+//   - TextDelta is non-empty on text-content delta chunks.
+//   - ToolCall is non-nil when a fully assembled tool call is ready to deliver.
+//   - Done is true on the terminal chunk; Usage may be set on that chunk if the
+//     upstream endpoint included trailing usage data.
+type Chunk struct {
+	TextDelta string
+	ToolCall  *ToolCall
+	Done      bool
+	Usage     *Usage
+}
+
+// ToolCall carries one complete, assembled tool invocation. Arguments is the
+// raw, concatenated JSON fragment string exactly as sent by the model — it is
+// never validated or parsed.
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments json.RawMessage
+}
+
+// Usage carries token-count metadata emitted at the end of the stream.
+type Usage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+// ── SSE wire types ────────────────────────────────────────────────────────────
+
+// sseChunk is the deserialized shape of one SSE data line from an
+// OpenAI-compatible streaming endpoint.
+type sseChunk struct {
+	Choices []sseChoice `json:"choices"`
+	Usage   *sseUsage   `json:"usage"`
+}
+
+type sseChoice struct {
+	Delta        sseDelta `json:"delta"`
+	FinishReason *string  `json:"finish_reason"`
+}
+
+type sseDelta struct {
+	Content   *string       `json:"content"`
+	ToolCalls []sseToolCall `json:"tool_calls"`
+}
+
+type sseToolCall struct {
+	Index    int             `json:"index"`
+	ID       string          `json:"id"`
+	Function sseToolFunction `json:"function"`
+}
+
+type sseToolFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type sseUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+// ── inFlight tracks an in-progress tool call being assembled ─────────────────
+
+type inFlightToolCall struct {
+	id   string
+	name string
+	args strings.Builder
+}
+
+// ParseSSE reads an OpenAI-compatible SSE byte stream from r and returns a
+// slice of Chunk values representing the parsed output.
+//
+// The function is a pure transformation of the byte stream — it holds no
+// HTTP state and performs no I/O beyond reading r.
+//
+// Tolerances:
+//   - Lines beginning with ':' (SSE comment / keep-alive) are silently ignored.
+//   - End-of-body (io.EOF without a preceding "[DONE]") is treated as normal
+//     termination; the Done chunk is still emitted.
+//   - Missing trailing usage is accepted; the Done chunk's Usage field is nil.
+//   - Sparse or non-contiguous tool-call indices are supported via a map.
+//   - Multiple parallel tool calls (distinct index values) are assembled
+//     independently and each emitted whole exactly once when the stream ends.
+//
+// A data line whose JSON payload is unparseable causes an immediate return of
+// a nil slice and an error wrapping [ErrMalformedStream].
+func ParseSSE(r io.Reader) ([]Chunk, error) {
+	scanner := bufio.NewScanner(r)
+	// Raise the line ceiling above bufio's 64 KiB default so a large but valid
+	// tool-call arguments line isn't misread as malformed (see maxSSELineBytes).
+	scanner.Buffer(make([]byte, 0, 64*1024), maxSSELineBytes)
+
+	// inFlight maps tool-call index → assembler.
+	inFlight := make(map[int]*inFlightToolCall)
+	// order preserves the first-seen order of tool-call indices for deterministic output.
+	var order []int
+
+	var chunks []Chunk
+	var finalUsage *sseUsage
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// SSE comment lines (keep-alive, heartbeat) — skip silently.
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+
+		// Empty lines are the SSE event separator — nothing to do.
+		if line == "" {
+			continue
+		}
+
+		// Only "data:" lines carry payload.
+		payload, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			// Non-data, non-comment, non-empty — not part of the OpenAI SSE
+			// contract; skip rather than error so unknown fields don't break.
+			continue
+		}
+
+		// Terminal sentinel — stream is done.
+		if payload == "[DONE]" {
+			break
+		}
+
+		var wire sseChunk
+		if err := json.Unmarshal([]byte(payload), &wire); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrMalformedStream, err)
+		}
+
+		// Accumulate trailing usage when provided.
+		if wire.Usage != nil {
+			finalUsage = wire.Usage
+		}
+
+		// v0.1 chat streaming is single-choice (n=1). All tool-call fragments
+		// are keyed by tc.Index alone, so an n>1 stream sharing indices across
+		// choices is out of scope and not supported here.
+		for _, choice := range wire.Choices {
+			delta := choice.Delta
+
+			// Text content delta. Empty-string content (e.g. the role-priming
+			// first chunk) is intentionally elided so it doesn't surface as a
+			// spurious empty TextDelta chunk.
+			if delta.Content != nil && *delta.Content != "" {
+				chunks = append(chunks, Chunk{TextDelta: *delta.Content})
+			}
+
+			// Tool-call delta fragments — accumulate by index.
+			for _, tc := range delta.ToolCalls {
+				ifl, exists := inFlight[tc.Index]
+				if !exists {
+					ifl = &inFlightToolCall{}
+					inFlight[tc.Index] = ifl
+					order = append(order, tc.Index)
+				}
+				// id and name arrive in the first fragment; subsequent fragments have empty strings.
+				if tc.ID != "" {
+					ifl.id = tc.ID
+				}
+				if tc.Function.Name != "" {
+					ifl.name = tc.Function.Name
+				}
+				ifl.args.WriteString(tc.Function.Arguments)
+			}
+
+			// finish_reason signals the end of the choice sequence. Flush all
+			// in-flight tool calls in first-seen index order, then set up the
+			// terminal chunk.
+			if choice.FinishReason != nil {
+				for _, idx := range order {
+					ifl := inFlight[idx]
+					tc := &ToolCall{
+						ID:        ifl.id,
+						Name:      ifl.name,
+						Arguments: json.RawMessage(ifl.args.String()),
+					}
+					chunks = append(chunks, Chunk{ToolCall: tc})
+				}
+				// Clear the in-flight map so a second finish_reason (unlikely but
+				// tolerated) doesn't double-emit.
+				clear(inFlight)
+				order = order[:0]
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("%w: scanner: %w", ErrMalformedStream, err)
+	}
+
+	// Build the terminal Done chunk. Usage is attached if the stream provided it.
+	done := Chunk{Done: true}
+	if finalUsage != nil {
+		done.Usage = &Usage{
+			PromptTokens:     finalUsage.PromptTokens,
+			CompletionTokens: finalUsage.CompletionTokens,
+			TotalTokens:      finalUsage.TotalTokens,
+		}
+	}
+	chunks = append(chunks, done)
+
+	return chunks, nil
+}

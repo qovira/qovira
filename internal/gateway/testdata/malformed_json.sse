@@ -1,0 +1,5 @@
+data: {"id":"chatcmpl-7","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}
+
+data: {NOT VALID JSON}
+
+data: [DONE]
