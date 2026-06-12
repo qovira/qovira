@@ -20,7 +20,7 @@ func newFakeSettings(pairs ...string) *fakeSettings {
 	}
 	fs := &fakeSettings{data: make(map[string]string, len(pairs)/2)}
 	for i := 0; i < len(pairs); i += 2 {
-		fs.data[pairs[i]] = pairs[i+1]
+		fs.data[pairs[i]] = pairs[i+1] //nolint:gosec // G602 false positive: the odd-length guard above ensures i+1 < len(pairs).
 	}
 	return fs
 }
@@ -43,7 +43,7 @@ func (fs *fakeSettings) set(key, value string) {
 // It bypasses New (which requires a *store.SettingsStore) so that tests stay
 // CGO-free.
 func newGatewayWithFake(fs settingsReader) *Gateway {
-	return &Gateway{settings: fs}
+	return &Gateway{settings: fs, httpClient: newHTTPClient()}
 }
 
 // fullPrimary returns the fake settings keys that represent a fully-configured

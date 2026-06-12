@@ -98,24 +98,19 @@ type inFlightToolCall struct {
 	args strings.Builder
 }
 
-// ParseSSE reads an OpenAI-compatible SSE byte stream from r and returns a
-// slice of Chunk values representing the parsed output.
+// streamSSE reads an OpenAI-compatible SSE byte stream from r and calls emit
+// for each assembled Chunk. It returns as soon as emit returns false (consumer
+// stopped), or after all chunks including the terminal Done chunk have been
+// emitted, or on the first parse/scan error.
 //
-// The function is a pure transformation of the byte stream — it holds no
-// HTTP state and performs no I/O beyond reading r.
+// On a scan or JSON error the function returns an error wrapping
+// [ErrMalformedStream]. A normal end-of-stream (with or without a "[DONE]"
+// sentinel) returns nil after emitting the Done chunk — even when emit returns
+// true for every chunk.
 //
-// Tolerances:
-//   - Lines beginning with ':' (SSE comment / keep-alive) are silently ignored.
-//   - End-of-body (io.EOF without a preceding "[DONE]") is treated as normal
-//     termination; the Done chunk is still emitted.
-//   - Missing trailing usage is accepted; the Done chunk's Usage field is nil.
-//   - Sparse or non-contiguous tool-call indices are supported via a map.
-//   - Multiple parallel tool calls (distinct index values) are assembled
-//     independently and each emitted whole exactly once when the stream ends.
-//
-// A data line whose JSON payload is unparseable causes an immediate return of
-// a nil slice and an error wrapping [ErrMalformedStream].
-func ParseSSE(r io.Reader) ([]Chunk, error) {
+// The Done chunk is always the last thing emitted; emit is never called after
+// it returns false or after Done has been emitted.
+func streamSSE(r io.Reader, emit func(Chunk) bool) error {
 	scanner := bufio.NewScanner(r)
 	// Raise the line ceiling above bufio's 64 KiB default so a large but valid
 	// tool-call arguments line isn't misread as malformed (see maxSSELineBytes).
@@ -126,7 +121,6 @@ func ParseSSE(r io.Reader) ([]Chunk, error) {
 	// order preserves the first-seen order of tool-call indices for deterministic output.
 	var order []int
 
-	var chunks []Chunk
 	var finalUsage *sseUsage
 
 	for scanner.Scan() {
@@ -157,7 +151,7 @@ func ParseSSE(r io.Reader) ([]Chunk, error) {
 
 		var wire sseChunk
 		if err := json.Unmarshal([]byte(payload), &wire); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrMalformedStream, err)
+			return fmt.Errorf("%w: %w", ErrMalformedStream, err)
 		}
 
 		// Accumulate trailing usage when provided.
@@ -175,7 +169,9 @@ func ParseSSE(r io.Reader) ([]Chunk, error) {
 			// first chunk) is intentionally elided so it doesn't surface as a
 			// spurious empty TextDelta chunk.
 			if delta.Content != nil && *delta.Content != "" {
-				chunks = append(chunks, Chunk{TextDelta: *delta.Content})
+				if !emit(Chunk{TextDelta: *delta.Content}) {
+					return nil
+				}
 			}
 
 			// Tool-call delta fragments — accumulate by index.
@@ -207,7 +203,9 @@ func ParseSSE(r io.Reader) ([]Chunk, error) {
 						Name:      ifl.name,
 						Arguments: json.RawMessage(ifl.args.String()),
 					}
-					chunks = append(chunks, Chunk{ToolCall: tc})
+					if !emit(Chunk{ToolCall: tc}) {
+						return nil
+					}
 				}
 				// Clear the in-flight map so a second finish_reason (unlikely but
 				// tolerated) doesn't double-emit.
@@ -218,7 +216,7 @@ func ParseSSE(r io.Reader) ([]Chunk, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("%w: scanner: %w", ErrMalformedStream, err)
+		return fmt.Errorf("%w: scanner: %w", ErrMalformedStream, err)
 	}
 
 	// Build the terminal Done chunk. Usage is attached if the stream provided it.
@@ -230,7 +228,36 @@ func ParseSSE(r io.Reader) ([]Chunk, error) {
 			TotalTokens:      finalUsage.TotalTokens,
 		}
 	}
-	chunks = append(chunks, done)
+	emit(done)
 
+	return nil
+}
+
+// ParseSSE reads an OpenAI-compatible SSE byte stream from r and returns a
+// slice of Chunk values representing the parsed output.
+//
+// The function is a pure transformation of the byte stream — it holds no
+// HTTP state and performs no I/O beyond reading r.
+//
+// Tolerances:
+//   - Lines beginning with ':' (SSE comment / keep-alive) are silently ignored.
+//   - End-of-body (io.EOF without a preceding "[DONE]") is treated as normal
+//     termination; the Done chunk is still emitted.
+//   - Missing trailing usage is accepted; the Done chunk's Usage field is nil.
+//   - Sparse or non-contiguous tool-call indices are supported via a map.
+//   - Multiple parallel tool calls (distinct index values) are assembled
+//     independently and each emitted whole exactly once when the stream ends.
+//
+// A data line whose JSON payload is unparseable causes an immediate return of
+// a nil slice and an error wrapping [ErrMalformedStream].
+func ParseSSE(r io.Reader) ([]Chunk, error) {
+	var chunks []Chunk
+	err := streamSSE(r, func(c Chunk) bool {
+		chunks = append(chunks, c)
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
 	return chunks, nil
 }
