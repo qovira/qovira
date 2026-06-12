@@ -9,6 +9,7 @@ require (
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.53.0
+	golang.org/x/term v0.44.0
 )
 
 require (

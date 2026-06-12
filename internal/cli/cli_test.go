@@ -22,12 +22,12 @@ func runCmd(t *testing.T, args ...string) (string, string, error) {
 	return outBuf.String(), errBuf.String(), err
 }
 
-// TestRootHelp verifies that "qovira --help" lists all three top-level
+// TestRootHelp verifies that "qovira --help" lists all five top-level
 // commands.
 func TestRootHelp(t *testing.T) {
 	t.Parallel()
 
-	want := []string{"serve", "migrate", "healthcheck", "version"}
+	want := []string{"serve", "migrate", "healthcheck", "version", "admin"}
 
 	out, _, err := runCmd(t, "--help")
 	if err != nil {

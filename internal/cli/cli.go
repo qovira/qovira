@@ -46,6 +46,7 @@ database schema, "qovira healthcheck" to probe the local server, and
 		newMigrateCmd(),
 		newHealthcheckCmd(),
 		newVersionCmd(),
+		newAdminCmd(),
 	)
 
 	return root
