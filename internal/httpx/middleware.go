@@ -300,6 +300,22 @@ func SecurityHeadersMiddleware() Middleware {
 	}
 }
 
+// SessionTokenFromRequest extracts the session token from r using the same
+// precedence the auth middleware uses:
+//  1. [SessionCookieName] cookie — the primary browser path.
+//  2. Authorization: Bearer <token> header — the API / programmatic path.
+//
+// Returns the token string and viaCookie=true when the cookie was used.
+// Returns an empty token and viaCookie=false when neither source is present.
+// Exported so logout handlers can retrieve the current session token without
+// duplicating the extraction logic.
+func SessionTokenFromRequest(r *http.Request) (token string, viaCookie bool) {
+	if t := sessionCookie(r); t != "" {
+		return t, true
+	}
+	return bearerToken(r), false
+}
+
 // AuthMiddleware authenticates each non-public request and places the resolved
 // [store.Principal] in the request context via [ContextWithPrincipal].
 //
@@ -328,15 +344,8 @@ func AuthMiddleware(validator TokenValidator, isPublic func(*http.Request) bool)
 				return
 			}
 
-			// Cookie-first extraction: prefer the session cookie, fall back to
-			// the Authorization: Bearer header.
-			viaCookie := false
-			token := sessionCookie(r)
-			if token != "" {
-				viaCookie = true
-			} else {
-				token = bearerToken(r)
-			}
+			// Cookie-first extraction via the shared helper (also used by logout handlers).
+			token, viaCookie := SessionTokenFromRequest(r)
 
 			if token == "" {
 				WriteProblem(w, r, Problem{

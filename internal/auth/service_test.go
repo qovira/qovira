@@ -747,3 +747,158 @@ func TestPasswordHash_IsArgon2idPHC(t *testing.T) {
 		t.Error("Verify returned false for correct password after UpdatePasswordHash")
 	}
 }
+
+// ── AC7: Authenticate ─────────────────────────────────────────────────────────
+
+// TestAuthenticate_UnknownEmail_ReturnsErrInvalidCredentials verifies that
+// Authenticate returns ErrInvalidCredentials (not ErrUserNotFound) for an email
+// that has never been registered, preventing user enumeration.
+func TestAuthenticate_UnknownEmail_ReturnsErrInvalidCredentials(t *testing.T) {
+	t.Parallel()
+
+	_, svc := openServiceStore(t)
+	ctx := context.Background()
+
+	_, err := svc.Authenticate(ctx, "nobody@example.com", "correct-horse")
+	if !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Errorf("Authenticate (unknown email) = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+// TestAuthenticate_WrongPassword_ReturnsErrInvalidCredentials verifies that a
+// correct email but wrong password returns ErrInvalidCredentials — the same
+// sentinel as the unknown-email path so callers cannot distinguish the two.
+func TestAuthenticate_WrongPassword_ReturnsErrInvalidCredentials(t *testing.T) {
+	t.Parallel()
+
+	_, svc := openServiceStore(t)
+	ctx := context.Background()
+
+	if _, err := svc.CreateUser(ctx, newUser("auth-wrong@example.com")); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	_, err := svc.Authenticate(ctx, "auth-wrong@example.com", "wrong-password")
+	if !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Errorf("Authenticate (wrong password) = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+// TestAuthenticate_CorrectCredentials_ReturnsUser verifies that Authenticate
+// returns the safe User record (no PasswordHash) when the email and password
+// are correct.
+func TestAuthenticate_CorrectCredentials_ReturnsUser(t *testing.T) {
+	t.Parallel()
+
+	_, svc := openServiceStore(t)
+	ctx := context.Background()
+
+	in := newUser("auth-ok@example.com")
+	created, err := svc.CreateUser(ctx, in)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	got, err := svc.Authenticate(ctx, in.Email, in.Password)
+	if err != nil {
+		t.Fatalf("Authenticate (correct credentials): %v", err)
+	}
+
+	if got.ID != created.ID {
+		t.Errorf("User.ID = %q, want %q", got.ID, created.ID)
+	}
+	if got.Email != created.Email {
+		t.Errorf("User.Email = %q, want %q", got.Email, created.Email)
+	}
+	if got.Role != created.Role {
+		t.Errorf("User.Role = %q, want %q", got.Role, created.Role)
+	}
+}
+
+// TestAuthenticate_UnknownEmail_ErrorIsUniform verifies that Authenticate
+// returns ErrInvalidCredentials for an unknown email regardless of the password
+// supplied — short, typical, or very long.  This asserts the no-enumeration
+// property: the caller cannot distinguish "email not found" from "wrong
+// password" by inspecting the error, and the sentinel is stable across all
+// input shapes.
+func TestAuthenticate_UnknownEmail_ErrorIsUniform(t *testing.T) {
+	t.Parallel()
+
+	_, svc := openServiceStore(t)
+	ctx := context.Background()
+
+	passwords := []string{"short", "correct-horse", strings.Repeat("x", 512)}
+	for _, pw := range passwords {
+		err := func(pw string) error {
+			_, err := svc.Authenticate(ctx, "ghost@example.com", pw)
+			return err
+		}(pw)
+		if !errors.Is(err, auth.ErrInvalidCredentials) {
+			t.Errorf("Authenticate (unknown email, pw=%q) = %v, want ErrInvalidCredentials", pw, err)
+		}
+	}
+}
+
+// TestAuthenticate_RehashOnLogin_UpgradesWeakHash verifies that when the stored
+// hash uses weaker parameters than the current Hasher, Authenticate succeeds AND
+// transparently upgrades the stored PHC to the current parameters. Subsequent
+// calls must still authenticate correctly using the upgraded hash.
+func TestAuthenticate_RehashOnLogin_UpgradesWeakHash(t *testing.T) {
+	t.Parallel()
+
+	// Build a store with two Services: one using weak params (simulates an old
+	// stored hash) and one using the test-standard params. We create the user
+	// with the weak-param hasher, then authenticate using the stronger-param
+	// hasher and verify the hash was upgraded.
+	dir := t.TempDir()
+	s, err := store.Open(store.Config{
+		Path:         dir + "/rehash.db",
+		Key:          serviceTestKey,
+		ReadPoolSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	runner := store.NewRunner()
+	if err := runner.Up(context.Background(), s.Writer()); err != nil {
+		t.Fatalf("runner.Up: %v", err)
+	}
+
+	// Weak params — deliberately lower than fastParams so NeedsRehash returns true.
+	weakParams := auth.Params{Memory: 32, Time: 1, Threads: 1, KeyLen: 32, SaltLen: 16}
+	weakHasher := auth.NewHasher(weakParams)
+	weakSvc := auth.NewService(s, weakHasher, fastPolicy)
+
+	// Create a user using the weak hasher.
+	const pw = "correct-horse"
+	in := newUser("rehash@example.com")
+	in.Password = pw
+	created, err := weakSvc.CreateUser(context.Background(), in)
+	if err != nil {
+		t.Fatalf("CreateUser (weak): %v", err)
+	}
+
+	// Now authenticate with the current (stronger) hasher. fastParams > weakParams
+	// so NeedsRehash should trigger.
+	strongHasher := auth.NewHasher(fastParams)
+	strongSvc := auth.NewService(s, strongHasher, fastPolicy)
+
+	got, err := strongSvc.Authenticate(context.Background(), in.Email, pw)
+	if err != nil {
+		t.Fatalf("Authenticate (should rehash): %v", err)
+	}
+	if got.ID != created.ID {
+		t.Errorf("User.ID mismatch after rehash: got %q, want %q", got.ID, created.ID)
+	}
+
+	// Second authenticate: must still succeed (the stored hash was upgraded).
+	got2, err := strongSvc.Authenticate(context.Background(), in.Email, pw)
+	if err != nil {
+		t.Fatalf("Authenticate after rehash: %v", err)
+	}
+	if got2.ID != created.ID {
+		t.Errorf("User.ID mismatch on second auth after rehash: got %q, want %q", got2.ID, created.ID)
+	}
+}

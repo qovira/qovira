@@ -39,10 +39,16 @@ func newServeCmd() *cobra.Command {
 				return auth.NewAuthenticator(sessions)
 			}
 
+			// authCtor builds the auth HTTP module from the store. DefaultParams,
+			// DefaultPolicy, and DefaultSessionConfig are the production values;
+			// per-instance overrides live in the DB settings layer (a later slice).
+			// logger is forwarded so internal errors are diagnosable server-side.
+			authCtor := app.AuthModuleCtor(auth.DefaultParams, auth.DefaultPolicy, auth.DefaultSessionConfig, logger)
+
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			a, err := app.New(ctx, cfg, logger, newValidator, version)
+			a, err := app.New(ctx, cfg, logger, newValidator, version, authCtor)
 			if err != nil {
 				return err
 			}

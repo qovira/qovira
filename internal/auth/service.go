@@ -21,6 +21,13 @@ import (
 // already exists in the users table.  Use [errors.Is] to check.
 var ErrEmailTaken = errors.New("email already taken")
 
+// ErrInvalidCredentials is returned by [Service.Authenticate] when the email
+// is not found or the password does not match.  The same sentinel is used for
+// both cases deliberately — callers must not be able to distinguish an unknown
+// email from a wrong password (user-enumeration prevention).  Use [errors.Is]
+// to check.
+var ErrInvalidCredentials = errors.New("invalid credentials")
+
 // ErrUserNotFound is returned by [Service.GetUserByEmail], [Service.GetUserByID],
 // [Service.UpdateProfile], and [Service.UpdatePasswordHash] when no matching row
 // exists.  Use [errors.Is] to check.
@@ -265,6 +272,69 @@ func (s *Service) UpdatePasswordHash(ctx context.Context, userID, phc string) er
 		return ErrUserNotFound
 	}
 	return nil
+}
+
+// ── userRowByEmail ────────────────────────────────────────────────────────────
+
+// userRowByEmail fetches the raw [db.User] row (including PasswordHash) for the
+// given email after normalisation.  It is package-private and used only by
+// [Service.Authenticate] so the hash is never reachable through a public method.
+// Returns [sql.ErrNoRows] when no row matches.
+func (s *Service) userRowByEmail(ctx context.Context, email string) (db.User, error) {
+	row, err := s.readQ.GetUserByEmail(ctx, normalizeEmail(email))
+	if err != nil {
+		return db.User{}, err
+	}
+	return row, nil
+}
+
+// ── Authenticate ──────────────────────────────────────────────────────────────
+
+// Authenticate validates email/password credentials and returns the safe [User]
+// on success.  Both the unknown-email and wrong-password paths return the
+// uniform [ErrInvalidCredentials] sentinel — callers must not be able to
+// distinguish them.
+//
+// Order of operations:
+//  1. Normalise email; fetch raw DB row (includes PasswordHash).
+//  2. Unknown email ([sql.ErrNoRows]): call [Hasher.DummyVerify] for constant
+//     KDF cost, then return [ErrInvalidCredentials].
+//  3. Found: [Hasher.Verify] the stored PHC against the supplied password.
+//     Mismatch → [ErrInvalidCredentials].
+//  4. Match: if [Hasher.NeedsRehash] is true, compute a fresh hash and call
+//     [Service.UpdatePasswordHash].  A rehash failure must NOT fail the login —
+//     the original credentials were correct; we simply skip the upgrade.
+//  5. Return [userFromRow](row), nil.
+func (s *Service) Authenticate(ctx context.Context, email, password string) (User, error) {
+	row, err := s.userRowByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Constant-time work so timing cannot reveal whether the email exists.
+			_, _ = s.hasher.DummyVerify(password)
+			return User{}, ErrInvalidCredentials
+		}
+		return User{}, fmt.Errorf("auth: authenticate lookup: %w", err)
+	}
+
+	ok, err := s.hasher.Verify(row.PasswordHash, password)
+	if err != nil {
+		// Malformed PHC stored in the DB — treat as failed auth but log via error
+		// wrapping so infrastructure failures are distinguishable in metrics.
+		return User{}, fmt.Errorf("auth: verify password hash: %w", err)
+	}
+	if !ok {
+		return User{}, ErrInvalidCredentials
+	}
+
+	// Opportunistic rehash: upgrade weak stored params to current params on
+	// login.  A failure must not fail the login — skip silently.
+	if s.hasher.NeedsRehash(row.PasswordHash) {
+		if newPHC, rehashErr := s.hasher.Hash(password); rehashErr == nil {
+			_ = s.UpdatePasswordHash(ctx, row.ID, newPHC)
+		}
+	}
+
+	return userFromRow(row), nil
 }
 
 // ── constraint detection ──────────────────────────────────────────────────────

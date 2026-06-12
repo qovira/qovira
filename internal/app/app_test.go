@@ -266,6 +266,10 @@ func (fakeModule) Tools() []capability.Tool {
 	}
 }
 
+// fakeModuleCtor is a module-constructor form of fakeModule for use with the
+// updated app.New signature that accepts func(*store.Store) app.Module.
+func fakeModuleCtor(_ *store.Store) app.Module { return fakeModule{} }
+
 // TestNew_ModuleSeam_RouteAndAuth verifies that a Module passed to New mounts
 // its route on the shared mux and that auth is live on that route (deny-all
 // validator → 401 with no token, instead of 404 from the catch-all).
@@ -275,7 +279,7 @@ func TestNew_ModuleSeam_RouteAndAuth(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, false)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", fakeModule{})
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", fakeModuleCtor)
 	if err != nil {
 		t.Fatalf("app.New with fakeModule: %v", err)
 	}

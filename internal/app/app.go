@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/qovira/qovira/internal/auth"
+	"github.com/qovira/qovira/internal/authhttp"
 	"github.com/qovira/qovira/internal/capability"
 	"github.com/qovira/qovira/internal/config"
 	"github.com/qovira/qovira/internal/events"
@@ -92,6 +94,30 @@ type App struct {
 	logger      *slog.Logger
 }
 
+// AuthModuleCtor returns a module constructor that builds the auth HTTP module
+// from the store that app.New opens.  Pass it as one of the moduleCtors
+// arguments to [New] in production.
+//
+// params, policy, and cfg are the argon2id, password policy, and session config
+// respectively.  For production, pass [auth.DefaultParams],
+// [auth.DefaultPolicy], and [auth.DefaultSessionConfig].
+//
+// logger is forwarded to the module so internal errors are diagnosable via
+// server-side logs without leaking details to the client.
+func AuthModuleCtor(
+	params auth.Params,
+	policy auth.Policy,
+	cfg auth.SessionConfig,
+	logger *slog.Logger,
+) func(*store.Store) Module {
+	return func(s *store.Store) Module {
+		hasher := auth.NewHasher(params)
+		svc := auth.NewService(s, hasher, policy)
+		sessions := auth.NewSessions(s, cfg)
+		return authhttp.New(svc, sessions, cfg, nil, logger) // nil clock → time.Now
+	}
+}
+
 // New wires the full dependency graph in explicit, top-to-bottom order and returns a ready-to-run *App. It fails fast
 // on any construction error; if the store opened successfully but a later step fails, New closes the store before
 // returning so no resource leaks.
@@ -109,23 +135,30 @@ type App struct {
 //
 //	func(s *store.Store) httpx.TokenValidator { return myFakeValidator{} }
 //
+// moduleCtors is a slice of module constructors — each receives the opened store
+// and returns a [Module].  This two-phase design mirrors newValidator: modules
+// can hold store references without being constructed before the store opens.
+// Pass [AuthModuleCtor] and any other feature-slice ctors for production; tests
+// may pass none (or wrap a [fakeModule]) to exercise wiring in isolation.
+//
 // Order:
 //  1. Open the encrypted store (store.Open).
 //  2. Call newValidator(s) to build the token validator.
-//  3. If cfg.AutoMigrate, run all pending migrations against the write pool.
-//  4. Construct the in-memory event bus.
-//  5. Construct the capability registry.
-//  6. Construct the HTTP router.
-//  7. For each module: mount routes onto the router, register tools in the
+//  3. Build each module by calling moduleCtors[i](s).
+//  4. If cfg.AutoMigrate, run all pending migrations against the write pool.
+//  5. Construct the in-memory event bus.
+//  6. Construct the capability registry.
+//  7. Construct the HTTP router.
+//  8. For each module: mount routes onto the router, register tools in the
 //     registry.
-//  8. Build the HTTP server with the StandardChain middleware.
+//  9. Build the HTTP server with the StandardChain middleware.
 func New(
 	ctx context.Context,
 	cfg *config.Config,
 	logger *slog.Logger,
 	newValidator func(*store.Store) httpx.TokenValidator,
 	version string,
-	modules ...Module,
+	moduleCtors ...func(*store.Store) Module,
 ) (_ *App, err error) {
 	// Step 1: open the encrypted store.
 	s, err := store.Open(store.Config{
@@ -145,7 +178,13 @@ func New(
 	// Step 2: build the token validator now that the store is open.
 	validator := newValidator(s)
 
-	// Step 3: run migrations on boot when requested.
+	// Step 3: build each module now that the store is open.
+	modules := make([]Module, 0, len(moduleCtors))
+	for _, ctor := range moduleCtors {
+		modules = append(modules, ctor(s))
+	}
+
+	// Step 4: run migrations on boot when requested.
 	if cfg.AutoMigrate {
 		runner := store.NewRunner()
 		if err = runner.Up(ctx, s.Writer()); err != nil {
@@ -153,23 +192,22 @@ func New(
 		}
 	}
 
-	// Step 4: in-memory event bus.
+	// Step 5: in-memory event bus.
 	bus := events.NewBus()
 
-	// Step 5: capability registry.
+	// Step 6: capability registry.
 	reg := capability.NewRegistry()
 
-	// Step 6: HTTP router.
+	// Step 7: HTTP router.
 	router := httpx.NewRouter()
 
-	// Step 7: module registration loop. The slice is empty at this point in the project's life — the seam is what
-	// ships. Sibling modules call New with themselves in the variadic list.
+	// Step 8: module registration loop.
 	for _, m := range modules {
 		m.Routes(router)
 		reg.Add(m.Name(), m.Tools())
 	}
 
-	// Step 8: build the HTTP server with the standard middleware chain.
+	// Step 9: build the HTTP server with the standard middleware chain.
 	// The connection context (connCtx) is a cancelable parent given to every request via srv.BaseContext. Cancelling
 	// it before srv.Shutdown is called causes long-lived SSE handlers to return (they select on r.Context().Done()),
 	// so Shutdown drains quickly rather than waiting for the full timeout.
