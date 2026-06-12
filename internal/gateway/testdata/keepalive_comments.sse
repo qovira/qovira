@@ -1,0 +1,11 @@
+: keep-alive
+
+data: {"id":"chatcmpl-6","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"Hey"},"finish_reason":null}]}
+
+: keep-alive
+
+data: {"id":"chatcmpl-6","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+: keep-alive
+
+data: [DONE]
