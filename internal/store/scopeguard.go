@@ -30,6 +30,10 @@ var systemTables = map[string]bool{
 	// settings is system-owned (no user_id column) — instance-global operational config that is readable and writable
 	// by any authenticated subsystem, not bound to a specific user.
 	"settings": true,
+	// users is system-owned (no user_id column) — it is the identity table from which per-user scope is derived.
+	// Every user IS a row in this table, so it cannot itself be scoped by user_id; the system layer (auth.Service)
+	// owns reads and writes to this table directly.
+	"users": true,
 }
 
 // Violation describes a query that is missing a user_id predicate.

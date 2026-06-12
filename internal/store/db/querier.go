@@ -10,12 +10,21 @@ import (
 )
 
 type Querier interface {
+	// Queries for the users identity table.
+	// users is system-owned (no user_id column; it is the identity table from which
+	// per-user scope is derived) and is exempt from the scope guard.  All
+	// SELECT/UPDATE operations are therefore permitted without a user_id predicate.
+	//
+	// Parameters use sqlc named params (@name) per the house convention.
+	CreateUser(ctx context.Context, arg CreateUserParams) error
 	// Delete a setting by key.  No-op when the key does not exist.
 	DeleteSetting(ctx context.Context, settingKey string) error
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
 	GetInstance(ctx context.Context) (Instance, error)
 	// Retrieve a single setting row by its exact key.
 	GetSetting(ctx context.Context, settingKey string) (Setting, error)
+	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
 	// Scoped queries for the user_data exemplar table.
 	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
@@ -32,6 +41,8 @@ type Querier interface {
 	// rather than as a wildcard.
 	ListSettingsByPrefix(ctx context.Context, prefix sql.NullString) ([]Setting, error)
 	ListUserData(ctx context.Context, userID string) ([]UserDatum, error)
+	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
+	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)
 	// Upsert a setting by key.  Inserts a new row or replaces value and
 	// updated_at when the key already exists.
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error

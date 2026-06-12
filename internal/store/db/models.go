@@ -15,6 +15,19 @@ type Setting struct {
 	UpdatedAt  string
 }
 
+type User struct {
+	ID           string
+	Email        string
+	DisplayName  string
+	PasswordHash string
+	Role         string
+	Timezone     string
+	Locale       string
+	Language     string
+	CreatedAt    string
+	UpdatedAt    string
+}
+
 type UserDatum struct {
 	ID        string
 	UserID    string
