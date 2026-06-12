@@ -9,10 +9,31 @@ type Instance struct {
 	CreatedAt string
 }
 
+type Session struct {
+	ID         string
+	UserID     string
+	TokenHash  []byte
+	CreatedAt  string
+	LastUsedAt string
+}
+
 type Setting struct {
 	SettingKey string
 	Value      string
 	UpdatedAt  string
+}
+
+type User struct {
+	ID           string
+	Email        string
+	DisplayName  string
+	PasswordHash string
+	Role         string
+	Timezone     string
+	Locale       string
+	Language     string
+	CreatedAt    string
+	UpdatedAt    string
 }
 
 type UserDatum struct {

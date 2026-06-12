@@ -47,6 +47,10 @@ func (denyAllValidator) ValidateToken(_ context.Context, _ string) (store.Princi
 	return store.Principal{}, errors.New("token validation not yet implemented")
 }
 
+// denyAllCtor is a newValidator constructor that always returns a denyAllValidator.
+// Use it in tests that exercise app.New without needing real token resolution.
+func denyAllCtor(_ *store.Store) httpx.TokenValidator { return denyAllValidator{} }
+
 // cleanupApp shuts down a in its cleanup hook without leaking goroutines.
 func cleanupApp(t *testing.T, a *app.App) {
 	t.Helper()
@@ -72,7 +76,7 @@ func TestNew_FailFast_EmptyKey(t *testing.T) {
 		AutoMigrate: false,
 	}
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
 	if err == nil {
 		t.Fatal("app.New returned nil error for empty MasterKey; want non-nil")
 	}
@@ -89,7 +93,7 @@ func TestNew_Success_AutoMigrateTrue(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
 	if err != nil {
 		t.Fatalf("app.New: unexpected error: %v", err)
 	}
@@ -112,7 +116,7 @@ func TestNew_Healthz_Returns200AndVersion(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, wantVersion)
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, wantVersion)
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -150,7 +154,7 @@ func TestNew_ProtectedRoute_NoToken_Returns401(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -178,7 +182,7 @@ func TestNew_ProtectedRoute_WithBearerToken_Returns401(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, false)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -207,7 +211,7 @@ func TestRun_GracefulShutdown(t *testing.T) {
 	cfg := testConfig(t, dir, false)
 	cfg.HTTPAddr = "127.0.0.1:0"
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -262,6 +266,10 @@ func (fakeModule) Tools() []capability.Tool {
 	}
 }
 
+// fakeModuleCtor is a module-constructor form of fakeModule for use with the
+// updated app.New signature that accepts func(*store.Store) app.Module.
+func fakeModuleCtor(_ *store.Store) app.Module { return fakeModule{} }
+
 // TestNew_ModuleSeam_RouteAndAuth verifies that a Module passed to New mounts
 // its route on the shared mux and that auth is live on that route (deny-all
 // validator → 401 with no token, instead of 404 from the catch-all).
@@ -271,7 +279,7 @@ func TestNew_ModuleSeam_RouteAndAuth(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, false)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test", fakeModule{})
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", fakeModuleCtor)
 	if err != nil {
 		t.Fatalf("app.New with fakeModule: %v", err)
 	}
@@ -338,7 +346,7 @@ func TestNew_AutoMigrate_True(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
 	if err != nil {
 		t.Fatalf("app.New(AutoMigrate=true): %v", err)
 	}
@@ -360,7 +368,7 @@ func TestNew_AutoMigrate_False(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, false)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
 	if err != nil {
 		t.Fatalf("app.New(AutoMigrate=false): %v", err)
 	}
@@ -381,7 +389,7 @@ func TestNew_AutoMigrate_ReaderSeesSchema(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -400,7 +408,7 @@ func TestNew_DBPath(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, false)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllValidator{}, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}

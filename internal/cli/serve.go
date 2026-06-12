@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"context"
-	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,20 +8,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qovira/qovira/internal/app"
+	"github.com/qovira/qovira/internal/auth"
 	"github.com/qovira/qovira/internal/config"
 	"github.com/qovira/qovira/internal/httpx"
 	"github.com/qovira/qovira/internal/logging"
 	"github.com/qovira/qovira/internal/store"
 )
-
-// denyAllValidator is the temporary TokenValidator injected until the Identity & Auth slice lands with a concrete
-// implementation. Every token validation attempt returns a non-nil error, causing AuthMiddleware to respond 401 for
-// all protected routes. Replace this injection point when the real validator is available.
-type denyAllValidator struct{}
-
-func (denyAllValidator) ValidateToken(_ context.Context, _ string) (store.Principal, error) {
-	return store.Principal{}, errors.New("token validation not yet implemented")
-}
 
 func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -41,12 +31,24 @@ func newServeCmd() *cobra.Command {
 
 			logger := logging.NewLogger(os.Stdout, *cfg)
 
-			var validator httpx.TokenValidator = denyAllValidator{}
+			// newValidator builds the real token validator once the store is open.
+			// Session config is wired via DefaultSessionConfig (per-instance tuning
+			// lives in the DB config layer, which is a later slice).
+			newValidator := func(s *store.Store) httpx.TokenValidator {
+				sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
+				return auth.NewAuthenticator(sessions)
+			}
+
+			// authCtor builds the auth HTTP module from the store. DefaultParams,
+			// DefaultPolicy, and DefaultSessionConfig are the production values;
+			// per-instance overrides live in the DB settings layer (a later slice).
+			// logger is forwarded so internal errors are diagnosable server-side.
+			authCtor := app.AuthModuleCtor(auth.DefaultParams, auth.DefaultPolicy, auth.DefaultSessionConfig, logger)
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			a, err := app.New(ctx, cfg, logger, validator, version)
+			a, err := app.New(ctx, cfg, logger, newValidator, version, authCtor)
 			if err != nil {
 				return err
 			}
