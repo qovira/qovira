@@ -51,8 +51,8 @@ func tableExists(t *testing.T, db *sql.DB, name string) bool {
 }
 
 // TestRunnerUp_CreatesSchema verifies that Runner.Up applies migrations and
-// creates the expected schema objects (instance, user_data, settings, users, and
-// the goose version table).
+// creates the expected schema objects (instance, user_data, settings, users,
+// sessions, and the goose version table).
 func TestRunnerUp_CreatesSchema(t *testing.T) {
 	t.Parallel()
 
@@ -75,16 +75,19 @@ func TestRunnerUp_CreatesSchema(t *testing.T) {
 	if !tableExists(t, s.Writer(), "users") {
 		t.Error("users table not found after Up")
 	}
+	if !tableExists(t, s.Writer(), "sessions") {
+		t.Error("sessions table not found after Up")
+	}
 	if !tableExists(t, s.Writer(), "goose_db_version") {
 		t.Error("goose_db_version table not found after Up")
 	}
 }
 
 // TestRunnerDown_RevertsSchema verifies that Runner.Down rolls back the last
-// applied migration. With four migrations in the chain (00001_instance,
-// 00002_scoping_exemplar, 00003_settings, 00004_users), a single Down call
-// reverts migration 4 — dropping the users table — while leaving migrations 1,
-// 2, and 3 (instance, user_data, settings) intact.
+// applied migration. With five migrations in the chain (00001_instance,
+// 00002_scoping_exemplar, 00003_settings, 00004_users, 00005_sessions), a single
+// Down call reverts migration 5 — dropping the sessions table — while leaving
+// migrations 1–4 (instance, user_data, settings, users) intact.
 func TestRunnerDown_RevertsSchema(t *testing.T) {
 	t.Parallel()
 
@@ -94,26 +97,29 @@ func TestRunnerDown_RevertsSchema(t *testing.T) {
 	if err := runner.Up(context.Background(), s.Writer()); err != nil {
 		t.Fatalf("Runner.Up: %v", err)
 	}
-	if !tableExists(t, s.Writer(), "users") {
-		t.Fatal("users table must exist before Down")
+	if !tableExists(t, s.Writer(), "sessions") {
+		t.Fatal("sessions table must exist before Down")
 	}
 
 	if err := runner.Down(context.Background(), s.Writer()); err != nil {
 		t.Fatalf("Runner.Down: %v", err)
 	}
-	// Migration 4 (users) must be gone.
-	if tableExists(t, s.Writer(), "users") {
-		t.Error("users table still present after Down; expected it to be dropped")
+	// Migration 5 (sessions) must be gone.
+	if tableExists(t, s.Writer(), "sessions") {
+		t.Error("sessions table still present after Down; expected it to be dropped")
 	}
-	// Migrations 1, 2, and 3 (instance, user_data, settings) must still be applied.
+	// Migrations 1–4 (instance, user_data, settings, users) must still be applied.
 	if !tableExists(t, s.Writer(), "instance") {
-		t.Error("instance table absent after single Down; only migration 4 should have been rolled back")
+		t.Error("instance table absent after single Down; only migration 5 should have been rolled back")
 	}
 	if !tableExists(t, s.Writer(), "user_data") {
-		t.Error("user_data table absent after single Down; only migration 4 should have been rolled back")
+		t.Error("user_data table absent after single Down; only migration 5 should have been rolled back")
 	}
 	if !tableExists(t, s.Writer(), "settings") {
-		t.Error("settings table absent after single Down; only migration 4 should have been rolled back")
+		t.Error("settings table absent after single Down; only migration 5 should have been rolled back")
+	}
+	if !tableExists(t, s.Writer(), "users") {
+		t.Error("users table absent after single Down; only migration 5 should have been rolled back")
 	}
 }
 
@@ -175,12 +181,12 @@ func TestRunnerUpDownStatus_RoundTrip(t *testing.T) {
 		t.Errorf("after Up: expected applied state in status output, got:\n%s", afterUp.String())
 	}
 
-	// Down: reverts migration 4 (users). Migrations 1-3 (instance, user_data, settings) stay.
+	// Down: reverts migration 5 (sessions). Migrations 1-4 (instance, user_data, settings, users) stay.
 	if err := runner.Down(ctx, s.Writer()); err != nil {
 		t.Fatalf("Runner.Down: %v", err)
 	}
 
-	// Status must show at least one pending migration (migration 4 was rolled back).
+	// Status must show at least one pending migration (migration 5 was rolled back).
 	var afterDown strings.Builder
 	if err := runner.Status(ctx, s.Writer(), &afterDown); err != nil {
 		t.Fatalf("Status after Down: %v", err)
@@ -188,19 +194,22 @@ func TestRunnerUpDownStatus_RoundTrip(t *testing.T) {
 	if !strings.Contains(afterDown.String(), string(goose.StatePending)) {
 		t.Errorf("after Down: expected pending state in status output, got:\n%s", afterDown.String())
 	}
-	// Migration 4's table (users) must be absent.
-	if tableExists(t, s.Writer(), "users") {
-		t.Error("users table must be absent after Down (migration 4 rolled back)")
+	// Migration 5's table (sessions) must be absent.
+	if tableExists(t, s.Writer(), "sessions") {
+		t.Error("sessions table must be absent after Down (migration 5 rolled back)")
 	}
-	// Migrations 1, 2, and 3 (instance, user_data, settings) must remain applied.
+	// Migrations 1–4 (instance, user_data, settings, users) must remain applied.
 	if !tableExists(t, s.Writer(), "instance") {
-		t.Error("instance table must remain present — only migration 4 was rolled back")
+		t.Error("instance table must remain present — only migration 5 was rolled back")
 	}
 	if !tableExists(t, s.Writer(), "user_data") {
-		t.Error("user_data table must remain present — only migration 4 was rolled back")
+		t.Error("user_data table must remain present — only migration 5 was rolled back")
 	}
 	if !tableExists(t, s.Writer(), "settings") {
-		t.Error("settings table must remain present — only migration 4 was rolled back")
+		t.Error("settings table must remain present — only migration 5 was rolled back")
+	}
+	if !tableExists(t, s.Writer(), "users") {
+		t.Error("users table must remain present — only migration 5 was rolled back")
 	}
 }
 

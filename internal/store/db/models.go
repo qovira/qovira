@@ -9,6 +9,14 @@ type Instance struct {
 	CreatedAt string
 }
 
+type Session struct {
+	ID         string
+	UserID     string
+	TokenHash  []byte
+	CreatedAt  string
+	LastUsedAt string
+}
+
 type Setting struct {
 	SettingKey string
 	Value      string

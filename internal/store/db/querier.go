@@ -10,6 +10,16 @@ import (
 )
 
 type Querier interface {
+	BumpSessionLastUsedByID(ctx context.Context, arg BumpSessionLastUsedByIDParams) (int64, error)
+	// Queries for the sessions table.
+	// sessions is per-user data (it has a user_id column and belongs to individual users), but
+	// some queries operate on a token_hash key (the bearer capability itself) rather than a
+	// user_id predicate.  Those queries carry a per-query scopeguard exemption with an explicit
+	// reason.  The bump query is keyed by id+user_id and needs no annotation.
+	// INSERT is always scopeguard-exempt.
+	//
+	// Parameters use sqlc named params (@name) per the house convention.
+	CreateSession(ctx context.Context, arg CreateSessionParams) error
 	// Queries for the users identity table.
 	// users is system-owned (no user_id column; it is the identity table from which
 	// per-user scope is derived) and is exempt from the scope guard.  All
@@ -17,10 +27,20 @@ type Querier interface {
 	//
 	// Parameters use sqlc named params (@name) per the house convention.
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	DeleteOtherSessionsForUser(ctx context.Context, arg DeleteOtherSessionsForUserParams) (int64, error)
+	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
+	// itself authorizes access; this path is used for single-session logout and best-effort
+	// delete-on-expiry, both keyed by the bearer token before a user_id is available.
+	DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error)
+	DeleteSessionsForUser(ctx context.Context, userID string) (int64, error)
 	// Delete a setting by key.  No-op when the key does not exist.
 	DeleteSetting(ctx context.Context, settingKey string) error
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
 	GetInstance(ctx context.Context) (Instance, error)
+	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
+	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
+	// predicate is possible or meaningful at this lookup stage.
+	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (Session, error)
 	// Retrieve a single setting row by its exact key.
 	GetSetting(ctx context.Context, settingKey string) (Setting, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
@@ -41,6 +61,10 @@ type Querier interface {
 	// rather than as a wildcard.
 	ListSettingsByPrefix(ctx context.Context, prefix sql.NullString) ([]Setting, error)
 	ListUserData(ctx context.Context, userID string) ([]UserDatum, error)
+	// scopeguard:allow-unscoped: system housekeeping; the scheduler purges across all users by
+	// TTL cutoffs (idle and absolute), so there is no meaningful user context available and a
+	// user_id predicate would prevent cross-user expiry from working.
+	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)
 	// Upsert a setting by key.  Inserts a new row or replaces value and
