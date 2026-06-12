@@ -33,17 +33,20 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// TokenValidator is the seam for token validation. The concrete implementation is provided by the Identity & Auth slice; tests inject a fake.
+// TokenValidator is the seam for token validation. The concrete implementation is provided by the Identity & Auth
+// slice; tests inject a fake.
 type TokenValidator interface {
 	ValidateToken(ctx context.Context, token string) (store.Principal, error)
 }
 
-// ContextWithPrincipal returns a new context carrying the given Principal. The auth middleware stores the authenticated identity here; handlers and downstream layers retrieve it with PrincipalFromContext.
+// ContextWithPrincipal returns a new context carrying the given Principal. The auth middleware stores the
+// authenticated identity here; handlers and downstream layers retrieve it with PrincipalFromContext.
 func ContextWithPrincipal(ctx context.Context, p store.Principal) context.Context {
 	return context.WithValue(ctx, principalKey, p)
 }
 
-// PrincipalFromContext retrieves the Principal stored by ContextWithPrincipal. ok is false when no Principal has been placed in the context (e.g. the route is public or auth was not run).
+// PrincipalFromContext retrieves the Principal stored by ContextWithPrincipal. ok is false when no Principal has been
+// placed in the context (e.g. the route is public or auth was not run).
 func PrincipalFromContext(ctx context.Context) (store.Principal, bool) {
 	p, ok := ctx.Value(principalKey).(store.Principal)
 	return p, ok
@@ -71,16 +74,22 @@ func StandardChain(logger *slog.Logger, validator TokenValidator, isPublic func(
 	}
 }
 
-// RecoverMiddleware is the outermost wrapper. It catches any panic that escapes inner middleware or the route handler, logs the full detail and stack trace server-side via logger, and writes a generic 500 problem+json response to the client. The panic value and stack are never sent to the client.
+// RecoverMiddleware is the outermost wrapper. It catches any panic that escapes inner middleware or the route handler,
+// logs the full detail and stack trace server-side via logger, and writes a generic 500 problem+json response to the
+// client. The panic value and stack are never sent to the client.
 //
-// Because request-id runs INSIDE recover, the Request-Id response header may already be set on the ResponseWriter when the panic unwinds — this is intentional (see RequestIDMiddleware doc). If it is set, the 500 response carries it; if not (panic in recover itself, or recover is used without request-id), the header is absent but the body still carries requestId from context (or the unknownRequestID sentinel).
+// Because request-id runs INSIDE recover, the Request-Id response header may already be set on the ResponseWriter when
+// the panic unwinds — this is intentional (see RequestIDMiddleware doc). If it is set, the 500 response carries it; if
+// not (panic in recover itself, or recover is used without request-id), the header is absent but the body still
+// carries requestId from context (or the unknownRequestID sentinel).
 func RecoverMiddleware(logger *slog.Logger) Middleware {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Wrap the writer so the deferred recovery can tell whether the response was already started. Writing a problem body on top of a partially-sent response would corrupt it.
+			// Wrap the writer so the deferred recovery can tell whether the response was already started. Writing a
+			// problem body on top of a partially-sent response would corrupt it.
 			guard := &responseGuard{ResponseWriter: w}
 			defer func() {
 				if v := recover(); v != nil {
@@ -92,7 +101,9 @@ func RecoverMiddleware(logger *slog.Logger) Middleware {
 						"path", r.URL.Path,
 					)
 					if guard.committed {
-						// The handler already began writing before it panicked; the status line is on the wire and the body is partial. We cannot turn it into a clean 500 — log and let the connection close with a truncated response rather than splice a JSON problem into the middle of it.
+						// The handler already began writing before it panicked; the status line is on the wire and the
+						// body is partial. We cannot turn it into a clean 500 — log and let the connection close with a
+						// truncated response rather than splice a JSON problem into the middle of it.
 						logger.Error("httpx: panic after response was partially written; cannot send error body",
 							"method", r.Method,
 							"path", r.URL.Path,
@@ -112,7 +123,9 @@ func RecoverMiddleware(logger *slog.Logger) Middleware {
 	}
 }
 
-// responseGuard wraps an http.ResponseWriter to record whether the response has been committed (a status line or any body byte written). RecoverMiddleware uses it to avoid writing an error body on top of a response a panicking handler had already begun.
+// responseGuard wraps an http.ResponseWriter to record whether the response has been committed (a status line or any
+// body byte written). RecoverMiddleware uses it to avoid writing an error body on top of a response a panicking handler
+// had already begun.
 type responseGuard struct {
 	http.ResponseWriter
 	committed bool
@@ -130,9 +143,13 @@ func (g *responseGuard) Write(b []byte) (int, error) {
 
 // RequestIDMiddleware propagates or generates a per-request correlation ID.
 //
-// If the incoming request carries a "Request-Id" header, that value is reused; otherwise a new random-hex ID is generated. The ID is stored in the request context via ContextWithRequestID so WriteProblem and the log middleware can read it.
+// If the incoming request carries a "Request-Id" header, that value is reused; otherwise a new random-hex ID is
+// generated. The ID is stored in the request context via ContextWithRequestID so WriteProblem and the log middleware
+// can read it.
 //
-// Crucially, both the "Request-Id" and "traceparent" response headers are set on the ResponseWriter BEFORE calling next.ServeHTTP. This ensures that even when a downstream panic unwinds back to RecoverMiddleware (which sits outermost), those headers are already present on the wire — the recovered 500 still carries them.
+// Crucially, both the "Request-Id" and "traceparent" response headers are set on the ResponseWriter BEFORE calling
+// next.ServeHTTP. This ensures that even when a downstream panic unwinds back to RecoverMiddleware (which sits
+// outermost), those headers are already present on the wire — the recovered 500 still carries them.
 //
 // Header names:
 //   - "Request-Id" (plain, per the HTTP house guide — never "X-Request-Id")
@@ -145,23 +162,27 @@ func RequestIDMiddleware() Middleware {
 				id = generateHex(16) // 128 bits → 32 hex chars
 			}
 
-			// Derive a W3C traceparent. Use a fresh random trace-id so every request appears as its own root trace (until we have real OTel propagation). The span-id is also random.
+			// Derive a W3C traceparent. Use a fresh random trace-id so every request appears as its own root trace
+			// (until we have real OTel propagation). The span-id is also random.
 			traceID := generateHex(16) // 128 bits → 32 hex
 			spanID := generateHex(8)   // 64 bits → 16 hex
 			traceparent := "00-" + traceID + "-" + spanID + "-01"
 
-			// Set response headers BEFORE calling next so that if next panics, these headers are already committed to the ResponseWriter header map (recover can then write the 500 body safely).
+			// Set response headers BEFORE calling next so that if next panics, these headers are already committed to
+			// the ResponseWriter header map (recover can then write the 500 body safely).
 			w.Header().Set("Request-Id", id)
 			w.Header().Set("traceparent", traceparent)
 
-			// Store in context so downstream layers (logging, WriteProblem) can read the correlation ID without touching response headers.
+			// Store in context so downstream layers (logging, WriteProblem) can read the correlation ID without
+			// touching response headers.
 			ctx := ContextWithRequestID(r.Context(), id)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-// generateHex returns n random bytes encoded as a lowercase hex string (2n chars). It panics if the OS entropy source is unavailable — that is a fatal system error.
+// generateHex returns n random bytes encoded as a lowercase hex string (2n chars). It panics if the OS entropy source
+// is unavailable — that is a fatal system error.
 func generateHex(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -170,7 +191,8 @@ func generateHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// statusRecorder wraps an http.ResponseWriter to capture the first status code written via WriteHeader (or the implicit 200 on first Write). Used by RequestLogMiddleware so it can log the status after the handler returns.
+// statusRecorder wraps an http.ResponseWriter to capture the first status code written via WriteHeader (or the implicit
+// 200 on first Write). Used by RequestLogMiddleware so it can log the status after the handler returns.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -207,7 +229,8 @@ func (r *statusRecorder) statusCode() int {
 //   - duration — wall-clock duration in milliseconds
 //   - requestId — correlation ID from context (set by RequestIDMiddleware)
 //
-// It intentionally omits query strings, request headers (including Authorization), response headers, and body content to avoid logging PII or secrets. The log level is Info for 1xx–4xx and Error for 5xx.
+// It intentionally omits query strings, request headers (including Authorization), response headers, and body content
+// to avoid logging PII or secrets. The log level is Info for 1xx–4xx and Error for 5xx.
 func RequestLogMiddleware(logger *slog.Logger) Middleware {
 	if logger == nil {
 		logger = slog.Default()
@@ -246,7 +269,8 @@ func RequestLogMiddleware(logger *slog.Logger) Middleware {
 //   - Content-Security-Policy: conservative default-src 'self' with frame-ancestors 'none'
 //   - Referrer-Policy: strict-origin-when-cross-origin
 //
-// These are set before calling next so that handlers can override them for specific responses if needed (e.g. a download endpoint that needs a different frame policy). Full CSP hardening is deferred to the v0.2 security slice.
+// These are set before calling next so that handlers can override them for specific responses if needed (e.g. a
+// download endpoint that needs a different frame policy). Full CSP hardening is deferred to the v0.2 security slice.
 func SecurityHeadersMiddleware() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -258,13 +282,17 @@ func SecurityHeadersMiddleware() Middleware {
 	}
 }
 
-// AuthMiddleware validates the Bearer token from the Authorization header and, on success, places the resolved store.Principal in the request context via ContextWithPrincipal.
+// AuthMiddleware validates the Bearer token from the Authorization header and, on success, places the resolved
+// store.Principal in the request context via ContextWithPrincipal.
 //
-// Routes for which isPublic(r) returns true are passed through without any token check — no Principal is placed in context for those routes.
+// Routes for which isPublic(r) returns true are passed through without any token check — no Principal is placed in
+// context for those routes.
 //
-// On missing or invalid token for a non-public route, the middleware writes a 401 problem+json response and does not call next.
+// On missing or invalid token for a non-public route, the middleware writes a 401 problem+json response and does not
+// call next.
 //
-// The concrete token validation is deferred to the Identity & Auth slice; this middleware only defines the seam (TokenValidator interface) and wires it in.
+// The concrete token validation is deferred to the Identity & Auth slice; this middleware only defines the seam
+// (TokenValidator interface) and wires it in.
 func AuthMiddleware(validator TokenValidator, isPublic func(*http.Request) bool) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -301,14 +329,16 @@ func AuthMiddleware(validator TokenValidator, isPublic func(*http.Request) bool)
 	}
 }
 
-// bearerToken extracts the token value from an "Authorization: Bearer <token>" header. Returns an empty string if the header is absent, empty, or does not start with "Bearer ".
+// bearerToken extracts the token value from an "Authorization: Bearer <token>" header. Returns an empty string if the
+// header is absent, empty, or does not start with "Bearer ".
 func bearerToken(r *http.Request) string {
 	const prefix = "Bearer "
 	v := r.Header.Get("Authorization")
 	if len(v) <= len(prefix) {
 		return ""
 	}
-	// RFC 7235: the auth-scheme token is case-insensitive, so accept "bearer" and any other casing of the scheme name.
+	// RFC 7235: the auth-scheme token is case-insensitive, so accept "bearer" and any other casing of the scheme
+	// name.
 	if !strings.EqualFold(v[:len(prefix)], prefix) {
 		return ""
 	}

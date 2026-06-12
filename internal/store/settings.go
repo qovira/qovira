@@ -2,9 +2,12 @@ package store
 
 // Package store — settings accessor.
 //
-// SettingsStore is the typed accessor for the settings table, which holds instance-global operational configuration (model endpoints, per-role overrides, SMTP settings, etc.).  It is obtained via (*Store).Settings().
+// SettingsStore is the typed accessor for the settings table, which holds instance-global operational configuration
+// (model endpoints, per-role overrides, SMTP settings, etc.).  It is obtained via (*Store).Settings().
 //
-// Security note: the master encryption key (store.Config.Key) is boot-only configuration and is NEVER stored in the database.  SettingsStore has no path to that value — it is a plain string KV over the application-level settings table, which is entirely separate from the SQLCipher key material.
+// Security note: the master encryption key (store.Config.Key) is boot-only configuration and is NEVER stored in the
+// database.  SettingsStore has no path to that value — it is a plain string KV over the application-level settings
+// table, which is entirely separate from the SQLCipher key material.
 
 import (
 	"context"
@@ -16,7 +19,8 @@ import (
 	"github.com/qovira/qovira/internal/store/db"
 )
 
-// likeEscaper escapes the LIKE metacharacters ('\', '%', '_') so a value can be matched literally by a "LIKE … ESCAPE '\'" predicate. The backslash itself must be escaped first.
+// likeEscaper escapes the LIKE metacharacters ('\', '%', '_') so a value can be matched literally by a
+// "LIKE … ESCAPE '\'" predicate. The backslash itself must be escaped first.
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 // SettingEntry is a single setting row returned by ByPrefix.
@@ -25,7 +29,8 @@ type SettingEntry struct {
 	Value string
 }
 
-// SettingsStore provides typed read/write access to the settings table. Reads use the store's read pool; writes use the write pool — consistent with the existing ScopedQueries pattern.
+// SettingsStore provides typed read/write access to the settings table. Reads use the store's read pool; writes use
+// the write pool — consistent with the existing ScopedQueries pattern.
 //
 // Obtain a *SettingsStore via (*Store).Settings().
 type SettingsStore struct {
@@ -33,7 +38,8 @@ type SettingsStore struct {
 	writeQ *db.Queries
 }
 
-// Settings returns a *SettingsStore backed by the store's connection pools. The returned value is cheap to create — it wraps two existing *db.Queries values and holds no state of its own.
+// Settings returns a *SettingsStore backed by the store's connection pools. The returned value is cheap to create —
+// it wraps two existing *db.Queries values and holds no state of its own.
 func (s *Store) Settings() *SettingsStore {
 	return &SettingsStore{
 		readQ:  db.New(s.readDB),
@@ -41,7 +47,8 @@ func (s *Store) Settings() *SettingsStore {
 	}
 }
 
-// Get retrieves the value for key.  It returns (value, true, nil) when the key exists and ("", false, nil) when it does not.  A non-nil error indicates a real database failure.
+// Get retrieves the value for key.  It returns (value, true, nil) when the key exists and ("", false, nil) when it
+// does not.  A non-nil error indicates a real database failure.
 func (ss *SettingsStore) Get(ctx context.Context, key string) (string, bool, error) {
 	row, err := ss.readQ.GetSetting(ctx, key)
 	if err != nil {
@@ -72,7 +79,10 @@ func (ss *SettingsStore) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// ByPrefix returns all settings whose key starts with prefix, ordered by key. An empty prefix returns all settings.  The returned slice is nil (not empty) when no rows match. The prefix is matched literally: any LIKE metacharacters ('%', '_') it contains are escaped, so a prefix such as "model.api_" matches only that literal stem and never bleeds into a sibling key space.
+// ByPrefix returns all settings whose key starts with prefix, ordered by key. An empty prefix returns all settings.
+// The returned slice is nil (not empty) when no rows match. The prefix is matched literally: any LIKE metacharacters
+// ('%', '_') it contains are escaped, so a prefix such as "model.api_" matches only that literal stem and never bleeds
+// into a sibling key space.
 func (ss *SettingsStore) ByPrefix(ctx context.Context, prefix string) ([]SettingEntry, error) {
 	rows, err := ss.readQ.ListSettingsByPrefix(ctx, sql.NullString{
 		String: likeEscaper.Replace(prefix),
@@ -91,7 +101,8 @@ func (ss *SettingsStore) ByPrefix(ctx context.Context, prefix string) ([]Setting
 	return entries, nil
 }
 
-// Namespace returns a *SettingsNamespace whose Get/Set/Delete/ByPrefix methods transparently prepend "<prefix>." to every key, so that independent subsystems can each own their own key space without colliding.
+// Namespace returns a *SettingsNamespace whose Get/Set/Delete/ByPrefix methods transparently prepend "<prefix>." to
+// every key, so that independent subsystems can each own their own key space without colliding.
 //
 // Example:
 //
@@ -102,7 +113,8 @@ func (ss *SettingsStore) Namespace(prefix string) *SettingsNamespace {
 	return &SettingsNamespace{parent: ss, prefix: prefix}
 }
 
-// SettingsNamespace wraps a *SettingsStore and transparently prefixes every key with "<prefix>.".  Callers interact with logical (unprefixed) key names; the prefix is an implementation detail.
+// SettingsNamespace wraps a *SettingsStore and transparently prefixes every key with "<prefix>.".  Callers interact
+// with logical (unprefixed) key names; the prefix is an implementation detail.
 type SettingsNamespace struct {
 	parent *SettingsStore
 	prefix string
@@ -131,7 +143,8 @@ func (ns *SettingsNamespace) Delete(ctx context.Context, logicalKey string) erro
 	return ns.parent.Delete(ctx, ns.fullKey(logicalKey))
 }
 
-// ByPrefix returns all settings within this namespace whose logical key starts with subPrefix.  An empty subPrefix returns all settings in the namespace.
+// ByPrefix returns all settings within this namespace whose logical key starts with subPrefix.  An empty subPrefix
+// returns all settings in the namespace.
 //
 // The returned SettingEntry.Key values are the logical (non-namespaced) key names; the namespace prefix is stripped.
 func (ns *SettingsNamespace) ByPrefix(ctx context.Context, subPrefix string) ([]SettingEntry, error) {
@@ -140,7 +153,8 @@ func (ns *SettingsNamespace) ByPrefix(ctx context.Context, subPrefix string) ([]
 	if err != nil {
 		return nil, err
 	}
-	// Strip the namespace prefix from the returned keys so callers see only the logical key name (the part after "<prefix>.").
+	// Strip the namespace prefix from the returned keys so callers see only the logical key name (the part after
+	// "<prefix>.").
 	strip := ns.prefix + "."
 	for i := range rows {
 		rows[i].Key = strings.TrimPrefix(rows[i].Key, strip)

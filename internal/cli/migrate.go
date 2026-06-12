@@ -32,7 +32,8 @@ func newMigrateCmd() *cobra.Command {
 	return migrate
 }
 
-// migrateConfig loads configuration from the --config flag on cmd (or its parent, since the flag is persistent) and opens the store. The caller is responsible for closing the returned *store.Store.
+// migrateConfig loads configuration from the --config flag on cmd (or its parent, since the flag is persistent) and
+// opens the store. The caller is responsible for closing the returned *store.Store.
 func migrateConfig(cmd *cobra.Command) (*config.Config, *store.Store, error) {
 	cfgPath, _ := cmd.Flags().GetString("config")
 

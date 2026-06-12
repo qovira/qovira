@@ -16,7 +16,9 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// denyAllValidator is the temporary TokenValidator injected until the Identity & Auth slice lands with a concrete implementation. Every token validation attempt returns a non-nil error, causing AuthMiddleware to respond 401 for all protected routes. Replace this injection point when the real validator is available.
+// denyAllValidator is the temporary TokenValidator injected until the Identity & Auth slice lands with a concrete
+// implementation. Every token validation attempt returns a non-nil error, causing AuthMiddleware to respond 401 for
+// all protected routes. Replace this injection point when the real validator is available.
 type denyAllValidator struct{}
 
 func (denyAllValidator) ValidateToken(_ context.Context, _ string) (store.Principal, error) {

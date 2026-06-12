@@ -22,6 +22,7 @@ linters:
     - unconvert
     - gosec
     - nilnil
+    - modernize
 
   exclusions:
     presets:

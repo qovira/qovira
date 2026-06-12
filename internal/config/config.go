@@ -1,8 +1,11 @@
-// Package config implements an explicit env-first configuration loader for Qovira's boot configuration — the settings needed before the encrypted database opens. It cannot live in the DB; this package owns it.
+// Package config implements an explicit env-first configuration loader for Qovira's boot configuration — the settings
+// needed before the encrypted database opens. It cannot live in the DB; this package owns it.
 //
 // Precedence: env > optional TOML file > built-in defaults.
 //
-// Secrets (MasterKey, AdminPassword) are env-only — they are never read from the TOML file. Both support _FILE indirection: set QOVIRA_MASTER_KEY_FILE (or QOVIRA_ADMIN_PASSWORD_FILE) to a path whose contents are used as the secret. Setting both the direct env var and its _FILE counterpart is an error.
+// Secrets (MasterKey, AdminPassword) are env-only — they are never read from the TOML file. Both support _FILE
+// indirection: set QOVIRA_MASTER_KEY_FILE (or QOVIRA_ADMIN_PASSWORD_FILE) to a path whose contents are used as the
+// secret. Setting both the direct env var and its _FILE counterpart is an error.
 //
 // Master-key minimum length: 16 bytes.
 package config
@@ -19,10 +22,13 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// masterKeyMinLen is the minimum acceptable length for the master key passphrase. 16 bytes is the floor; operators are encouraged to use longer passphrases.
+// masterKeyMinLen is the minimum acceptable length for the master key passphrase. 16 bytes is the floor; operators are
+// encouraged to use longer passphrases.
 const masterKeyMinLen = 16
 
-// Secret is a string type that structurally prevents its value from leaking via fmt verbs or slog. All fmt.Stringer, fmt.GoStringer, and slog.LogValuer methods return a redacted placeholder, so the actual value never appears in log lines or error messages regardless of calling code discipline.
+// Secret is a string type that structurally prevents its value from leaking via fmt verbs or slog. All fmt.Stringer,
+// fmt.GoStringer, and slog.LogValuer methods return a redacted placeholder, so the actual value never appears in log
+// lines or error messages regardless of calling code discipline.
 type Secret string
 
 // String implements fmt.Stringer. Returns "[REDACTED]" so %v/%s never leaks the value.
@@ -34,7 +40,9 @@ func (Secret) GoString() string { return `config.Secret("[REDACTED]")` }
 // LogValue implements slog.LogValuer. Returns a redacted slog.Value so any slog handler never records the actual value.
 func (Secret) LogValue() slog.Value { return slog.StringValue("[REDACTED]") }
 
-// tomlFile is the thin TOML surface that the config file may carry. Secrets (master_key, admin_password) are deliberately absent — they are env-only. If a caller puts secret-looking keys in the file they are silently ignored (they simply don't map to any field here).
+// tomlFile is the thin TOML surface that the config file may carry. Secrets (master_key, admin_password) are
+// deliberately absent — they are env-only. If a caller puts secret-looking keys in the file they are silently ignored
+// (they simply don't map to any field here).
 type tomlFile struct {
 	DataDir     string `toml:"data_dir"`
 	HTTPAddr    string `toml:"http_addr"`
@@ -43,7 +51,8 @@ type tomlFile struct {
 	AutoMigrate *bool  `toml:"auto_migrate"`
 }
 
-// Config holds all boot-time configuration resolved from env, file, and defaults. Fields are exported so the serve command (and tests) can inspect them; secrets are typed as Secret to prevent accidental logging.
+// Config holds all boot-time configuration resolved from env, file, and defaults. Fields are exported so the serve
+// command (and tests) can inspect them; secrets are typed as Secret to prevent accidental logging.
 type Config struct {
 	// MasterKey is the passphrase used to derive the encryption key for the
 	// database. Required; minimum 16 bytes; env-only (never from TOML).
@@ -68,21 +77,26 @@ type Config struct {
 	// startup. Default: true.
 	AutoMigrate bool
 
-	// AdminEmail, if set together with AdminPassword, seeds an initial admin account on first run. Both must be set together or not at all.
+	// AdminEmail, if set together with AdminPassword, seeds an initial admin account on first run. Both must be set
+	// together or not at all.
 	AdminEmail string
 
 	// AdminPassword is the initial admin account password. Env-only.
 	AdminPassword Secret
 
-	// rawAutoMigrate captures the literal QOVIRA_AUTO_MIGRATE env value so validate can produce an aggregated error for unrecognized values.
+	// rawAutoMigrate captures the literal QOVIRA_AUTO_MIGRATE env value so validate can produce an aggregated error for
+	// unrecognized values.
 	rawAutoMigrate string
 }
 
-// Load resolves boot configuration from the environment, an optional TOML file, and built-in defaults (in that order of precedence).
+// Load resolves boot configuration from the environment, an optional TOML file, and built-in defaults (in that order of
+// precedence).
 //
-// cfgPath is the path to the TOML file. Pass an empty string to skip file loading (the server still boots from env + defaults).
+// cfgPath is the path to the TOML file. Pass an empty string to skip file loading (the server still boots from env +
+// defaults).
 //
-// Load always returns the partially-resolved *Config alongside any error, so callers can inspect defaults even when validation fails. The returned error is an aggregated list of every field that is missing or invalid.
+// Load always returns the partially-resolved *Config alongside any error, so callers can inspect defaults even when
+// validation fails. The returned error is an aggregated list of every field that is missing or invalid.
 func Load(cfgPath string) (*Config, error) {
 	// Step 1: apply defaults.
 	cfg := &Config{
@@ -138,7 +152,8 @@ func loadTOML(cfg *Config, cfgPath string) error {
 	return nil
 }
 
-// loadEnv reads QOVIRA_* environment variables and overlays them onto cfg. Returns a hard error only for _FILE conflicts or unreadable secret files.
+// loadEnv reads QOVIRA_* environment variables and overlays them onto cfg. Returns a hard error only for _FILE
+// conflicts or unreadable secret files.
 func loadEnv(cfg *Config) error {
 	// --- Secrets via _FILE indirection ---
 	// MasterKey: prefer _FILE when it's the sole source; error on conflict.
@@ -205,9 +220,11 @@ func loadEnv(cfg *Config) error {
 	return nil
 }
 
-// readSecretFile reads the content of path, trims a single trailing newline (common when secrets are written by shell echo or Docker secrets), and returns the result. The file is opened read-only.
+// readSecretFile reads the content of path, trims a single trailing newline (common when secrets are written by shell
+// echo or Docker secrets), and returns the result. The file is opened read-only.
 //
-// The path comes from a trusted operator-controlled environment variable (_FILE indirection). Path traversal is an accepted, documented operator responsibility; the process must have access to the secret file by design.
+// The path comes from a trusted operator-controlled environment variable (_FILE indirection). Path traversal is an
+// accepted, documented operator responsibility; the process must have access to the secret file by design.
 func readSecretFile(path string) (string, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // operator-provided _FILE path; intentional
 	if err != nil {
@@ -216,7 +233,8 @@ func readSecretFile(path string) (string, error) {
 	return strings.TrimRight(string(data), "\n\r"), nil
 }
 
-// validate runs one pass over cfg and returns an aggregated error listing every field that is missing or invalid. Returns nil if everything is valid.
+// validate runs one pass over cfg and returns an aggregated error listing every field that is missing or invalid.
+// Returns nil if everything is valid.
 func validate(cfg *Config) error {
 	var errs []error
 
@@ -229,7 +247,8 @@ func validate(cfg *Config) error {
 		errs = append(errs, fmt.Errorf("master_key: must be at least %d bytes", masterKeyMinLen))
 	}
 
-	// HTTP listen address: must be host:port with a valid, non-empty port number in the range 1..65535. An empty host (":8080") is fine; an empty or non-numeric port is not.
+	// HTTP listen address: must be host:port with a valid, non-empty port number in the range 1..65535. An empty host
+	// (":8080") is fine; an empty or non-numeric port is not.
 	if cfg.HTTPAddr != "" {
 		_, port, splitErr := net.SplitHostPort(cfg.HTTPAddr)
 		switch {
@@ -253,7 +272,10 @@ func validate(cfg *Config) error {
 		case "true", "1", "yes", "false", "0", "no":
 			// already applied in loadEnv; nothing to do here.
 		default:
-			errs = append(errs, fmt.Errorf("auto_migrate: unrecognized value %q (accepted: true, 1, yes, false, 0, no)", cfg.rawAutoMigrate))
+			errs = append(errs, fmt.Errorf(
+				"auto_migrate: unrecognized value %q (accepted: true, 1, yes, false, 0, no)",
+				cfg.rawAutoMigrate,
+			))
 		}
 	}
 

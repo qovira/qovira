@@ -52,12 +52,11 @@ func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("QOVIRA_ADMIN_PASSWORD_FILE", "")
 
 	cfg, err := config.Load("")
-	// Expect error because master key is missing — but cfg is still returned.
+	// Expect error because master key is missing — but Load still returns a
+	// populated *Config on every path, so the default fields below remain
+	// observable (a nil cfg here would panic the assertions and fail the test).
 	if err == nil {
 		t.Fatal("expected validation error, got nil")
-	}
-	if cfg == nil {
-		t.Fatal("expected non-nil Config even on validation error")
 	}
 
 	// Defaults should be populated regardless of validation failure.

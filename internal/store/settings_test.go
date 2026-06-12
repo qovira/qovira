@@ -309,7 +309,9 @@ func TestSettingsStore_NoMasterKeyAccess(t *testing.T) {
 	// interface.  This assertion is a compile-time shape check at test time.
 	type masterKeyProvider interface{ MasterKey() string }
 	if _, ok := any(ss).(masterKeyProvider); ok {
-		t.Error("SettingsStore must not implement MasterKey() — the master key must never be accessible through the settings store")
+		t.Error(
+			"SettingsStore must not implement MasterKey() — the master key must never be accessible through the settings store",
+		)
 	}
 
 	// The master key must not be present in the DB (it is never written there).
@@ -346,7 +348,9 @@ func TestSettingsStore_ByPrefixEscapesWildcards(t *testing.T) {
 		t.Fatalf("ByPrefix: %v", err)
 	}
 	if len(got) != 1 || got[0].Key != "model.api_key" {
-		t.Errorf("ByPrefix(%q) = %+v, want exactly [model.api_key] (the '_' must be literal, not a wildcard)", "model.api_", got)
+		t.Errorf(
+			"ByPrefix(%q) = %+v, want exactly [model.api_key] (the '_' must be literal, not a wildcard)",
+			"model.api_", got)
 	}
 }
 

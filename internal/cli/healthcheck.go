@@ -11,10 +11,13 @@ import (
 	"github.com/qovira/qovira/internal/config"
 )
 
-// healthcheckTimeout is the total request deadline for the health probe. Short enough to stay well inside Docker's --timeout=5s.
+// healthcheckTimeout is the total request deadline for the health probe. Short enough to stay well inside Docker's
+// --timeout=5s.
 const healthcheckTimeout = 3 * time.Second
 
-// newHealthcheckCmd returns the healthcheck subcommand. It performs a single HTTP GET to the local server's /healthz endpoint and exits 0 on HTTP 200, non-zero on any error or non-200 status. This is the exec-form target for the Dockerfile HEALTHCHECK instruction — distroless images have no shell or curl, so the app supplies its own probe.
+// newHealthcheckCmd returns the healthcheck subcommand. It performs a single HTTP GET to the local server's /healthz
+// endpoint and exits 0 on HTTP 200, non-zero on any error or non-200 status. This is the exec-form target for the
+// Dockerfile HEALTHCHECK instruction — distroless images have no shell or curl, so the app supplies its own probe.
 func newHealthcheckCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "healthcheck",
@@ -54,7 +57,8 @@ non-200 status. Designed to be called by the Dockerfile HEALTHCHECK instruction.
 	return cmd
 }
 
-// dialAddr converts a listen address (as stored in cfg.HTTPAddr) to a dial address suitable for an outbound HTTP connection to the local server.
+// dialAddr converts a listen address (as stored in cfg.HTTPAddr) to a dial address suitable for an outbound HTTP
+// connection to the local server.
 //
 // Rules:
 //   - ":8080"       → "127.0.0.1:8080"  (empty host)
