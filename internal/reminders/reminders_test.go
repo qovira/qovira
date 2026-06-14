@@ -1065,10 +1065,10 @@ func TestModule_Interface(t *testing.T) {
 	if m.Name() != "reminders" {
 		t.Errorf("Name() = %q, want %q", m.Name(), "reminders")
 	}
-	// Tools() now returns the four AI tool adapters (create/update/complete/delete).
-	// The nil-placeholder was replaced in slice 5 — verify non-nil and correct count.
-	if got := m.Tools(); len(got) != 4 {
-		t.Errorf("Tools() returned %d tools, want 4", len(got))
+	// Tools() now returns five AI tool adapters:
+	//   create/update/complete/delete (slice 5) + list_reminders (slice 6).
+	if got := m.Tools(); len(got) != 5 {
+		t.Errorf("Tools() returned %d tools, want 5", len(got))
 	}
 
 	// Routes must not panic.

@@ -10,6 +10,39 @@ import (
 	"database/sql"
 )
 
+const countReminders = `-- name: CountReminders :one
+SELECT COUNT(*) AS count
+FROM reminders
+WHERE user_id = ?1
+  AND (?2     IS NULL OR status = ?2)
+  AND (?3  IS NULL OR due_at > ?3)
+  AND (?4 IS NULL OR due_at < ?4)
+`
+
+type CountRemindersParams struct {
+	UserID    string
+	Status    interface{}
+	DueAfter  interface{}
+	DueBefore interface{}
+}
+
+// Count reminders for a user with optional status and due-window filters.
+// Uses the same filter predicates as ListReminders so the count is always
+// consistent with what a list query would return. The result is used by the
+// list_reminders tool to emit a truncation signal when more than 20 match.
+// MANDATORY user_id predicate enforced by scope guard.
+func (q *Queries) CountReminders(ctx context.Context, arg CountRemindersParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countReminders,
+		arg.UserID,
+		arg.Status,
+		arg.DueAfter,
+		arg.DueBefore,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteReminder = `-- name: DeleteReminder :execrows
 DELETE FROM reminders
 WHERE id      = ?1

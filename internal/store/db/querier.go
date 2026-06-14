@@ -24,6 +24,12 @@ type Querier interface {
 	// this count is zero (no siblings remain pending or were resolved by the user).
 	// User-scoped: requires user_id to prevent cross-user information leakage.
 	CountNonExpiredConfirmationsByMessageID(ctx context.Context, arg CountNonExpiredConfirmationsByMessageIDParams) (int64, error)
+	// Count reminders for a user with optional status and due-window filters.
+	// Uses the same filter predicates as ListReminders so the count is always
+	// consistent with what a list query would return. The result is used by the
+	// list_reminders tool to emit a truncation signal when more than 20 match.
+	// MANDATORY user_id predicate enforced by scope guard.
+	CountReminders(ctx context.Context, arg CountRemindersParams) (int64, error)
 	// Queries for the sessions table.
 	// sessions is per-user data (it has a user_id column and belongs to individual users), but
 	// some queries operate on a token_hash key (the bearer capability itself) rather than a

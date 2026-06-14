@@ -8,7 +8,8 @@ package reminders_test
 //  2. update/complete/delete route to Service methods and emit the same events.
 //  3. Risk tiers: create/update/complete = RiskWrite, delete = RiskDestructive.
 //  4. Validation errors (bad dueAt/rrule/tz) surface as *capability.ToolError.
-//  5. The four tools are registered on the capability registry.
+//  5. Five tools are registered on the capability registry (four write/destructive
+//     from slice 5 + list_reminders RiskRead from slice 6).
 
 import (
 	"context"
@@ -52,11 +53,11 @@ func encodeArgs(t *testing.T, v any) json.RawMessage {
 	return b
 }
 
-// ── AC5: Tools() returns four tools registered on the registry ────────────────
+// ── AC5: Tools() returns five tools registered on the registry ───────────────
 
-// TestTools_ReturnsExactlyFourTools verifies that Module.Tools() returns exactly
-// four tools with the expected names.
-func TestTools_ReturnsExactlyFourTools(t *testing.T) {
+// TestTools_ReturnsFiveTools verifies that Module.Tools() returns exactly five
+// tools: the four write/destructive tools and the new list_reminders read tool.
+func TestTools_ReturnsFiveTools(t *testing.T) {
 	t.Parallel()
 
 	st := openMigratedStore(t)
@@ -65,11 +66,14 @@ func TestTools_ReturnsExactlyFourTools(t *testing.T) {
 	m, _ := newTestModule(t, st, prod, bus)
 
 	tools := m.Tools()
-	if len(tools) != 4 {
-		t.Fatalf("Tools() returned %d tools, want 4", len(tools))
+	if len(tools) != 5 {
+		t.Fatalf("Tools() returned %d tools, want 5", len(tools))
 	}
 
-	wantNames := []string{"create_reminder", "update_reminder", "complete_reminder", "delete_reminder"}
+	wantNames := []string{
+		"create_reminder", "update_reminder", "complete_reminder",
+		"delete_reminder", "list_reminders",
+	}
 	got := make(map[string]bool, len(tools))
 	for _, tt := range tools {
 		got[tt.Name] = true
@@ -81,8 +85,8 @@ func TestTools_ReturnsExactlyFourTools(t *testing.T) {
 	}
 }
 
-// TestTools_RegisteredOnCapabilityRegistry verifies that the four tools appear in
-// the capability registry after reg.Add(module).
+// TestTools_RegisteredOnCapabilityRegistry verifies that all five tools appear
+// in the capability registry after reg.Add(module).
 func TestTools_RegisteredOnCapabilityRegistry(t *testing.T) {
 	t.Parallel()
 
@@ -97,11 +101,14 @@ func TestTools_RegisteredOnCapabilityRegistry(t *testing.T) {
 	}
 
 	catalog := reg.Catalog()
-	if len(catalog) != 4 {
-		t.Fatalf("registry catalog has %d tools, want 4", len(catalog))
+	if len(catalog) != 5 {
+		t.Fatalf("registry catalog has %d tools, want 5", len(catalog))
 	}
 
-	wantNames := []string{"create_reminder", "update_reminder", "complete_reminder", "delete_reminder"}
+	wantNames := []string{
+		"create_reminder", "update_reminder", "complete_reminder",
+		"delete_reminder", "list_reminders",
+	}
 	got := make(map[string]bool, len(catalog))
 	for _, tt := range catalog {
 		got[tt.Name] = true

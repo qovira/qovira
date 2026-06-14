@@ -98,6 +98,20 @@ type deleteReminderArgs struct {
 	ID string `json:"id"`
 }
 
+// listRemindersArgs holds the optional filter args for the list_reminders tool.
+// All fields are optional; absent fields use the defaults described below.
+type listRemindersArgs struct {
+	// Status filters reminders by status. Accepted values: "active" (default),
+	// "completed". Omit to use the default (active).
+	Status string `json:"status,omitempty"`
+	// DueBefore is an optional RFC 3339 upper bound on due_at (exclusive). Use
+	// to narrow results to reminders due before a specific instant.
+	DueBefore string `json:"dueBefore,omitempty"`
+	// DueAfter is an optional RFC 3339 lower bound on due_at (exclusive). Use
+	// to narrow results to reminders due after a specific instant.
+	DueAfter string `json:"dueAfter,omitempty"`
+}
+
 // ── JSON Schemas ──────────────────────────────────────────────────────────────
 
 // schemaCreateReminder is the hand-authored JSON Schema for createReminderArgs.
@@ -200,9 +214,33 @@ var schemaDeleteReminder = json.RawMessage(`{
   "additionalProperties": false
 }`)
 
+// schemaListReminders is the hand-authored JSON Schema for listRemindersArgs.
+// All fields are optional; the tool defaults status to "active".
+var schemaListReminders = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["active", "completed"],
+      "description": "Filter by status. Defaults to \"active\" when omitted. Use \"completed\" to list finished reminders."
+    },
+    "dueBefore": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 upper bound on due_at (exclusive). Use to narrow results to reminders due before a specific instant, e.g. \"2026-06-21T00:00:00Z\" for reminders due this week."
+    },
+    "dueAfter": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 lower bound on due_at (exclusive). Use to narrow results to reminders due after a specific instant, e.g. \"2026-06-14T00:00:00Z\" to skip past reminders."
+    }
+  },
+  "additionalProperties": false
+}`)
+
 // ── Tools() ───────────────────────────────────────────────────────────────────
 
-// Tools returns the four AI capability tools contributed by the reminders module.
+// Tools returns the five AI capability tools contributed by the reminders module.
 // Each tool is a thin adapter over the same Service methods used by the REST
 // handlers, proving one-service-two-surfaces. Risk tiers are declared here;
 // confirmation and trust-level enforcement are the harness's responsibility.
@@ -245,6 +283,18 @@ func (m *Module) Tools() []capability.Tool {
 			schemaDeleteReminder,
 			capability.RiskDestructive,
 			m.toolDelete,
+		),
+		capability.NewTool(
+			"list_reminders",
+			"List upcoming reminders in a compact, token-efficient format. "+
+				"Defaults to active reminders ordered soonest-first (ascending due_at). "+
+				"Returns at most 20 results; when more exist a truncation line names "+
+				"the shown/total counts and suggests narrowing by date with dueBefore/dueAfter. "+
+				"Only returns id, title, dueAt, and status — use get_reminder for full details. "+
+				"Use dueBefore and dueAfter (RFC 3339) to focus on a date window.",
+			schemaListReminders,
+			capability.RiskRead,
+			m.toolList,
 		),
 	}
 }
@@ -400,6 +450,126 @@ func (m *Module) toolDelete(ctx context.Context, scope store.Scope, args deleteR
 	// Delete has no meaningful entity to return. A struct{} result is
 	// JSON-marshalable (→ {}) and satisfies the nilnil linter.
 	return struct{}{}, nil
+}
+
+// toolList is the typed handler for list_reminders.
+// It is context-safe for the model's token budget: it hard-caps at 20 results,
+// returns a compact projection (id, title, dueAt, status — no notes), and
+// appends a truncation line when the total count exceeds the cap.
+//
+// Defaults:
+//   - status: "active" (overridable to "completed").
+//   - order:  ascending due_at (upcoming-first) — Service.List already orders by (due_at, id).
+//   - limit:  20 (hard cap; not configurable by the model).
+//
+// The truncation total is obtained from Service.Count with the same filters
+// so the model sees an accurate shown/total ratio.
+func (m *Module) toolList(ctx context.Context, scope store.Scope, args listRemindersArgs) (capability.Result, error) {
+	const toolCap = 20
+
+	// ── Validate and coerce args ─────────────────────────────────────────────
+	status := args.Status
+	if status == "" {
+		status = "active" // default: active
+	}
+	switch status {
+	case "active", "completed":
+		// valid
+	default:
+		return nil, &capability.ToolError{
+			Code:    "validation_failed",
+			Message: fmt.Sprintf("status %q is not valid; accepted values are \"active\" and \"completed\"", status),
+		}
+	}
+
+	var dueBefore time.Time
+	if args.DueBefore != "" {
+		var err error
+		dueBefore, err = time.Parse(time.RFC3339, args.DueBefore)
+		if err != nil {
+			return nil, &capability.ToolError{
+				Code:    "validation_failed",
+				Message: fmt.Sprintf("dueBefore %q is not a valid RFC 3339 timestamp; convert the date to RFC 3339 format first", args.DueBefore),
+			}
+		}
+	}
+
+	var dueAfter time.Time
+	if args.DueAfter != "" {
+		var err error
+		dueAfter, err = time.Parse(time.RFC3339, args.DueAfter)
+		if err != nil {
+			return nil, &capability.ToolError{
+				Code:    "validation_failed",
+				Message: fmt.Sprintf("dueAfter %q is not a valid RFC 3339 timestamp; convert the date to RFC 3339 format first", args.DueAfter),
+			}
+		}
+	}
+
+	q := ListQuery{
+		Status:    status,
+		DueBefore: dueBefore,
+		DueAfter:  dueAfter,
+		Limit:     toolCap,
+	}
+
+	// ── Fetch capped page ────────────────────────────────────────────────────
+	page, err := m.svc.List(ctx, scope, q)
+	if err != nil {
+		return nil, mapServiceError(err)
+	}
+
+	// ── Compact projection ───────────────────────────────────────────────────
+	// Build a plain text block: one compact line per reminder, so the model can
+	// scan without JSON parsing overhead. Fields: id | title | dueAt | status.
+	var sb strings.Builder
+	for _, r := range page.Items {
+		// Compact line: "id | title | dueAt | status".
+		// Sanitize the title to prevent a crafted CR/LF from forging extra lines
+		// or fake truncation signals in the model-facing output. This is applied
+		// only here — stored data and all other surfaces are unaffected.
+		safeTitle := sanitizeLineField(r.Title)
+		sb.WriteString(r.ID)
+		sb.WriteString(" | ")
+		sb.WriteString(safeTitle)
+		sb.WriteString(" | ")
+		sb.WriteString(r.DueAt)
+		sb.WriteString(" | ")
+		sb.WriteString(r.Status)
+		sb.WriteByte('\n')
+	}
+
+	// ── Truncation signal ────────────────────────────────────────────────────
+	// When the cap was reached (Service.List returned exactly toolCap items and
+	// the page might have more), get the exact total via Service.Count and emit
+	// a truncation line so the model knows to narrow by date.
+	if len(page.Items) == toolCap {
+		total, countErr := m.svc.Count(ctx, scope, q)
+		if countErr != nil {
+			// Non-fatal: we still return the capped page; just omit the count.
+			m.logger.Error("reminders: list_reminders: count for truncation signal",
+				"err", countErr)
+		} else if total > int64(toolCap) {
+			// Format: "showing 20 of 64 active; narrow by date with dueBefore/dueAfter"
+			fmt.Fprintf(&sb, "showing %d of %d %s; narrow by date with dueBefore/dueAfter\n",
+				toolCap, total, status)
+		}
+	}
+
+	return strings.TrimRight(sb.String(), "\n"), nil
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+// sanitizeLineField replaces CR and LF characters in s with a single space so
+// that a crafted title cannot forge additional lines or fake truncation signals
+// in the compact tool text block written to the model. Applied only to
+// model-facing text rendering — stored values and all other surfaces are
+// unaffected.
+func sanitizeLineField(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return s
 }
 
 // ── error mapping ─────────────────────────────────────────────────────────────

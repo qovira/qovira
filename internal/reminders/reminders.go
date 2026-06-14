@@ -554,6 +554,37 @@ func (s *Service) List(ctx context.Context, scope store.Scope, q ListQuery) (Pag
 	return Page{Items: items, NextCursor: nextCursor, HasMore: hasMore}, nil
 }
 
+// Count returns the total number of reminders matching the given query for the
+// requesting user. It applies the same status and due-window filters as List
+// but ignores the cursor and limit fields (those are pagination controls, not
+// filter controls). Used by the list_reminders tool to determine whether to
+// emit a truncation signal.
+func (s *Service) Count(ctx context.Context, scope store.Scope, q ListQuery) (int64, error) {
+	var statusArg any
+	if q.Status != "" {
+		statusArg = q.Status
+	}
+	var dueAfterArg any
+	if !q.DueAfter.IsZero() {
+		dueAfterArg = q.DueAfter.UTC().Format(time.RFC3339)
+	}
+	var dueBeforeArg any
+	if !q.DueBefore.IsZero() {
+		dueBeforeArg = q.DueBefore.UTC().Format(time.RFC3339)
+	}
+
+	n, err := db.New(s.st.Reader()).CountReminders(ctx, db.CountRemindersParams{
+		UserID:    scope.UserID(),
+		Status:    statusArg,
+		DueAfter:  dueAfterArg,
+		DueBefore: dueBeforeArg,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("reminders: count: %w", err)
+	}
+	return n, nil
+}
+
 // ── Update / Complete / Delete ────────────────────────────────────────────────
 
 // Update applies a partial/merge update to the reminder identified by id in

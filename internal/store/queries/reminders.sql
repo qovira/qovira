@@ -81,6 +81,19 @@ DELETE FROM reminders
 WHERE id      = @id
   AND user_id = @user_id;
 
+-- name: CountReminders :one
+-- Count reminders for a user with optional status and due-window filters.
+-- Uses the same filter predicates as ListReminders so the count is always
+-- consistent with what a list query would return. The result is used by the
+-- list_reminders tool to emit a truncation signal when more than 20 match.
+-- MANDATORY user_id predicate enforced by scope guard.
+SELECT COUNT(*) AS count
+FROM reminders
+WHERE user_id = @user_id
+  AND (sqlc.narg('status')     IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('due_after')  IS NULL OR due_at > sqlc.narg('due_after'))
+  AND (sqlc.narg('due_before') IS NULL OR due_at < sqlc.narg('due_before'));
+
 -- name: ListReminders :many
 -- List reminders for a user with optional status and due-window filters,
 -- keyset-paginated on (due_at, id).  Fetches limit+1 rows so the caller can
