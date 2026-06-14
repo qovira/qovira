@@ -10,6 +10,13 @@ import (
 )
 
 type Querier interface {
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler self-reschedules a
+	// recurring job after its handler succeeds: resets status to 'pending', sets run_at
+	// to the next occurrence, clears locked_at, and resets attempt to 0. Only updates
+	// rows with status = 'running' (the job the scheduler just leased) to guard against
+	// a future double-processor. A 0-row result (e.g. the row was deleted by Cancel) is
+	// harmless and silently tolerated by the caller.
+	AdvanceRecurringJob(ctx context.Context, arg AdvanceRecurringJobParams) (int64, error)
 	BumpSessionLastUsedByID(ctx context.Context, arg BumpSessionLastUsedByIDParams) (int64, error)
 	// Returns the count of pending_confirmations rows for a given assistant message
 	// that are NOT in 'expired' status (i.e. 'pending', 'approved', or 'denied').
@@ -33,6 +40,16 @@ type Querier interface {
 	//
 	// Parameters use sqlc named params (@name) per the house convention.
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler marks an exhausted job as permanently
+	// failed. Sets status='failed', records last_error, and clears locked_at. The row is intentionally
+	// kept (NOT deleted) so operators can inspect dead-lettered jobs. AND status = 'running' ensures
+	// the update only applies to rows the scheduler actually leased, guarding against a future
+	// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
+	// and silently tolerated by the caller.
+	DeadLetterJob(ctx context.Context, arg DeadLetterJobParams) (int64, error)
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler deletes the row after a handler
+	// succeeds. The scheduler owns the row lifecycle; no user_id predicate is applicable.
+	DeleteJob(ctx context.Context, id string) error
 	DeleteOtherSessionsForUser(ctx context.Context, arg DeleteOtherSessionsForUserParams) (int64, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; this path is used for single-session logout and best-effort
@@ -44,6 +61,25 @@ type Querier interface {
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
 	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
 	GetInstance(ctx context.Context) (Instance, error)
+	// Queries for the jobs table (durable scheduler queue).
+	// The scheduler accesses jobs cross-user: the claim selects due jobs across ALL users and
+	// resolves scope per-row. This is intentionally unscoped -- each query below carries an
+	// explicit scopeguard annotation with the reason.
+	//
+	// Parameters use sqlc named params (@name) per the house convention.
+	//
+	// NOTE: Several operations use raw SQL via s.Writer() rather than sqlc queries, because
+	// sqlc's SQLite ANTLR parser cannot model the required shapes:
+	//   1. INSERT ... ON CONFLICT(key) DO NOTHING: the upsert clause is not supported.
+	//   2. UPDATE ... WHERE id IN (SELECT ... LIMIT @batch) RETURNING ...: compound UPDATE.
+	// These are executed as s.Writer().ExecContext / QueryContext in internal/scheduler.
+	// scopeguard:allow-unscoped: cross-user lookup by idempotency key. The scheduler resolves
+	// the existing job id when ON CONFLICT(key) DO NOTHING suppresses the insert.
+	GetJobIDByKey(ctx context.Context, key sql.NullString) (string, error)
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler reads the status of any job
+	// regardless of owner to implement Cancel/Reschedule atomicity. Called inside a transaction
+	// on the write pool to provide a consistent read-then-write with no TOCTOU window.
+	GetJobStatus(ctx context.Context, id string) (string, error)
 	GetPendingConfirmation(ctx context.Context, arg GetPendingConfirmationParams) (PendingConfirmation, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
@@ -97,6 +133,27 @@ type Querier interface {
 	// TTL cutoffs (idle and absolute), so there is no meaningful user context available and a
 	// user_id predicate would prevent cross-user expiry from working.
 	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- cross-user reclaim sweep. The scheduler reclaims
+	// running rows whose locked_at is older than the lease threshold, returning them to pending so
+	// they can be re-leased. This fires on boot (to recover rows orphaned by a prior process crash)
+	// and on each poll tick (to recover wedged-but-alive workers that ignore cancellation). The
+	// locked_at comparison uses RFC3339 UTC strings, which are lexicographically ordered, matching
+	// the pattern used by the claim query's run_at comparison. attempt is deliberately NOT reset:
+	// the retry ceiling must still apply to reclaimed jobs.
+	ReclaimStaleJobs(ctx context.Context, arg ReclaimStaleJobsParams) (int64, error)
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler moves run_at for any pending job.
+	// Only updates rows with status='pending'; returns 0 rows affected when the job is not pending
+	// (running or absent today; 'failed'/dead-letter is a later slice). The caller interprets a
+	// non-pending status as ErrJobRunning or ErrJobNotFound
+	// after reading the status inside the enclosing transaction.
+	RescheduleJob(ctx context.Context, arg RescheduleJobParams) (int64, error)
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler re-arms a failed job row for retry
+	// with a backoff run_at. Sets status='pending', clears locked_at, and advances run_at so the
+	// job re-enters the claim queue at the calculated backoff time. AND status = 'running' ensures
+	// the update only applies to rows the scheduler actually leased, guarding against a future
+	// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
+	// and silently tolerated by the caller.
+	RetryJob(ctx context.Context, arg RetryJobParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
