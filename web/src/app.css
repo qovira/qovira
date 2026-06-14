@@ -1,0 +1,10 @@
+/* Load order is fixed and load-bearing:
+   1. tailwindcss  — the base layer + utilities
+   2. @qovira/theme — tokens + semantic layer + @theme inline (must precede Tailwind scans)
+   3. @qovira/theme/fonts — self-hosted @font-face declarations (no CDN)
+   4. @qovira/ui   — the component library's compiled styles
+   NOTE: Use @import, NOT @source, for @qovira/ui — @source emits zero CSS under Tailwind v4. */
+@import "tailwindcss";
+@import "@qovira/theme";
+@import "@qovira/theme/fonts";
+@import "@qovira/ui";

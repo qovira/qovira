@@ -18,6 +18,39 @@ env:
   GOFLAGS: "-trimpath"
 
 jobs:
+  # Frontend checks for the SvelteKit SPA in web/. Runs first and gates the Go
+  # jobs below — a broken frontend build blocks the pipeline before the slower
+  # CGo matrix legs start. Runs on Linux x64 only (platform-agnostic JS build).
+  web:
+    name: Web (svelte-check, lint, format, test, build)
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+          standalone: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: svelte-check
+        run: pnpm check
+      - name: Lint
+        run: pnpm lint
+      - name: Format check
+        run: pnpm format:check
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
   # Build and Test run across every supported OS/arch target: the SQLCipher cgo
   # build (via go-sqlcipher) and its OpenSSL linkage are platform-specific, so a
   # green Linux x64 run says nothing about ARM64 or Apple Silicon. Lint and Vuln
@@ -27,6 +60,7 @@ jobs:
   # GitHub-hosted runner. 2 vCPU is the like-for-like Linux default; macOS starts
   # at Blacksmith's smallest size, 6 vCPU.
   build:
+    needs: web
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -46,6 +80,7 @@ jobs:
         run: go build ./...
 
   race:
+    needs: web
     name: Test (race, ${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -65,6 +100,7 @@ jobs:
         run: go test -race ./...
 
   lint:
+    needs: web
     name: Lint
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
@@ -76,6 +112,7 @@ jobs:
           version: v2.12.2
 
   vuln:
+    needs: web
     name: Vulnerability scan
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
@@ -99,6 +136,7 @@ jobs:
   # useblacksmith/* drop-ins and there is no type=gha layer cache — Blacksmith
   # persists build layers itself.
   docker:
+    needs: web
     name: Docker image
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:

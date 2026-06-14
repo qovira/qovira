@@ -1,0 +1,49 @@
+import js from "@eslint/js";
+import svelte from "eslint-plugin-svelte";
+import globals from "globals";
+import tseslint from "typescript-eslint";
+
+export default tseslint.config(
+  js.configs.recommended,
+  ...tseslint.configs.strictTypeChecked,
+  ...tseslint.configs.stylisticTypeChecked,
+  ...svelte.configs["flat/recommended"],
+  {
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
+      parserOptions: {
+        projectService: {
+          // Config files not covered by the SvelteKit-generated tsconfig:
+          // svelte.config.js (JS) and vitest.config.ts.
+          // vite.config.ts is already included via .svelte-kit/tsconfig.json.
+          allowDefaultProject: ["*.config.js", "vitest.config.ts"],
+        },
+        tsconfigRootDir: import.meta.dirname,
+        extraFileExtensions: [".svelte"],
+      },
+    },
+  },
+  {
+    files: ["**/*.svelte", "**/*.svelte.ts"],
+    languageOptions: {
+      parserOptions: {
+        parser: tseslint.parser,
+      },
+    },
+  },
+  {
+    // tseslint.config() is deprecated in favour of ESLint's own defineConfig(),
+    // which ships in ESLint 10. We are pinned to ESLint 9 for now; suppress
+    // the rule on this file only until we upgrade eslint.
+    files: ["eslint.config.js"],
+    rules: {
+      "@typescript-eslint/no-deprecated": "off",
+    },
+  },
+  {
+    ignores: ["build/", ".svelte-kit/", "dist/", "node_modules/"],
+  },
+);

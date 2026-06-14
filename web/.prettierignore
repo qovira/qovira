@@ -1,0 +1,4 @@
+# Generated / tooling-owned files — not Prettier-managed
+pnpm-lock.yaml
+build/
+.svelte-kit/
