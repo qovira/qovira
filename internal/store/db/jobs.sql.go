@@ -10,6 +10,31 @@ import (
 	"database/sql"
 )
 
+const deadLetterJob = `-- name: DeadLetterJob :execrows
+UPDATE jobs SET status = 'failed', last_error = ?1, locked_at = NULL, updated_at = ?2
+WHERE id = ?3 AND status = 'running'
+`
+
+type DeadLetterJobParams struct {
+	LastError sql.NullString
+	UpdatedAt string
+	ID        string
+}
+
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler marks an exhausted job as permanently
+// failed. Sets status='failed', records last_error, and clears locked_at. The row is intentionally
+// kept (NOT deleted) so operators can inspect dead-lettered jobs. AND status = 'running' ensures
+// the update only applies to rows the scheduler actually leased, guarding against a future
+// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
+// and silently tolerated by the caller.
+func (q *Queries) DeadLetterJob(ctx context.Context, arg DeadLetterJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deadLetterJob, arg.LastError, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteJob = `-- name: DeleteJob :exec
 DELETE FROM jobs WHERE id = ?1
 `
@@ -80,6 +105,31 @@ type RescheduleJobParams struct {
 // after reading the status inside the enclosing transaction.
 func (q *Queries) RescheduleJob(ctx context.Context, arg RescheduleJobParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, rescheduleJob, arg.RunAt, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const retryJob = `-- name: RetryJob :execrows
+UPDATE jobs SET status = 'pending', run_at = ?1, locked_at = NULL, updated_at = ?2
+WHERE id = ?3 AND status = 'running'
+`
+
+type RetryJobParams struct {
+	RunAt     string
+	UpdatedAt string
+	ID        string
+}
+
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler re-arms a failed job row for retry
+// with a backoff run_at. Sets status='pending', clears locked_at, and advances run_at so the
+// job re-enters the claim queue at the calculated backoff time. AND status = 'running' ensures
+// the update only applies to rows the scheduler actually leased, guarding against a future
+// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
+// and silently tolerated by the caller.
+func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, retryJob, arg.RunAt, arg.UpdatedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}

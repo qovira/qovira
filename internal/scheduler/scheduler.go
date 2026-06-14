@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -37,8 +38,11 @@ import (
 // ── Public types ──────────────────────────────────────────────────────────────
 
 // Handler is a function that executes a single job. The context carries the
-// JobTimeout deadline; returning nil causes the row to be deleted (one-shot).
-// Any error leaves the row in the running state (retry/dead-letter is a later slice).
+// JobTimeout deadline. Returning nil deletes the row (one-shot success). Returning
+// a non-nil error triggers retry-with-backoff: the row is re-armed as pending with
+// a jittered exponential delay. At MaxAttempts the job is dead-lettered (status set
+// to 'failed', row kept, job.failed event published for user-scoped jobs). Wrapping
+// the error with [Permanent] skips any remaining retries and dead-letters immediately.
 type Handler func(ctx context.Context, job Job) error
 
 // Job carries the resolved, handler-facing representation of a queued job. The
@@ -146,7 +150,7 @@ func (c Config) Validate() error {
 // the zero value is not valid.
 type Scheduler struct {
 	st       *store.Store
-	bus      events.Bus // reserved for job lifecycle events in a later slice
+	bus      events.Bus // publishes job.failed to the owning user's bus when a user-scoped job dead-letters; system-scoped failures are logged only
 	cfg      Config
 	now      func() time.Time
 	logger   *slog.Logger
@@ -433,7 +437,8 @@ func (s *Scheduler) tick(ctx context.Context) {
 
 // dispatch runs the handler for one claimed job row. It resolves scope, builds
 // the Job struct, calls the handler under a JobTimeout-bounded context, and on
-// success deletes the row.
+// success deletes the row. On failure it either re-arms the row with jittered
+// backoff (transient) or dead-letters it (MaxAttempts reached or Permanent error).
 func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 	// Resolve scope from stored user_id.
 	var scope store.Scope
@@ -457,11 +462,12 @@ func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 	s.mu.RUnlock()
 
 	if !ok {
-		// No registered handler for this kind. Log loudly at error level; leave the
-		// row in running state so it is visible. Do NOT delete it -- that would silently
-		// drop a job with no handler. Retry/dead-letter handling is a later slice.
-		s.logger.Error("scheduler: no handler registered for job kind; row left running",
+		// No registered handler for this kind. Log loudly and flow through the
+		// failure path as a transient error: retry with backoff, then dead-letter
+		// at MaxAttempts. This prevents the old "row left running" footgun.
+		s.logger.Error("scheduler: no handler registered for job kind; treating as transient failure",
 			"id", r.id, "kind", r.kind, "attempt", r.attempt)
+		s.handleFailure(r, scope, fmt.Errorf("no handler registered for kind %q", r.kind))
 		return
 	}
 
@@ -472,16 +478,15 @@ func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 	defer cancel()
 
 	// Invoke the handler under a deferred recover so that a panicking handler does
-	// not propagate out of the worker goroutine and crash the process. On panic the
-	// row is left in "running" state, matching the semantics of a handler returning
-	// an error (retry/dead-letter is a later slice).
+	// not propagate out of the worker goroutine and crash the process. A panic is
+	// converted into an error and flows through the same retry/dead-letter path as
+	// any transient handler error.
 	var handlerErr error
-	panicked := false
 	func() {
 		defer func() {
 			if p := recover(); p != nil {
-				panicked = true
-				s.logger.Error("scheduler: handler panicked; job left running",
+				handlerErr = fmt.Errorf("scheduler: handler panicked: %v", p)
+				s.logger.Error("scheduler: handler panicked; flowing through retry/dead-letter path",
 					"id", r.id, "kind", r.kind, "attempt", r.attempt,
 					"panic", p,
 					"stack", string(debug.Stack()),
@@ -491,19 +496,8 @@ func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 		handlerErr = h(jobCtx, job)
 	}()
 
-	if panicked {
-		// Panic was recovered; treat the same as a handler error -- leave the row in
-		// running state. Do not fall through to the success delete path below.
-		return
-	}
-
 	if handlerErr != nil {
-		// Handler returned an error. Leave the row in running state.
-		// Retry/backoff/dead-letter is a later slice.
-		if !errors.Is(handlerErr, context.Canceled) && !errors.Is(handlerErr, context.DeadlineExceeded) {
-			s.logger.Error("scheduler: handler failed",
-				"id", r.id, "kind", r.kind, "attempt", r.attempt, "err", handlerErr)
-		}
+		s.handleFailure(r, scope, handlerErr)
 		return
 	}
 
@@ -514,6 +508,168 @@ func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 		s.logger.Error("scheduler: delete job row after success",
 			"id", r.id, "kind", r.kind, "err", err)
 	}
+}
+
+// handleFailure implements the retry/dead-letter decision for a failed one-shot job.
+//
+// Decision logic:
+//   - Permanent error or attempt >= MaxAttempts → dead-letter (status=failed, row kept).
+//   - context.Canceled or context.DeadlineExceeded (JobTimeout) → transient retry.
+//   - Any other error → transient retry if attempt < MaxAttempts, else dead-letter.
+func (s *Scheduler) handleFailure(r claimedRow, scope store.Scope, handlerErr error) {
+	attempt := int(r.attempt)
+
+	// Determine whether this is a permanent (non-retryable) failure.
+	var permErr *permanentError
+	isPermanent := errors.As(handlerErr, &permErr)
+
+	// Determine whether to dead-letter.
+	deadLetter := isPermanent || attempt >= s.cfg.MaxAttempts
+
+	if deadLetter {
+		s.deadLetter(r, scope, attempt, handlerErr)
+		return
+	}
+
+	// Transient failure: log (unless it's a context cancellation) and re-arm.
+	if !errors.Is(handlerErr, context.Canceled) && !errors.Is(handlerErr, context.DeadlineExceeded) {
+		s.logger.Error("scheduler: handler failed; will retry",
+			"id", r.id, "kind", r.kind, "attempt", attempt,
+			"maxAttempts", s.cfg.MaxAttempts, "err", handlerErr)
+	} else {
+		s.logger.Info("scheduler: handler context cancelled/timed out; will retry",
+			"id", r.id, "kind", r.kind, "attempt", attempt)
+	}
+
+	backoff := backoffDuration(s.cfg, attempt)
+	runAt := s.now().Add(backoff)
+	nowStr := s.now().UTC().Format(time.RFC3339)
+	runAtStr := runAt.UTC().Format(time.RFC3339)
+
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), failureWriteTimeout)
+	defer writeCancel()
+
+	if _, err := db.New(s.st.Writer()).RetryJob(writeCtx, db.RetryJobParams{
+		RunAt:     runAtStr,
+		UpdatedAt: nowStr,
+		ID:        r.id,
+	}); err != nil {
+		s.logger.Error("scheduler: retry job update failed",
+			"id", r.id, "kind", r.kind, "attempt", attempt, "err", err)
+	}
+}
+
+// deadLetter marks the job as permanently failed (status=failed, last_error set, row kept)
+// and publishes a job.failed event on the owning user's bus (or logs-only for system jobs).
+func (s *Scheduler) deadLetter(r claimedRow, scope store.Scope, attempt int, handlerErr error) {
+	errStr := handlerErr.Error()
+
+	s.logger.Error("scheduler: job dead-lettered",
+		"id", r.id, "kind", r.kind, "attempt", attempt, "err", handlerErr)
+
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), failureWriteTimeout)
+	defer writeCancel()
+
+	nowStr := s.now().UTC().Format(time.RFC3339)
+	if _, err := db.New(s.st.Writer()).DeadLetterJob(writeCtx, db.DeadLetterJobParams{
+		LastError: sql.NullString{String: errStr, Valid: true},
+		UpdatedAt: nowStr,
+		ID:        r.id,
+	}); err != nil {
+		s.logger.Error("scheduler: dead-letter job update failed",
+			"id", r.id, "kind", r.kind, "attempt", attempt, "err", err)
+		return
+	}
+
+	// Publish job.failed on the owning user's bus. System-scoped jobs have no bus
+	// channel, so they are logged only (the bus is strictly per-user).
+	if !scope.IsSystem() && scope.UserID() != "" {
+		s.bus.Publish(scope.UserID(), events.Event{
+			Type: jobFailedEventType,
+			Data: JobFailedEvent{
+				JobID:     r.id,
+				Kind:      r.kind,
+				Attempt:   attempt,
+				LastError: errStr,
+			},
+		})
+	}
+}
+
+// ── Permanent error ───────────────────────────────────────────────────────────
+
+// permanentError wraps an inner error and signals to the scheduler that the job
+// must be dead-lettered immediately without any retry attempt. The inner error is
+// preserved via Unwrap so errors.Is and errors.As can inspect the chain.
+type permanentError struct {
+	inner error
+}
+
+func (e *permanentError) Error() string { return "scheduler: permanent: " + e.inner.Error() }
+func (e *permanentError) Unwrap() error { return e.inner }
+
+// Permanent wraps err to signal that the job must be dead-lettered immediately
+// on the first failure without any retry, regardless of how many attempts remain.
+// Use it in a handler when the error is definitively unrecoverable:
+//
+//	return scheduler.Permanent(fmt.Errorf("reminder %s gone: %w", id, ErrNotFound))
+//
+// The wrapped error is accessible via errors.Unwrap / errors.Is / errors.As.
+func Permanent(err error) error { return &permanentError{inner: err} }
+
+// ── job.failed event ──────────────────────────────────────────────────────────
+
+// JobFailedEvent is the payload published on the owning user's bus when a one-shot
+// job is dead-lettered. It is a fat event: it carries enough information to render
+// a failure surface without a re-fetch.
+type JobFailedEvent struct {
+	// JobID is the ULID string identifier of the dead-lettered job.
+	JobID string `json:"jobId"`
+	// Kind is the dispatch selector of the dead-lettered job.
+	Kind string `json:"kind"`
+	// Attempt is the 1-based attempt number that triggered dead-lettering.
+	Attempt int `json:"attempt"`
+	// LastError is the string representation of the error that caused dead-lettering.
+	LastError string `json:"lastError"`
+}
+
+// jobFailedEventType is the event type string for the job.failed bus event.
+const jobFailedEventType = "job.failed"
+
+// failureWriteTimeout is the deadline applied to failure-path DB writes (RetryJob,
+// DeadLetterJob). These writes use context.Background() — not the handler context —
+// because they must survive shutdown cancellation: a failing job's final state must
+// be persisted even when Stop cancels the poller context.
+const failureWriteTimeout = 5 * time.Second
+
+// ── Backoff ───────────────────────────────────────────────────────────────────
+
+// backoffDuration returns a jittered backoff duration for the given attempt using
+// full-jitter capped exponential backoff:
+//
+//	random(0, min(BackoffCap, BackoffBase * 2^(attempt-1)))
+//
+// attempt is 1-based at dispatch. math/rand/v2 is used deliberately: this is
+// scheduling spread, not a security secret, so crypto/rand would be unnecessary.
+func backoffDuration(cfg Config, attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	// Compute cap: BackoffBase * 2^(attempt-1), guarded against overflow.
+	var ceiling time.Duration
+	shift := attempt - 1
+	if shift >= 62 || cfg.BackoffBase > cfg.BackoffCap>>(shift) {
+		// Would overflow or exceed cap — use BackoffCap directly.
+		ceiling = cfg.BackoffCap
+	} else {
+		ceiling = min(cfg.BackoffBase<<shift, cfg.BackoffCap) // BackoffBase * 2^(attempt-1), capped
+	}
+	if ceiling <= 0 {
+		return 0
+	}
+	// Full jitter: uniform random in [0, ceiling]. math/rand is intentional here:
+	// this is scheduling spread, not a secret. See issue spec §Backoff.
+	return time.Duration(rand.Int64N(int64(ceiling) + 1)) //nolint:gosec // scheduling jitter, not a secret
 }
 
 // ── Sentinel errors ───────────────────────────────────────────────────────────
@@ -540,12 +696,10 @@ var ErrJobRunning = errors.New("scheduler: job is currently running")
 //     The handler will complete exactly once; its post-success DELETE becomes a
 //     harmless no-op (0 rows affected). The job can never be re-leased because the
 //     row is gone. This is safe and race-clean under -race.
+//   - failed: the dead-lettered row is deleted (operator cleanup). Cancel treats a
+//     dead-lettered job the same as any other status — it deletes by id regardless.
+//     This lets operators clear dead-lettered jobs rather than leaving them indefinitely.
 //   - absent: returns ErrJobNotFound.
-//
-// Note: this slice has no 'failed'/dead-letter status yet — an errored or
-// panicked handler currently leaves its row in 'running' (reclaim and
-// dead-letter land in later slices). When that status arrives, a failed row
-// will be deletable here the same as a pending one.
 //
 // Cancel uses a transaction on the single-connection write pool so that the
 // status read and the delete are one atomic unit, serialised against the claim loop.

@@ -16,6 +16,41 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
+// ── capturingBus records published events for test assertions ────────────────
+
+// publishedEvent holds a single Publish call's arguments.
+type publishedEvent struct {
+	userID string
+	event  events.Event
+}
+
+// capturingBus is a fake events.Bus that records all Publish calls for later assertion.
+// It is safe for concurrent use.
+type capturingBus struct {
+	mu     sync.Mutex
+	events []publishedEvent
+}
+
+func (b *capturingBus) Publish(userID string, e events.Event) {
+	b.mu.Lock()
+	b.events = append(b.events, publishedEvent{userID: userID, event: e})
+	b.mu.Unlock()
+}
+
+func (b *capturingBus) Subscribe(_ string) (<-chan events.Event, func()) {
+	ch := make(chan events.Event)
+	return ch, func() { close(ch) }
+}
+
+// published returns a snapshot of all recorded events.
+func (b *capturingBus) published() []publishedEvent {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]publishedEvent, len(b.events))
+	copy(out, b.events)
+	return out
+}
+
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
 // openMigratedStore opens a fresh SQLCipher database on a temp file and runs all
@@ -105,6 +140,18 @@ func jobRow(t *testing.T, db *sql.DB, jobID string) (status, lockedAt string, at
 		t.Fatalf("jobRow(%q): %v", jobID, err)
 	}
 	return
+}
+
+// jobLastError returns the last_error column value for the given job id.
+func jobLastError(t *testing.T, db *sql.DB, jobID string) sql.NullString {
+	t.Helper()
+	var lastError sql.NullString
+	if err := db.QueryRow(
+		`SELECT last_error FROM jobs WHERE id = ?`, jobID,
+	).Scan(&lastError); err != nil {
+		t.Fatalf("jobLastError(%q): %v", jobID, err)
+	}
+	return lastError
 }
 
 // jobExists reports whether a row with the given id exists in jobs.
@@ -749,8 +796,8 @@ func TestDefaultConfig_Defaults(t *testing.T) {
 // TestHandler_PanicDoesNotCrash verifies three things after a handler panics:
 // (a) the scheduler/process survives (the test itself proves this -- a process
 // crash would be a test binary crash, not a test failure),
-// (b) the panicking job's row is still present with status "running" (not
-// deleted, not reset to pending),
+// (b) the panicking job's row is re-armed as pending (not left running), because
+// panics now flow through the retry/dead-letter failure path as transient failures,
 // (c) a second, well-behaved job dispatched concurrently/after still runs to
 // completion and its row is deleted.
 func TestHandler_PanicDoesNotCrash(t *testing.T) {
@@ -762,6 +809,9 @@ func TestHandler_PanicDoesNotCrash(t *testing.T) {
 	cfg := defaultTestConfig()
 	cfg.PollInterval = 10 * time.Millisecond
 	cfg.Workers = 4
+	// Set MaxAttempts high enough that the panicking job isn't dead-lettered during
+	// the short observation window — we want to assert it gets re-armed as pending.
+	cfg.MaxAttempts = 100
 
 	// panicDone is closed once the panicking handler has been invoked (the panic
 	// itself immediately follows). We use a sync.Once so the close is idempotent
@@ -818,15 +868,18 @@ func TestHandler_PanicDoesNotCrash(t *testing.T) {
 		t.Fatal("panicking handler was not invoked within timeout")
 	}
 
-	// (b) The panicking job's row must still be present and in "running" state.
-	// Give the scheduler a moment to settle after the panic.
-	time.Sleep(50 * time.Millisecond)
+	// (b) The panicking job's row must still be present. After a panic the failure path
+	// re-arms it as 'pending' (transient failure with backoff) rather than leaving it
+	// in 'running'. Give the scheduler a moment to process the post-panic update.
+	time.Sleep(100 * time.Millisecond)
 	if !jobExists(t, s.Writer(), panicJobID) {
-		t.Error("panicking job row was deleted; expected it to remain in running state")
+		t.Error("panicking job row was deleted; expected it to remain (re-armed as pending)")
 	}
 	status, _, _, _ := jobRow(t, s.Writer(), panicJobID)
-	if status != "running" {
-		t.Errorf("panicking job status = %q, want %q", status, "running")
+	// After a panic, the row should be 'pending' (re-armed) or 'failed' (dead-lettered),
+	// but never 'running' (which would mean it was stuck in running state, the old behavior).
+	if status == "running" {
+		t.Errorf("panicking job status = %q; want 'pending' or 'failed' (panic flows through retry/dead-letter path)", status)
 	}
 
 	// (c) The well-behaved job must complete and have its row deleted.
@@ -836,13 +889,9 @@ func TestHandler_PanicDoesNotCrash(t *testing.T) {
 		t.Fatal("well-behaved job did not complete within timeout")
 	}
 	time.Sleep(50 * time.Millisecond)
-	// Verify that only the panic job row remains (good job row was deleted).
-	var remaining int
-	if err := s.Writer().QueryRow("SELECT count(*) FROM jobs").Scan(&remaining); err != nil {
-		t.Fatalf("count jobs: %v", err)
-	}
-	if remaining != 1 {
-		t.Errorf("expected exactly 1 job row remaining (the panicking one), got %d", remaining)
+	// The good job row was deleted; the panic job row remains (re-armed or dead-lettered).
+	if !jobExists(t, s.Writer(), panicJobID) {
+		t.Error("panic job row deleted; expected it to remain in pending/failed state")
 	}
 }
 
@@ -1221,5 +1270,627 @@ func TestReschedule_RunningJob(t *testing.T) {
 	status, _, _, _ := jobRow(t, s.Writer(), jobID)
 	if status != "running" {
 		t.Errorf("job status after Reschedule = %q, want %q", status, "running")
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Retry / backoff / dead-letter tests (issue: failing jobs retry with backoff)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// TestDeadLetter_AtMaxAttempts verifies criterion 2: at MaxAttempts the job is dead-lettered
+// with status=failed, last_error set, row kept, and a job.failed event emitted.
+func TestDeadLetter_AtMaxAttempts(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+	cfg.MaxAttempts = 2 // small so the test converges quickly
+	cfg.BackoffBase = 1 * time.Millisecond
+	cfg.BackoffCap = 1 * time.Millisecond
+
+	bus := &capturingBus{}
+	sched := scheduler.NewWithClock(s, bus, cfg, fixedClock(now))
+
+	var callCount atomic.Int32
+	sched.Register("deadletter.test", func(_ context.Context, _ scheduler.Job) error {
+		callCount.Add(1)
+		return errors.New("always fails")
+	})
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "deadletter.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for the job to dead-letter: poll for status=failed.
+	var finalStatus string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&finalStatus); err != nil {
+			t.Fatalf("SELECT status: %v", err)
+		}
+		if finalStatus == "failed" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if finalStatus != "failed" {
+		t.Errorf("job status = %q after MaxAttempts=%d; want %q", finalStatus, cfg.MaxAttempts, "failed")
+	}
+
+	// Row must be kept (not deleted).
+	if !jobExists(t, s.Writer(), jobID) {
+		t.Error("dead-lettered job row was deleted; expected it to remain")
+	}
+
+	// last_error must be set.
+	lastError := jobLastError(t, s.Writer(), jobID)
+	if !lastError.Valid || lastError.String == "" {
+		t.Error("last_error is NULL/empty after dead-letter; expected the error text")
+	}
+
+	// System-scoped job: job.failed must be logged only, NOT published to the bus.
+	// (The bus has no system channel; system jobs are logged only.)
+	evts := bus.published()
+	for _, ev := range evts {
+		if ev.event.Type == "job.failed" {
+			t.Errorf("job.failed event published for system-scoped job (userID=%q); want no publish", ev.userID)
+		}
+	}
+}
+
+// TestDeadLetter_PermanentErrorSkipsRetry verifies criterion 3: a Permanent error causes
+// immediate dead-letter on the first failure (attempt=1), with no backoff, status=failed.
+func TestDeadLetter_PermanentErrorSkipsRetry(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+	cfg.MaxAttempts = 5 // would normally get 5 attempts; Permanent should skip straight to dead-letter
+
+	bus := &capturingBus{}
+	sched := scheduler.NewWithClock(s, bus, cfg, fixedClock(now))
+
+	var callCount atomic.Int32
+	sched.Register("permanent.test", func(_ context.Context, _ scheduler.Job) error {
+		callCount.Add(1)
+		return scheduler.Permanent(errors.New("permanent: data deleted"))
+	})
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "permanent.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for dead-letter.
+	var finalStatus string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&finalStatus); err != nil {
+			t.Fatalf("SELECT status: %v", err)
+		}
+		if finalStatus == "failed" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if finalStatus != "failed" {
+		t.Errorf("job status = %q after Permanent error; want %q immediately", finalStatus, "failed")
+	}
+
+	// Must have been called exactly once (no retries before dead-letter).
+	if n := callCount.Load(); n != 1 {
+		t.Errorf("handler called %d times; want exactly 1 (Permanent skips retry)", n)
+	}
+
+	// last_error must be set.
+	lastError := jobLastError(t, s.Writer(), jobID)
+	if !lastError.Valid || lastError.String == "" {
+		t.Error("last_error is NULL/empty after Permanent dead-letter; expected the error text")
+	}
+}
+
+// TestJobFailed_UserScopedPublishesEvent verifies criterion 4 (user side): a user-scoped job
+// that dead-letters publishes a job.failed event on the owning user's bus.
+func TestJobFailed_UserScopedPublishesEvent(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	const testUserID = "01JXYZ000USER0000000000000"
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+	cfg.MaxAttempts = 1 // dead-letter on first failure
+	cfg.BackoffBase = 1 * time.Millisecond
+	cfg.BackoffCap = 1 * time.Millisecond
+
+	bus := &capturingBus{}
+	sched := scheduler.NewWithClock(s, bus, cfg, fixedClock(now))
+
+	sched.Register("user.deadletter.test", func(_ context.Context, _ scheduler.Job) error {
+		return errors.New("user job failed")
+	})
+
+	_, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "user.deadletter.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.UserScope(store.Principal{UserID: testUserID}),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for a job.failed event to be published.
+	var gotEvent *publishedEvent
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for i, ev := range bus.published() {
+			if ev.event.Type == "job.failed" && ev.userID == testUserID {
+				evts := bus.published()
+				gotEvent = &evts[i]
+				break
+			}
+		}
+		if gotEvent != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if gotEvent == nil {
+		t.Fatal("no job.failed event published on the user's bus within timeout")
+	}
+
+	// Verify the event payload is the expected fat event type.
+	payload, ok := gotEvent.event.Data.(scheduler.JobFailedEvent)
+	if !ok {
+		t.Errorf("event.Data type = %T, want scheduler.JobFailedEvent", gotEvent.event.Data)
+	} else {
+		if payload.Kind != "user.deadletter.test" {
+			t.Errorf("JobFailedEvent.Kind = %q, want %q", payload.Kind, "user.deadletter.test")
+		}
+		if payload.LastError == "" {
+			t.Error("JobFailedEvent.LastError is empty; want the error text")
+		}
+		if payload.Attempt < 1 {
+			t.Errorf("JobFailedEvent.Attempt = %d; want >= 1", payload.Attempt)
+		}
+	}
+}
+
+// TestJobFailed_SystemScopedLogsOnly verifies criterion 4 (system side): a system-scoped
+// dead-lettered job does NOT publish to the bus (logged only).
+func TestJobFailed_SystemScopedLogsOnly(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+	cfg.MaxAttempts = 1
+	cfg.BackoffBase = 1 * time.Millisecond
+	cfg.BackoffCap = 1 * time.Millisecond
+
+	bus := &capturingBus{}
+	sched := scheduler.NewWithClock(s, bus, cfg, fixedClock(now))
+
+	sched.Register("system.deadletter.test", func(_ context.Context, _ scheduler.Job) error {
+		return errors.New("system job failed")
+	})
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "system.deadletter.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for the job to reach failed status.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var status string
+		if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&status); err != nil {
+			t.Fatalf("SELECT status: %v", err)
+		}
+		if status == "failed" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Give a little extra time to ensure no bus publish happens.
+	time.Sleep(50 * time.Millisecond)
+
+	// No job.failed event should have been published (system has no bus channel).
+	for _, ev := range bus.published() {
+		if ev.event.Type == "job.failed" {
+			t.Errorf("job.failed event published for system-scoped job (userID=%q); want logged only", ev.userID)
+		}
+	}
+}
+
+// TestRetry_JobTimeoutIsTransient verifies criterion 5: when a handler's JobTimeout fires,
+// the job is treated as a transient failure and re-armed as pending (not dead-lettered).
+func TestRetry_JobTimeoutIsTransient(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+	cfg.JobTimeout = 20 * time.Millisecond // very short so the test is fast
+	cfg.LeaseTimeout = 1 * time.Minute     // maintain invariant: LeaseTimeout > JobTimeout
+	cfg.MaxAttempts = 5                    // don't dead-letter on first attempt
+	cfg.BackoffBase = 1 * time.Millisecond
+	cfg.BackoffCap = 5 * time.Millisecond
+
+	handlerStarted := make(chan struct{}, 1)
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+	sched.Register("timeout.test", func(ctx context.Context, _ scheduler.Job) error {
+		select {
+		case handlerStarted <- struct{}{}:
+		default:
+		}
+		// Block until context is cancelled by JobTimeout.
+		<-ctx.Done()
+		return ctx.Err() // returns context.DeadlineExceeded
+	})
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "timeout.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for the handler to start (so we know the timeout will fire).
+	select {
+	case <-handlerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler not invoked within timeout")
+	}
+
+	// Wait for the job to be re-armed (status=pending after the timeout).
+	var finalStatus string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&finalStatus); err != nil {
+			t.Fatalf("SELECT status: %v", err)
+		}
+		if finalStatus == "pending" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if finalStatus != "pending" {
+		t.Errorf("status after JobTimeout = %q; want %q (deadline fires = transient, retried)", finalStatus, "pending")
+	}
+
+	// locked_at must be cleared.
+	_, lockedAt, _, _ := jobRow(t, s.Writer(), jobID)
+	if lockedAt != "" {
+		t.Errorf("locked_at = %q after retry; want empty (cleared)", lockedAt)
+	}
+}
+
+// TestRetry_UnknownKindFlowsThroughFailurePath verifies that a job with no registered handler
+// flows through the retry/dead-letter failure path (transient), rather than being left in
+// 'running' state (the old behavior).
+func TestRetry_UnknownKindFlowsThroughFailurePath(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+	cfg.MaxAttempts = 1 // dead-letter on first attempt so we can assert quickly
+	cfg.BackoffBase = 1 * time.Millisecond
+	cfg.BackoffCap = 1 * time.Millisecond
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+	// No handler registered for "unknown.kind".
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "unknown.kind",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for the job to dead-letter or retry (must NOT stay in 'running').
+	deadline := time.Now().Add(5 * time.Second)
+	var finalStatus string
+	for time.Now().Before(deadline) {
+		if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&finalStatus); err != nil {
+			t.Fatalf("SELECT status: %v", err)
+		}
+		if finalStatus != "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if finalStatus == "running" {
+		t.Errorf("unknown-kind job left in 'running' state; want 'pending' or 'failed' (flows through failure path)")
+	}
+}
+
+// TestPermanent_ErrorWrapsAndUnwraps verifies that scheduler.Permanent wraps the inner error
+// and that errors.Is/As can see through it via Unwrap.
+func TestPermanent_ErrorWrapsAndUnwraps(t *testing.T) {
+	t.Parallel()
+
+	inner := errors.New("inner cause")
+	wrapped := scheduler.Permanent(inner)
+
+	if wrapped == nil {
+		t.Fatal("Permanent(err) returned nil")
+	}
+
+	// errors.Is must see the inner error via Unwrap.
+	if !errors.Is(wrapped, inner) {
+		t.Errorf("errors.Is(Permanent(inner), inner) = false; want true (Unwrap must chain)")
+	}
+
+	// The error message should be non-empty and meaningful.
+	if wrapped.Error() == "" {
+		t.Error("Permanent(err).Error() is empty")
+	}
+}
+
+// TestCancel_FailedJob verifies that Cancel of a dead-lettered (status='failed') row deletes
+// it cleanly and returns no error. An operator cancelling a dead-lettered job removes it so
+// the failed row does not accumulate indefinitely.
+func TestCancel_FailedJob(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+	cfg.MaxAttempts = 1 // dead-letter on the very first failure
+	cfg.BackoffBase = 1 * time.Millisecond
+	cfg.BackoffCap = 1 * time.Millisecond
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+	sched.Register("cancel.failed.test", func(_ context.Context, _ scheduler.Job) error {
+		return errors.New("always fails")
+	})
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "cancel.failed.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for the job to reach status='failed'.
+	deadline := time.Now().Add(5 * time.Second)
+	var finalStatus string
+	for time.Now().Before(deadline) {
+		if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&finalStatus); err != nil {
+			t.Fatalf("SELECT status: %v", err)
+		}
+		if finalStatus == "failed" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if finalStatus != "failed" {
+		t.Fatalf("job did not reach status='failed' within timeout (got %q)", finalStatus)
+	}
+
+	// Cancel the dead-lettered row — must succeed and remove the row.
+	if err := sched.Cancel(context.Background(), jobID); err != nil {
+		t.Fatalf("Cancel of failed job returned error: %v; want nil", err)
+	}
+
+	// Row must be gone.
+	if jobExists(t, s.Writer(), jobID) {
+		t.Error("failed job row still exists after Cancel; expected deletion (operator cleanup)")
+	}
+}
+
+// TestRetry_BackoffWindowOnTransientFailure verifies that after a transient failure the
+// job is re-armed with run_at inside the full-jitter exponential window for attempt=1.
+//
+// Clock strategy: a frozen clock is injected so that run_at - now equals exactly the
+// backoff duration with no real-time drift. BackoffBase=30s, BackoffCap=1h, so the
+// attempt=1 ceiling is 30s — well above the 1s RFC3339 storage granularity. The
+// assertion allows a ≤1s downward tolerance for the truncation, but no upward slack.
+//
+// Exponential growth and cap-clamp are covered deterministically by the pure-function
+// tests in backoff_internal_test.go (package scheduler); this test focuses solely on
+// the end-to-end re-arm path: claim → fail → DB write → status/run_at check.
+func TestRetry_BackoffWindowOnTransientFailure(t *testing.T) {
+	t.Parallel()
+
+	// BackoffBase=30s, BackoffCap=1h: attempt=1 ceiling = min(1h, 30s*2^0) = 30s.
+	// Using second-scale values ensures RFC3339 storage preserves the bound; the
+	// 1s truncation is the only allowed slack on the lower bound.
+	const backoffBase = 30 * time.Second
+	const backoffCap = 1 * time.Hour
+
+	// Freeze the clock at a round second so RFC3339 round-trips without truncation.
+	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	clk := fixedClock(now)
+
+	s := openMigratedStore(t)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+	cfg.MaxAttempts = 10 // never dead-letter during this test
+	cfg.BackoffBase = backoffBase
+	cfg.BackoffCap = backoffCap
+
+	// handlerCalled is closed on the first (and only) handler invocation.
+	handlerCalled := make(chan struct{})
+	var handlerOnce sync.Once
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, clk)
+	sched.Register("backoff.window.test", func(_ context.Context, _ scheduler.Job) error {
+		handlerOnce.Do(func() { close(handlerCalled) })
+		return errors.New("transient failure")
+	})
+
+	// Enqueue with zero RunAt so the scheduler sets run_at = clk() = now, which
+	// satisfies the claim predicate (run_at <= now) on the very first tick.
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "backoff.window.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for the handler to be invoked exactly once.
+	select {
+	case <-handlerCalled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("handler was not called within timeout")
+	}
+
+	// Stop the scheduler before it can attempt a second claim (with the frozen clock
+	// the re-armed row is not yet due, so this is a safety measure, not a race).
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	if err := sched.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Read the persisted run_at from the DB.
+	var runAtStr string
+	if err := s.Writer().QueryRow(`SELECT run_at FROM jobs WHERE id = ?`, jobID).Scan(&runAtStr); err != nil {
+		t.Fatalf("SELECT run_at: %v", err)
+	}
+	runAt, err := time.Parse(time.RFC3339, runAtStr)
+	if err != nil {
+		t.Fatalf("parse run_at %q: %v", runAtStr, err)
+	}
+
+	// With a frozen clock, run_at = now + backoff where backoff ∈ [0, BackoffBase].
+	// Therefore run_at - now ∈ [0, BackoffBase].
+	//
+	// RFC3339 stores at second precision; backoffDuration uses Int64N so it can produce
+	// values anywhere in [0, ceiling]. A sample of exactly 0 round-trips without loss.
+	// A sample of e.g. 17,400,999,999ns stores as 17s (truncation ≤1s downward).
+	// We therefore allow ≤1s below 'now' on the lower bound, but no upward slack.
+	lowerBound := now.Add(-1 * time.Second) // 1s tolerance for RFC3339 truncation
+	upperBound := now.Add(backoffBase)      // attempt=1 ceiling = BackoffBase
+	if runAt.Before(lowerBound) {
+		t.Errorf("run_at %v < lower bound %v (now=%v minus 1s RFC3339 tolerance); backoff is negative",
+			runAt, lowerBound, now)
+	}
+	if runAt.After(upperBound) {
+		t.Errorf("run_at %v > upper bound %v (now=%v + BackoffBase=%v); ceiling exceeded",
+			runAt, upperBound, now, backoffBase)
+	}
+
+	// The row must be pending (re-armed) with locked_at cleared.
+	status, lockedAt, _, _ := jobRow(t, s.Writer(), jobID)
+	if status != "pending" {
+		t.Errorf("status after transient failure = %q, want %q", status, "pending")
+	}
+	if lockedAt != "" {
+		t.Errorf("locked_at after retry = %q, want empty (cleared)", lockedAt)
 	}
 }

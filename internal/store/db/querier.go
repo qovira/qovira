@@ -33,6 +33,13 @@ type Querier interface {
 	//
 	// Parameters use sqlc named params (@name) per the house convention.
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler marks an exhausted job as permanently
+	// failed. Sets status='failed', records last_error, and clears locked_at. The row is intentionally
+	// kept (NOT deleted) so operators can inspect dead-lettered jobs. AND status = 'running' ensures
+	// the update only applies to rows the scheduler actually leased, guarding against a future
+	// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
+	// and silently tolerated by the caller.
+	DeadLetterJob(ctx context.Context, arg DeadLetterJobParams) (int64, error)
 	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler deletes the row after a handler
 	// succeeds. The scheduler owns the row lifecycle; no user_id predicate is applicable.
 	DeleteJob(ctx context.Context, id string) error
@@ -125,6 +132,13 @@ type Querier interface {
 	// non-pending status as ErrJobRunning or ErrJobNotFound
 	// after reading the status inside the enclosing transaction.
 	RescheduleJob(ctx context.Context, arg RescheduleJobParams) (int64, error)
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler re-arms a failed job row for retry
+	// with a backoff run_at. Sets status='pending', clears locked_at, and advances run_at so the
+	// job re-enters the claim queue at the calculated backoff time. AND status = 'running' ensures
+	// the update only applies to rows the scheduler actually leased, guarding against a future
+	// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
+	// and silently tolerated by the caller.
+	RetryJob(ctx context.Context, arg RetryJobParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)

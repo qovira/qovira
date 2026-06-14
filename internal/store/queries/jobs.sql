@@ -35,3 +35,23 @@ SELECT status FROM jobs WHERE id = @id;
 -- after reading the status inside the enclosing transaction.
 UPDATE jobs SET run_at = @run_at, updated_at = @updated_at
 WHERE id = @id AND status = 'pending';
+
+-- name: RetryJob :execrows
+-- scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler re-arms a failed job row for retry
+-- with a backoff run_at. Sets status='pending', clears locked_at, and advances run_at so the
+-- job re-enters the claim queue at the calculated backoff time. AND status = 'running' ensures
+-- the update only applies to rows the scheduler actually leased, guarding against a future
+-- double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
+-- and silently tolerated by the caller.
+UPDATE jobs SET status = 'pending', run_at = @run_at, locked_at = NULL, updated_at = @updated_at
+WHERE id = @id AND status = 'running';
+
+-- name: DeadLetterJob :execrows
+-- scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler marks an exhausted job as permanently
+-- failed. Sets status='failed', records last_error, and clears locked_at. The row is intentionally
+-- kept (NOT deleted) so operators can inspect dead-lettered jobs. AND status = 'running' ensures
+-- the update only applies to rows the scheduler actually leased, guarding against a future
+-- double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
+-- and silently tolerated by the caller.
+UPDATE jobs SET status = 'failed', last_error = @last_error, locked_at = NULL, updated_at = @updated_at
+WHERE id = @id AND status = 'running';
