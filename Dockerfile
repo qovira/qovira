@@ -1,11 +1,15 @@
 # syntax=docker/dockerfile:1
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Build stage
-# golang:1.26-bookworm — glibc matches the distroless base-debian12 (bookworm)
-# runtime, so dynamic-linked libcrypto loads cleanly in the runtime image.
+# Build stage — pinned to the BUILD platform (--platform=$BUILDPLATFORM) so a
+# multi-arch `docker buildx` build cross-compiles instead of emulating: the
+# build stage always runs on the native runner arch, and the arm64 target is
+# reached by Go's cgo cross-compiler (CC + GOARCH below), so no QEMU is needed
+# and both arches build on one amd64 runner. golang:1.26-bookworm — glibc
+# matches the distroless base-debian12 (bookworm) runtime, so the dynamic-linked
+# libcrypto loads cleanly in the runtime image.
 # ──────────────────────────────────────────────────────────────────────────────
-FROM golang:1.26-bookworm@sha256:13e7249b4618c115a175ea2627213131855233ecf465328cac30a0f754beb985 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm@sha256:13e7249b4618c115a175ea2627213131855233ecf465328cac30a0f754beb985 AS build
 
 # Build-info ARGs — default to safe sentinels so a bare "docker build" works.
 ARG VERSION=dev
@@ -25,7 +29,8 @@ ARG TARGETPLATFORM
 # the cross toolchain): add the arm64 architecture and install
 # crossbuild-essential-arm64 + libssl-dev:arm64 so the CGO build can target
 # aarch64. The cross-compile path is architecture-gated and not verified in the
-# amd64-only local environment; it is CI-verified via the GitHub Actions matrix.
+# amd64-only local environment; it is CI-verified by the Docker build job, which
+# builds both linux/amd64 and linux/arm64 via buildx.
 # dpkg --add-architecture is gated so amd64 builds don't pull arm64 package
 # lists from apt, keeping the update step fast on the common path.
 RUN if [ "$TARGETARCH" = "arm64" ]; then dpkg --add-architecture arm64; fi && \

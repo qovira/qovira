@@ -15,6 +15,18 @@ This repository holds the Qovira **application server**: a single Go binary that
 - Go 1.26+
 - A C toolchain (GCC/Clang) and OpenSSL headers — CGO is required to build the SQLCipher driver.
 
+## Platform support
+
+Qovira's encrypted store is built on the [go-sqlcipher](https://github.com/omnilium/go-sqlcipher) driver, whose SQLCipher codec links OpenSSL's `libcrypto`, so the supported targets follow its native toolchain constraints:
+
+| OS | Arch | Status |
+| --- | --- | --- |
+| Linux | x86-64, ARM64 | Supported |
+| macOS | Apple Silicon (ARM64) | Supported (requires Homebrew OpenSSL). Intel macOS is **not** supported. |
+| Windows | any | **Not supported.** It should in principle compile with a MinGW toolchain and an OpenSSL built for it, but we do not wire Windows OpenSSL paths, build it, or test it. Use at your own risk. |
+
+CI builds and race-tests every supported target on Blacksmith runners; lint and vulnerability scanning run on Linux x86-64; the container image is built (not published) for both Linux arches.
+
 ## Build
 
 ```sh

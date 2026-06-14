@@ -45,7 +45,7 @@ Multi-stage `Dockerfile`: `golang:1.26-bookworm` builds the CGO binary; the runt
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every PR and push to `main`: **build**, **lint** (golangci-lint), **race** (`go test -race`), **vuln** (govulncheck) — each on a Blacksmith runner (house rule: every job runs on Blacksmith). No release/publish workflow: this app is deployed, not published.
+`.github/workflows/ci.yml` runs on every PR and push to `main`: **build** and **race** (`go test -race`) across every supported OS/arch target (Linux x86-64, Linux ARM64, Apple Silicon macOS — the SQLCipher cgo build and its OpenSSL linkage are platform-specific, so a green Linux x64 leg says nothing about the others); **lint** (golangci-lint) and **vuln** (govulncheck) once on Linux x86-64 (static, platform-agnostic). Every job runs on a Blacksmith runner (house rule: every job runs on Blacksmith) and shares the `./.github/actions/setup` composite action, which provisions OpenSSL (`libssl-dev` on Linux, Homebrew `openssl` on macOS) and sets up Go with caching. A **docker** job builds the container image for both Linux arches (`linux/amd64` + `linux/arm64`) via the Blacksmith buildx drop-ins — `push: false`, so it only proves the multi-stage Dockerfile (incl. the arm64 cross-compile path) builds cleanly; nothing is published. No release/publish workflow: this app is deployed, not published.
 
 ## Conventions
 

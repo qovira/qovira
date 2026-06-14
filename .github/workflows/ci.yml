@@ -18,63 +18,98 @@ env:
   GOFLAGS: "-trimpath"
 
 jobs:
+  # Build and Test run across every supported OS/arch target: the SQLCipher cgo
+  # build (via go-sqlcipher) and its OpenSSL linkage are platform-specific, so a
+  # green Linux x64 run says nothing about ARM64 or Apple Silicon. Lint and Vuln
+  # are static, platform-agnostic analyses and run once on Linux x64.
+  #
+  # House rule (writing-workflows): every job runs on Blacksmith, never a
+  # GitHub-hosted runner. 2 vCPU is the like-for-like Linux default; macOS starts
+  # at Blacksmith's smallest size, 6 vCPU.
   build:
-    name: Build
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: blacksmith-2vcpu-ubuntu-2404
+          - target: linux-arm64
+            runner: blacksmith-2vcpu-ubuntu-2404-arm
+          - target: macos-arm64
+            runner: blacksmith-6vcpu-macos-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
       - name: Build
         run: go build ./...
+
+  race:
+    name: Test (race, ${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: blacksmith-2vcpu-ubuntu-2404
+          - target: linux-arm64
+            runner: blacksmith-2vcpu-ubuntu-2404-arm
+          - target: macos-arm64
+            runner: blacksmith-6vcpu-macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+      - name: go test -race
+        run: go test -race ./...
 
   lint:
     name: Lint
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.12.2
 
-  race:
-    name: Test (race)
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: go test -race
-        run: go test -race ./...
-
   vuln:
     name: Vulnerability scan
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
-
       - name: govulncheck
         run: govulncheck ./...
+
+  # Build the container image for both supported Linux arches. The image is not
+  # published — this leg only proves the multi-stage Dockerfile builds cleanly,
+  # including the arm64 cross-compile path that `make docker-build` can't
+  # exercise on an amd64 host. The Dockerfile pins its build stage to
+  # BUILDPLATFORM and cross-compiles to the target arch (Go's cgo cross-compiler
+  # links the SQLCipher build against the arm64 OpenSSL), so both arches build on
+  # one amd64 runner with no QEMU emulation. 4 vCPU: the two platform builds run
+  # concurrently and each compiles the large SQLCipher amalgamation.
+  #
+  # Blacksmith Docker conventions (writing-workflows): the buildx actions are the
+  # useblacksmith/* drop-ins and there is no type=gha layer cache — Blacksmith
+  # persists build layers itself.
+  docker:
+    name: Docker image
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - uses: useblacksmith/setup-docker-builder@v1
+      - name: Build image (linux/amd64, linux/arm64)
+        uses: useblacksmith/build-push-action@v2
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            VERSION=ci
+            COMMIT=${{ github.sha }}

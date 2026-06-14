@@ -1,0 +1,33 @@
+name: Set up toolchain
+description: >-
+  Provisions the OpenSSL development libraries the SQLCipher cgo build links
+  against (libcrypto), then sets up Go from go.mod with module/build caching.
+  Qovira's encrypted store uses the go-sqlcipher driver, whose bundled SQLCipher
+  amalgamation links libcrypto on every platform, so this runs in every CI job
+  to keep the OpenSSL setup in one place across the OS/arch matrix.
+
+runs:
+  using: composite
+  steps:
+    # go-sqlcipher compiles the SQLCipher codec against OpenSSL and links
+    # -lcrypto, so libcrypto's dev headers + library must be present on every
+    # runner, Linux and macOS alike — without them the cgo build fails to link.
+    - name: Install OpenSSL (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev
+
+    # macOS: install via Homebrew. go-sqlcipher hard-codes the Homebrew keg paths
+    # (/opt/homebrew/opt/openssl) on Apple Silicon, so the keg must be present.
+    # Idempotent — a no-op when already in the image.
+    - name: Install OpenSSL (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install openssl
+
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+        cache: true
