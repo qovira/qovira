@@ -51,3 +51,10 @@ func (r *Router) Handle(pattern string, h http.Handler) {
 func (r *Router) HandleFunc(pattern string, h http.HandlerFunc) {
 	r.mux.HandleFunc(pattern, h)
 }
+
+// ServeHTTP satisfies [http.Handler], delegating directly to the underlying
+// mux. Tests can pass *Router to [net/http/httptest] without unwrapping the mux;
+// production code uses NewServer, which wraps the mux with middleware via Chain.
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.mux.ServeHTTP(w, req)
+}

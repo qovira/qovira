@@ -24,6 +24,12 @@ type Querier interface {
 	// this count is zero (no siblings remain pending or were resolved by the user).
 	// User-scoped: requires user_id to prevent cross-user information leakage.
 	CountNonExpiredConfirmationsByMessageID(ctx context.Context, arg CountNonExpiredConfirmationsByMessageIDParams) (int64, error)
+	// Count reminders for a user with optional status and due-window filters.
+	// Uses the same filter predicates as ListReminders so the count is always
+	// consistent with what a list query would return. The result is used by the
+	// list_reminders tool to emit a truncation signal when more than 20 match.
+	// MANDATORY user_id predicate enforced by scope guard.
+	CountReminders(ctx context.Context, arg CountRemindersParams) (int64, error)
 	// Queries for the sessions table.
 	// sessions is per-user data (it has a user_id column and belongs to individual users), but
 	// some queries operate on a token_hash key (the bearer capability itself) rather than a
@@ -51,6 +57,7 @@ type Querier interface {
 	// succeeds. The scheduler owns the row lifecycle; no user_id predicate is applicable.
 	DeleteJob(ctx context.Context, id string) error
 	DeleteOtherSessionsForUser(ctx context.Context, arg DeleteOtherSessionsForUserParams) (int64, error)
+	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; this path is used for single-session logout and best-effort
 	// delete-on-expiry, both keyed by the bearer token before a user_id is available.
@@ -81,6 +88,7 @@ type Querier interface {
 	// on the write pool to provide a consistent read-then-write with no TOCTOU window.
 	GetJobStatus(ctx context.Context, id string) (string, error)
 	GetPendingConfirmation(ctx context.Context, arg GetPendingConfirmationParams) (PendingConfirmation, error)
+	GetReminder(ctx context.Context, arg GetReminderParams) (Reminder, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
 	// predicate is possible or meaningful at this lookup stage.
@@ -103,6 +111,13 @@ type Querier interface {
 	// Every SELECT/UPDATE includes a user_id predicate so the row always
 	// belongs to the bound Scope. Parameters use sqlc named params (@name).
 	InsertPendingConfirmation(ctx context.Context, arg InsertPendingConfirmationParams) (PendingConfirmation, error)
+	// Scoped queries for the reminders table.
+	// reminders is user-owned: every SELECT/UPDATE/DELETE includes a user_id
+	// predicate so rows are always confined to the bound Scope.  The CI scope
+	// guard (TestScopeGuard_RealQueries) enforces this at build time.
+	//
+	// Parameters use sqlc named params (@name) per the house convention.
+	InsertReminder(ctx context.Context, arg InsertReminderParams) error
 	// Scoped queries for the user_data exemplar table.
 	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
 	// comes from and is limited to the bound Scope. This pattern is the template
@@ -118,6 +133,23 @@ type Querier interface {
 	// the caller can scope per-row operations (abandon message, emit per-user event).
 	ListLapsedConfirmations(ctx context.Context, now string) ([]PendingConfirmation, error)
 	ListMessages(ctx context.Context, arg ListMessagesParams) ([]ListMessagesRow, error)
+	// List reminders for a user with optional status and due-window filters,
+	// keyset-paginated on (due_at, id).  Fetches limit+1 rows so the caller can
+	// detect whether a next page exists.
+	//
+	// Optional filters use sqlc.narg so absent values are NULL and the predicate
+	// becomes a no-op.  The keyset predicate uses the expanded form of the tuple
+	// comparison (due_at, id) > (cursor_due, cursor_id), which is logically
+	// identical: skip rows that sort before the cursor.  Both forms produce the
+	// same result set; the expanded form is required because sqlc's SQLite parser
+	// does not recognise the row-value syntax (col, col) > (?, ?).
+	//
+	// The query is served by the reminders_user_due index on (user_id, due_at, id).
+	// That index satisfies ORDER BY due_at, id directly from the index-ordered stream
+	// for both the no-status path and the status-filtered path (status is a residual
+	// predicate).  No USE TEMP B-TREE FOR ORDER BY occurs in either case, verified
+	// by EXPLAIN QUERY PLAN in TestListReminders_IndexPlan.
+	ListReminders(ctx context.Context, arg ListRemindersParams) ([]Reminder, error)
 	// List all settings whose key starts with @prefix, ordered by key. The caller
 	// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
 	// those escapes literal, so a prefix containing '_' or '%' matches literally
@@ -154,8 +186,20 @@ type Querier interface {
 	// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
 	// and silently tolerated by the caller.
 	RetryJob(ctx context.Context, arg RetryJobParams) (int64, error)
+	SetReminderFireJobID(ctx context.Context, arg SetReminderFireJobIDParams) (int64, error)
+	StampFiredAutoComplete(ctx context.Context, arg StampFiredAutoCompleteParams) (int64, error)
+	StampFiredKeepActive(ctx context.Context, arg StampFiredKeepActiveParams) (int64, error)
+	// Advances a recurring reminder after each fire: stamps last_fired_at, advances
+	// due_at to the next occurrence, and keeps status=active. Only the fire handler
+	// calls this; UpdateReminder intentionally excludes last_fired_at.
+	StampFiredRecurring(ctx context.Context, arg StampFiredRecurringParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
+	// Writes all mutable columns for a single reminder row.
+	// last_fired_at is intentionally excluded: the fire handler is its sole writer.
+	// fire_job_id is included so Service owns all fire-job lifecycle transitions.
+	// MANDATORY user_id predicate enforced by scope guard.
+	UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)
 	// Queries for the conversations table.

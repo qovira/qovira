@@ -22,6 +22,7 @@ import (
 	"github.com/qovira/qovira/internal/gateway"
 	"github.com/qovira/qovira/internal/harness"
 	"github.com/qovira/qovira/internal/httpx"
+	"github.com/qovira/qovira/internal/reminders"
 	"github.com/qovira/qovira/internal/scheduler"
 	"github.com/qovira/qovira/internal/store"
 )
@@ -239,6 +240,15 @@ func New(
 	gw := gateway.New(s.Settings())
 	h := harness.New(reg, gw, s, bus, harnessCfg, logger)
 	h.Routes(router)
+
+	// Step 10b: construct the reminders module and mount its routes. reminders.New
+	// registers the "reminder.fire" handler on sched before Start is called (step 13),
+	// satisfying the invariant that all handlers are registered before the first tick.
+	remMod := reminders.New(s, sched, bus, sched)
+	remMod.Routes(router)
+	if err := reg.Add(remMod); err != nil {
+		return nil, fmt.Errorf("app: register %s tools: %w", remMod.Name(), err)
+	}
 
 	// Step 11: register scheduler handlers that depend on the harness being constructed.
 	// The handler must be registered before RegisterPeriodic upserts the row, and both
