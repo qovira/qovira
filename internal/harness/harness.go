@@ -12,6 +12,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -125,6 +126,22 @@ type ToolCompletedPayload struct {
 	Result any    `json:"result"`
 }
 
+// ToolFailedPayload is the Data for a "tool.failed" event, emitted when a tool
+// call returns a *capability.ToolError (a model-visible, self-correctable error).
+// Error carries only the model-safe ToolError.Message — no internal detail.
+type ToolFailedPayload struct {
+	CallID string `json:"callId"`
+	Error  string `json:"error"`
+}
+
+// TurnFailedPayload is the Data for a "turn.failed" event, emitted when the
+// turn aborts due to an infrastructure error (auth failure, upstream error,
+// network failure, recovered panic, etc.). Code is a stable, generic class
+// string — NOT the raw error text; the raw detail goes to the server log only.
+type TurnFailedPayload struct {
+	Code string `json:"code"`
+}
+
 // ── Config ────────────────────────────────────────────────────────────────────
 
 // defaultStepCap is the maximum number of model rounds per turn when no explicit
@@ -206,8 +223,28 @@ func (h *Harness) StartTurn(
 ) error {
 	//nolint:gosec // Intentional: the turn must outlive the request context; background context is correct here.
 	go func() {
+		// Panic recovery: a panic anywhere in run (including in tool Execute or
+		// gateway code) is infrastructure — abort the turn cleanly so the goroutine
+		// does not crash the server.
+		defer func() {
+			if r := recover(); r != nil {
+				h.logger.Error("harness: turn panicked", "conversationId", conv, "panic", r)
+				h.bus.Publish(principal.UserID, events.Event{
+					Type: "turn.failed",
+					Data: TurnFailedPayload{Code: "infrastructure"},
+				})
+			}
+		}()
+
 		if err := h.run(context.Background(), conv, principal); err != nil {
+			// run only returns errors that are not already handled (i.e., infra
+			// errors that abort the turn). Log the detail server-side and emit
+			// a generic code to the bus so no internal detail leaks to clients.
 			h.logger.Error("harness: turn failed", "conversationId", conv, "err", err)
+			h.bus.Publish(principal.UserID, events.Event{
+				Type: "turn.failed",
+				Data: TurnFailedPayload{Code: "infrastructure"},
+			})
 		}
 	}()
 	return nil
@@ -227,6 +264,14 @@ func (h *Harness) StartTurn(
 //
 // The loop is bounded by h.stepCap. If the cap is reached, a graceful "unable to
 // finish" assistant message is persisted and message.completed is emitted.
+//
+// Error handling: run classifies errors via classify() and acts accordingly.
+//   - faultToolError: persisted as tool result, emits tool.failed, loop continues.
+//   - faultContextLength: routed to handleContextLength (seam for context-assembly slice).
+//   - faultInfrastructure: returned to StartTurn, which logs and emits turn.failed.
+//
+// run returns only infrastructure errors; ToolError and ErrContextLength are
+// handled internally and never returned.
 func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.Principal) error {
 	scope := store.UserScope(principal)
 	sq := h.store.ForUser(scope)
@@ -256,17 +301,19 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 			return fmt.Errorf("harness: assemble request (step %d): %w", step, err)
 		}
 
-		seq, err := h.gw.Chat(ctx, req)
-		if err != nil {
-			return fmt.Errorf("harness: chat setup (step %d): %w", step, err)
+		seq, setupErr := h.gw.Chat(ctx, req)
+		if setupErr != nil {
+			return h.classifyGatewayError(ctx, sq, conv, principal.UserID, setupErr, step, "chat setup")
 		}
 
 		var textAccum []byte
 		var calls []*gateway.ToolCall
+		var streamErr error
 
 		for chunk, chunkErr := range seq {
 			if chunkErr != nil {
-				return fmt.Errorf("harness: stream error (step %d): %w", step, chunkErr)
+				streamErr = chunkErr
+				break
 			}
 			if chunk.TextDelta != "" {
 				textAccum = append(textAccum, chunk.TextDelta...)
@@ -284,6 +331,10 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 			if chunk.Done {
 				break
 			}
+		}
+
+		if streamErr != nil {
+			return h.classifyGatewayError(ctx, sq, conv, principal.UserID, streamErr, step, "stream")
 		}
 
 		// Done with no tool calls: this is the final reply — persist and stop.
@@ -315,6 +366,8 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 		// Execute tool calls in order, persisting each result immediately.
 		for _, c := range calls {
 			if err := h.executeAndPersistToolCall(ctx, sq, conv, principal.UserID, c, toolMap, scope); err != nil {
+				// executeAndPersistToolCall only returns infrastructure errors;
+				// ToolErrors are handled internally (persisted + tool.failed emitted).
 				return fmt.Errorf("harness: execute tool call %q (step %d): %w", c.ID, step, err)
 			}
 		}
@@ -332,6 +385,66 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 		Data: CompletedPayload{
 			MessageID:    assistantID,
 			FinishReason: "step_cap",
+		},
+	})
+	return nil
+}
+
+// classifyGatewayError classifies a gateway or stream error and routes accordingly.
+// Returns nil when the faultContextLength seam handles it gracefully (persists a
+// message and emits message.completed); propagates an infra error if the seam's
+// own persistence fails. Returns the wrapped original error for faultInfrastructure
+// so the caller can return it and trigger turn.failed.
+func (h *Harness) classifyGatewayError(
+	ctx context.Context,
+	sq *store.ScopedQueries,
+	conv, userID string,
+	err error,
+	step int,
+	phase string,
+) error {
+	fault := classify(err)
+	if fault == faultContextLength {
+		// Route to the context-length seam. The context-assembly slice will implement
+		// actual prompt trimming and retry here.
+		return h.handleContextLength(ctx, sq, conv, userID)
+	}
+	// faultToolError and faultInfrastructure: a gateway returning a ToolError is
+	// unusual (the gateway is not a tool), but both cases abort the turn the same
+	// way — wrap and return so StartTurn logs the detail and emits turn.failed.
+	return fmt.Errorf("harness: %s (step %d): %w", phase, step, err)
+}
+
+// handleContextLength is the seam for the context-assembly slice. It is called
+// when the gateway returns ErrContextLength (prompt too long for the model's
+// context window). The context-assembly slice will replace this stub with actual
+// prompt trimming and retry logic.
+//
+// Current stub: produce a graceful "conversation too long" outcome so the turn
+// ends cleanly rather than aborting with an opaque infrastructure error.
+//
+// context-assembly slice implements the actual trimming
+func (h *Harness) handleContextLength(
+	ctx context.Context,
+	sq *store.ScopedQueries,
+	conv, userID string,
+) error {
+	const msg = "This conversation has grown too long for me to continue. Please start a new conversation."
+	assistantID, err := persistAssistantMessage(ctx, sq, conv, msg, "")
+	if err != nil {
+		// Persist failure is infrastructure — let it propagate.
+		return fmt.Errorf("harness: persist context-length message: %w", err)
+	}
+	// Emit message.completed as the single terminal event for this turn. The
+	// context-assembly slice can later trim-and-retry (no terminal event) or,
+	// on irrecoverable overflow, fall through to this single-message.completed
+	// graceful pattern. turn.failed must NOT also be emitted — clients treat
+	// message.completed and turn.failed as mutually exclusive terminal events.
+	h.bus.Publish(userID, events.Event{
+		Type: "message.completed",
+		Data: CompletedPayload{
+			MessageID:    assistantID,
+			FinishReason: "context_length",
 		},
 	})
 	return nil
@@ -397,15 +510,17 @@ func (h *Harness) assembleChatRequest(
 // ── tool execution ────────────────────────────────────────────────────────────
 
 // executeAndPersistToolCall executes one tool call from the model, emits
-// tool.started and tool.completed events, and persists the result message.
+// tool lifecycle events, and persists the result message.
 //
-// On a tool Execute returning an error, the error is persisted as the tool-result
-// content and the turn continues (error classification into ToolError vs.
-// infrastructure error is deferred to the error-classification slice).
-// refined in the error-classification slice
+// Error classification:
+//   - If the model names an unknown tool: treated as a model fault (hallucinated
+//     tool name), produces a *capability.ToolError so the model can self-correct.
+//   - If tool.Execute returns a *capability.ToolError: persisted as tool-result
+//     (model-safe message only), emits tool.failed, turn continues.
+//   - If tool.Execute returns any other error: infrastructure — the error is
+//     returned so the caller aborts the turn and emits turn.failed.
 //
-// If the model names a tool not in the catalog, a tool-result noting "unknown
-// tool" is persisted and the turn continues.
+// This method returns only infrastructure errors; ToolError paths return nil.
 func (h *Harness) executeAndPersistToolCall(
 	ctx context.Context,
 	sq *store.ScopedQueries,
@@ -432,16 +547,28 @@ func (h *Harness) executeAndPersistToolCall(
 		},
 	})
 
-	var result any
+	// Unknown tool: the model hallucinated a tool name — model fault, not infra.
+	// Produce a *capability.ToolError so it flows through the same tool.failed + continue path.
 	if !found {
-		result = map[string]string{"error": "unknown tool: " + call.Name}
-	} else {
-		var execErr error
-		result, execErr = tool.Execute(ctx, scope, call.Arguments)
-		if execErr != nil {
-			// refined in the error-classification slice
-			result = map[string]string{"error": execErr.Error()}
+		toolErr := &capability.ToolError{
+			Code:    "unknown_tool",
+			Message: "unknown tool: " + call.Name,
 		}
+		return h.persistToolError(ctx, sq, conv, userID, call.ID, toolErr)
+	}
+
+	result, execErr := tool.Execute(ctx, scope, call.Arguments)
+	if execErr != nil {
+		if classify(execErr) == faultToolError {
+			// Model-visible error: persist model-safe message, emit tool.failed, continue.
+			var toolErr *capability.ToolError
+			// errors.As is guaranteed to succeed since classify returned faultToolError.
+			_ = errors.As(execErr, &toolErr)
+			return h.persistToolError(ctx, sq, conv, userID, call.ID, toolErr)
+		}
+		// faultContextLength and faultInfrastructure: context-length from a tool is
+		// not something the model can self-correct, so treat both as infra — abort.
+		return fmt.Errorf("execute tool %q: %w", call.Name, execErr)
 	}
 
 	// Persist tool-result message.
@@ -468,6 +595,47 @@ func (h *Harness) executeAndPersistToolCall(
 		},
 	})
 
+	return nil
+}
+
+// persistToolError persists a *capability.ToolError as the tool-result message
+// and emits tool.failed with the model-safe message. The turn continues after
+// this call (the caller returns nil). No internal error detail is exposed.
+func (h *Harness) persistToolError(
+	ctx context.Context,
+	sq *store.ScopedQueries,
+	conv, userID, callID string,
+	toolErr *capability.ToolError,
+) error {
+	// Persist the tool-result with the model-safe message so the next round's
+	// assembly feeds it back to the model and it can self-correct.
+	resultJSON, err := json.Marshal(map[string]string{
+		"error": toolErr.Message,
+		"code":  toolErr.Code,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal tool error result for call %s: %w", callID, err)
+	}
+	if _, err := sq.InsertMessage(ctx, store.InsertMessageParams{
+		ID:             generateID(),
+		ConversationID: conv,
+		Role:           "tool",
+		Content:        string(resultJSON),
+		ToolCallID:     callID,
+	}); err != nil {
+		return fmt.Errorf("persist tool error result for call %s: %w", callID, err)
+	}
+
+	// Emit tool.failed with only the model-safe message — no internal detail.
+	h.bus.Publish(userID, events.Event{
+		Type: "tool.failed",
+		Data: ToolFailedPayload{
+			CallID: callID,
+			Error:  toolErr.Message,
+		},
+	})
+
+	// Return nil so the loop continues — the model will self-correct.
 	return nil
 }
 
