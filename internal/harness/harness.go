@@ -16,12 +16,14 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"time"
 	"unicode/utf8"
 
 	"github.com/qovira/qovira/internal/capability"
 	"github.com/qovira/qovira/internal/events"
 	"github.com/qovira/qovira/internal/gateway"
 	"github.com/qovira/qovira/internal/store"
+	"github.com/qovira/qovira/internal/store/db"
 )
 
 // ── Narrow interfaces ─────────────────────────────────────────────────────────
@@ -148,24 +150,48 @@ type TurnFailedPayload struct {
 // cap is configured.
 const defaultStepCap = 8
 
+// defaultHistoryTokenBudget is the soft token budget for history messages when
+// none is configured. The system prompt sits outside the budget.
+const defaultHistoryTokenBudget = 50_000
+
+// defaultMaxContextRetries is the maximum number of additional trim-and-retry
+// attempts when the gateway returns ErrContextLength.
+const defaultMaxContextRetries = 2
+
 // Config holds boot-time configuration for the harness.
 type Config struct {
 	// StepCap limits the number of model-gateway rounds (including tool-call
 	// loops) per turn. If <= 0, the default of 8 is applied. On reaching the
 	// cap the turn ends gracefully with a final assistant message.
 	StepCap int
+
+	// HistoryTokenBudget is the soft token budget (chars/4 heuristic) for history
+	// messages included in each assembled ChatRequest. The system prompt is always
+	// included and does NOT count toward this budget. If <= 0, the default of
+	// 50_000 is applied.
+	HistoryTokenBudget int
+
+	// MaxContextRetries is the maximum number of additional trim-and-retry
+	// attempts when the gateway returns ErrContextLength. Each retry applies a
+	// harder trim (drops one more oldest group). If <= 0, the default of 2 is
+	// applied. After exhausting retries the turn emits a graceful
+	// message.completed{finishReason:"context_length"}.
+	MaxContextRetries int
 }
 
 // ── Harness ───────────────────────────────────────────────────────────────────
 
 // Harness is the AI turn orchestrator. Obtain one via New; the zero value is not valid.
 type Harness struct {
-	reg     Cataloger
-	gw      Chatter
-	store   *store.Store
-	bus     events.Publisher
-	stepCap int
-	logger  *slog.Logger
+	reg                Cataloger
+	gw                 Chatter
+	store              *store.Store
+	bus                events.Publisher
+	stepCap            int
+	historyTokenBudget int
+	maxContextRetries  int
+	now                func() time.Time
+	logger             *slog.Logger
 }
 
 // New constructs a Harness wired with the given collaborators.
@@ -177,20 +203,41 @@ type Harness struct {
 //   - cfg is the harness configuration.
 //   - logger is the structured logger for internal diagnostics.
 func New(reg Cataloger, gw Chatter, st *store.Store, bus events.Publisher, cfg Config, logger *slog.Logger) *Harness {
+	return NewWithClock(reg, gw, st, bus, cfg, logger, nil)
+}
+
+// NewWithClock constructs a Harness with an injected clock for deterministic
+// testing of time-dependent system-prompt content. When nowFn is nil, time.Now
+// is used. All other parameters are identical to New.
+func NewWithClock(reg Cataloger, gw Chatter, st *store.Store, bus events.Publisher, cfg Config, logger *slog.Logger, nowFn func() time.Time) *Harness {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if nowFn == nil {
+		nowFn = time.Now
 	}
 	stepCap := cfg.StepCap
 	if stepCap <= 0 {
 		stepCap = defaultStepCap
 	}
+	budget := cfg.HistoryTokenBudget
+	if budget <= 0 {
+		budget = defaultHistoryTokenBudget
+	}
+	maxRetries := cfg.MaxContextRetries
+	if maxRetries <= 0 {
+		maxRetries = defaultMaxContextRetries
+	}
 	return &Harness{
-		reg:     reg,
-		gw:      gw,
-		store:   st,
-		bus:     bus,
-		stepCap: stepCap,
-		logger:  logger,
+		reg:                reg,
+		gw:                 gw,
+		store:              st,
+		bus:                bus,
+		stepCap:            stepCap,
+		historyTokenBudget: budget,
+		maxContextRetries:  maxRetries,
+		now:                nowFn,
+		logger:             logger,
 	}
 }
 
@@ -267,7 +314,9 @@ func (h *Harness) StartTurn(
 //
 // Error handling: run classifies errors via classify() and acts accordingly.
 //   - faultToolError: persisted as tool result, emits tool.failed, loop continues.
-//   - faultContextLength: routed to handleContextLength (seam for context-assembly slice).
+//   - faultContextLength: routed to handleContextLength — trims harder and retries,
+//     bounded by h.maxContextRetries; exhausted retries emit a single graceful
+//     message.completed{finishReason:"context_length"}.
 //   - faultInfrastructure: returned to StartTurn, which logs and emits turn.failed.
 //
 // run returns only infrastructure errors; ToolError and ErrContextLength are
@@ -275,6 +324,12 @@ func (h *Harness) StartTurn(
 func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.Principal) error {
 	scope := store.UserScope(principal)
 	sq := h.store.ForUser(scope)
+
+	// Load the user profile once per turn for the system prompt.
+	profile, err := sq.GetProfile(ctx)
+	if err != nil {
+		return fmt.Errorf("harness: load user profile: %w", err)
+	}
 
 	// Build a by-name lookup from the catalog for O(1) dispatch.
 	tools := h.reg.Catalog()
@@ -293,53 +348,31 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 		})
 	}
 
+	// trimLevel controls how aggressively history is trimmed. It starts at 0 (soft
+	// budget only) and is incremented by handleContextLength on each retry, causing
+	// progressively more oldest groups to be dropped.
+	trimLevel := 0
+
 	for step := range h.stepCap {
-		// Re-assemble from persisted state on every round so tool-result messages
-		// are included in the context fed back to the model.
-		req, err := h.assembleChatRequest(ctx, sq, conv, gwTools)
-		if err != nil {
-			return fmt.Errorf("harness: assemble request (step %d): %w", step, err)
+		// runStep executes one model call (assemble → chat → stream → consume),
+		// handling ErrContextLength at BOTH setup and stream levels with bounded
+		// trim-and-retry inline — neither level advances the step counter. It returns:
+		//   - result consumed (text + calls): caller processes the round.
+		//   - termDone true: context-length retries exhausted; graceful terminal
+		//     event already emitted; caller returns termErr immediately.
+		//   - err non-nil: infra error; caller returns it to trigger turn.failed.
+		sr := h.runStep(ctx, sq, conv, principal.UserID, gwTools, profile, &trimLevel, step)
+		if sr.termDone {
+			// Graceful context-length terminal event emitted (or persist failed).
+			return sr.termErr
 		}
-
-		seq, setupErr := h.gw.Chat(ctx, req)
-		if setupErr != nil {
-			return h.classifyGatewayError(ctx, sq, conv, principal.UserID, setupErr, step, "chat setup")
-		}
-
-		var textAccum []byte
-		var calls []*gateway.ToolCall
-		var streamErr error
-
-		for chunk, chunkErr := range seq {
-			if chunkErr != nil {
-				streamErr = chunkErr
-				break
-			}
-			if chunk.TextDelta != "" {
-				textAccum = append(textAccum, chunk.TextDelta...)
-				h.bus.Publish(principal.UserID, events.Event{
-					Type: "message.delta",
-					Data: DeltaPayload{
-						ConversationID: conv,
-						Text:           chunk.TextDelta,
-					},
-				})
-			}
-			if chunk.ToolCall != nil {
-				calls = append(calls, chunk.ToolCall)
-			}
-			if chunk.Done {
-				break
-			}
-		}
-
-		if streamErr != nil {
-			return h.classifyGatewayError(ctx, sq, conv, principal.UserID, streamErr, step, "stream")
+		if sr.err != nil {
+			return sr.err
 		}
 
 		// Done with no tool calls: this is the final reply — persist and stop.
-		if len(calls) == 0 {
-			assistantID, err := persistAssistantMessage(ctx, sq, conv, string(textAccum), "")
+		if len(sr.calls) == 0 {
+			assistantID, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), "")
 			if err != nil {
 				return fmt.Errorf("harness: persist final assistant message: %w", err)
 			}
@@ -355,16 +388,16 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 
 		// Done with tool calls: persist the assistant message (with tool_calls JSON),
 		// then execute each call in order.
-		toolCallsJSON, err := json.Marshal(calls)
+		toolCallsJSON, err := json.Marshal(sr.calls)
 		if err != nil {
 			return fmt.Errorf("harness: marshal tool_calls (step %d): %w", step, err)
 		}
-		if _, err := persistAssistantMessage(ctx, sq, conv, string(textAccum), string(toolCallsJSON)); err != nil {
+		if _, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), string(toolCallsJSON)); err != nil {
 			return fmt.Errorf("harness: persist assistant message with tool_calls (step %d): %w", step, err)
 		}
 
 		// Execute tool calls in order, persisting each result immediately.
-		for _, c := range calls {
+		for _, c := range sr.calls {
 			if err := h.executeAndPersistToolCall(ctx, sq, conv, principal.UserID, c, toolMap, scope); err != nil {
 				// executeAndPersistToolCall only returns infrastructure errors;
 				// ToolErrors are handled internally (persisted + tool.failed emitted).
@@ -390,56 +423,167 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 	return nil
 }
 
-// classifyGatewayError classifies a gateway or stream error and routes accordingly.
-// Returns nil when the faultContextLength seam handles it gracefully (persists a
-// message and emits message.completed); propagates an infra error if the seam's
-// own persistence fails. Returns the wrapped original error for faultInfrastructure
-// so the caller can return it and trigger turn.failed.
-func (h *Harness) classifyGatewayError(
+// stepResult is the outcome of one runStep call.
+type stepResult struct {
+	// text is the accumulated text content from the stream when err is nil
+	// and termDone is false.
+	text []byte
+	// calls is the accumulated tool calls from the stream when err is nil
+	// and termDone is false.
+	calls []*gateway.ToolCall
+	// err is a non-nil infrastructure error when set; caller returns it so
+	// StartTurn can log and emit turn.failed.
+	err error
+	// termDone is true when a terminal event has already been emitted (graceful
+	// context-length exhaust or its own persist failure). The caller must return
+	// termErr immediately.
+	termDone bool
+	// termErr is the error from persist on context-length exhaust; nil on a clean
+	// graceful terminal.
+	termErr error
+}
+
+// runStep assembles the chat request, calls the gateway, and fully consumes the
+// stream for one model round. It handles ErrContextLength at BOTH the setup
+// level (Chat() returns an error before the stream) and the stream level (error
+// yielded during iteration) using the same bounded trim-and-retry inner loop.
+// Neither level advances the outer step counter — CL retries are "free" w.r.t.
+// the step cap, bounded instead by h.maxContextRetries via handleContextLength.
+//
+// The returned stepResult carries exactly one meaningful outcome:
+//   - text/calls populated, err nil, termDone false: consumed round; caller processes.
+//   - err non-nil, termDone false: infra error; caller returns err.
+//   - termDone true: context-length retries exhausted; graceful terminal already
+//     emitted; caller returns termErr.
+func (h *Harness) runStep(
 	ctx context.Context,
 	sq *store.ScopedQueries,
-	conv, userID string,
-	err error,
+	conv ConversationID,
+	userID string,
+	gwTools []gateway.ToolSchema,
+	profile db.User,
+	trimLevel *int,
 	step int,
-	phase string,
-) error {
-	fault := classify(err)
-	if fault == faultContextLength {
-		// Route to the context-length seam. The context-assembly slice will implement
-		// actual prompt trimming and retry here.
-		return h.handleContextLength(ctx, sq, conv, userID)
+) stepResult {
+	// Inner retry loop for ErrContextLength at both setup and stream levels.
+	// Each iteration re-assembles the request with the current trimLevel so
+	// that harder trims on successive CL errors are applied correctly.
+	for {
+		req, err := h.assembleChatRequest(ctx, sq, conv, gwTools, profile, *trimLevel)
+		if err != nil {
+			return stepResult{err: fmt.Errorf("harness: assemble request (step %d): %w", step, err)}
+		}
+
+		seq, setupErr := h.gw.Chat(ctx, req)
+		if setupErr != nil {
+			if classify(setupErr) != faultContextLength {
+				// Non-context-length error: infra abort.
+				return stepResult{err: fmt.Errorf("harness: chat setup (step %d): %w", step, setupErr)}
+			}
+			// Setup-level ErrContextLength: increment trimLevel and check budget.
+			done, tErr := h.handleContextLength(ctx, sq, conv, userID, trimLevel)
+			if done {
+				return stepResult{termDone: true, termErr: tErr}
+			}
+			// Budget not exhausted; loop with incremented trimLevel.
+			continue
+		}
+
+		// Consume the stream. On a stream-level ErrContextLength, apply the same
+		// trim-and-retry logic without returning to the outer step loop.
+		var textAccum []byte
+		var calls []*gateway.ToolCall
+		var streamErr error
+
+		for chunk, chunkErr := range seq {
+			if chunkErr != nil {
+				streamErr = chunkErr
+				break
+			}
+			if chunk.TextDelta != "" {
+				textAccum = append(textAccum, chunk.TextDelta...)
+				h.bus.Publish(userID, events.Event{
+					Type: "message.delta",
+					Data: DeltaPayload{
+						ConversationID: conv,
+						Text:           chunk.TextDelta,
+					},
+				})
+			}
+			if chunk.ToolCall != nil {
+				calls = append(calls, chunk.ToolCall)
+			}
+			if chunk.Done {
+				break
+			}
+		}
+
+		if streamErr != nil {
+			if classify(streamErr) == faultContextLength {
+				// Stream-level ErrContextLength: same bounded retry as setup level.
+				// Reset any partially accumulated deltas — they won't be resent on
+				// retry since the client gets a fresh stream.
+				textAccum = nil
+				calls = nil
+				done, tErr := h.handleContextLength(ctx, sq, conv, userID, trimLevel)
+				if done {
+					return stepResult{termDone: true, termErr: tErr}
+				}
+				// Budget not exhausted; loop with incremented trimLevel.
+				continue
+			}
+			// Non-CL stream error: infra abort.
+			return stepResult{err: classifyGatewayError(streamErr, step, "stream")}
+		}
+
+		// Stream consumed successfully.
+		return stepResult{text: textAccum, calls: calls}
 	}
-	// faultToolError and faultInfrastructure: a gateway returning a ToolError is
-	// unusual (the gateway is not a tool), but both cases abort the turn the same
-	// way — wrap and return so StartTurn logs the detail and emits turn.failed.
+}
+
+// classifyGatewayError wraps a non-context-length gateway or stream error for
+// return to StartTurn as an infrastructure abort. Context-length errors are
+// handled by the caller before reaching here; this function only sees
+// faultToolError and faultInfrastructure. Both abort the turn the same way:
+// a gateway returning a ToolError is unusual but treated as infrastructure.
+func classifyGatewayError(err error, step int, phase string) error {
 	return fmt.Errorf("harness: %s (step %d): %w", phase, step, err)
 }
 
-// handleContextLength is the seam for the context-assembly slice. It is called
-// when the gateway returns ErrContextLength (prompt too long for the model's
-// context window). The context-assembly slice will replace this stub with actual
-// prompt trimming and retry logic.
+// handleContextLength implements the bounded trim-and-retry logic for
+// ErrContextLength. It updates *trimLevel and returns:
+//   - (false, nil) when a retry should proceed (trimLevel was incremented).
+//   - (true, nil) when retries are exhausted and the graceful terminal event
+//     has been emitted. The caller must return termErr (nil here) to StartTurn.
+//   - (true, err) when the graceful-message persist itself fails (infra error).
 //
-// Current stub: produce a graceful "conversation too long" outcome so the turn
-// ends cleanly rather than aborting with an opaque infrastructure error.
-//
-// context-assembly slice implements the actual trimming
+// This method never emits turn.failed — it always either allows a retry or
+// emits exactly one message.completed. The single-terminal-event invariant is
+// maintained by the caller (run), which returns immediately after (true, _).
 func (h *Harness) handleContextLength(
 	ctx context.Context,
 	sq *store.ScopedQueries,
 	conv, userID string,
-) error {
-	const msg = "This conversation has grown too long for me to continue. Please start a new conversation."
-	assistantID, err := persistAssistantMessage(ctx, sq, conv, msg, "")
-	if err != nil {
-		// Persist failure is infrastructure — let it propagate.
-		return fmt.Errorf("harness: persist context-length message: %w", err)
+	trimLevel *int,
+) (done bool, err error) {
+	// Increment the trim level so the next assembleChatRequest drops one more
+	// oldest group.
+	*trimLevel++
+
+	// If we have not yet exhausted the retry budget, allow the caller to retry.
+	if *trimLevel <= h.maxContextRetries {
+		return false, nil
 	}
-	// Emit message.completed as the single terminal event for this turn. The
-	// context-assembly slice can later trim-and-retry (no terminal event) or,
-	// on irrecoverable overflow, fall through to this single-message.completed
-	// graceful pattern. turn.failed must NOT also be emitted — clients treat
-	// message.completed and turn.failed as mutually exclusive terminal events.
+
+	// Retries exhausted. Emit exactly one graceful terminal event.
+	const msg = "This conversation has grown too long for me to continue. Please start a new conversation."
+	assistantID, persistErr := persistAssistantMessage(ctx, sq, conv, msg, "")
+	if persistErr != nil {
+		// Persist failure is infrastructure — propagate; StartTurn emits turn.failed.
+		return true, fmt.Errorf("harness: persist context-length message: %w", persistErr)
+	}
+	// Emit message.completed as the sole terminal event. turn.failed must NOT be
+	// emitted alongside it — clients treat the two as mutually exclusive.
 	h.bus.Publish(userID, events.Event{
 		Type: "message.completed",
 		Data: CompletedPayload{
@@ -447,36 +591,47 @@ func (h *Harness) handleContextLength(
 			FinishReason: "context_length",
 		},
 	})
-	return nil
+	return true, nil
 }
 
 // ── assembly ─────────────────────────────────────────────────────────────────
 
 // assembleChatRequest builds a gateway.ChatRequest from the persisted message
-// history. It prepends a system prompt and round-trips each message type:
+// history. It:
+//  1. Composes a per-turn system prompt (identity + user context + memory slot).
+//  2. Loads and round-trips each persisted message (user/assistant/tool roles).
+//  3. Applies the sliding-window trim so that only history fitting within
+//     h.historyTokenBudget estimated tokens is included (oldest groups dropped
+//     first; newest group is always kept to satisfy the boundary rule).
+//  4. Applies extraDrop = trimLevel additional group drops for harder trims on
+//     context-length retries.
+//
+// The system prompt sits outside the history budget and is always included.
+//
+// Message role round-trip:
 //   - role "user"      → gateway.Message{Role:"user", Content}
-//   - role "assistant" with non-null tool_calls → gateway.Message{Role:"assistant", Content, ToolCalls}
-//   - role "assistant" without tool_calls → gateway.Message{Role:"assistant", Content}
-//   - role "tool"      → gateway.Message{Role:"tool", ToolCallID, Content}
+//   - role "assistant" with non-null tool_calls → {Role:"assistant", Content, ToolCalls}
+//   - role "assistant" without tool_calls → {Role:"assistant", Content}
+//   - role "tool"      → {Role:"tool", ToolCallID, Content}
 func (h *Harness) assembleChatRequest(
 	ctx context.Context,
 	sq *store.ScopedQueries,
 	conv ConversationID,
 	gwTools []gateway.ToolSchema,
+	profile db.User,
+	trimLevel int,
 ) (gateway.ChatRequest, error) {
 	msgs, err := sq.ListMessages(ctx, conv)
 	if err != nil {
 		return gateway.ChatRequest{}, fmt.Errorf("list messages: %w", err)
 	}
 
-	const systemPrompt = "You are Qovira, a helpful personal assistant."
-	gwMsgs := make([]gateway.Message, 0, len(msgs)+1)
-	gwMsgs = append(gwMsgs, gateway.Message{Role: "system", Content: systemPrompt})
-
+	// Convert persisted messages to gateway messages (faithful role round-trip).
+	rawMsgs := make([]gateway.Message, 0, len(msgs))
 	for _, m := range msgs {
 		switch m.Role {
 		case "tool":
-			gwMsgs = append(gwMsgs, gateway.Message{
+			rawMsgs = append(rawMsgs, gateway.Message{
 				Role:       "tool",
 				ToolCallID: m.ToolCallID.String,
 				Content:    m.Content,
@@ -491,15 +646,26 @@ func (h *Harness) assembleChatRequest(
 				}
 				gm.ToolCalls = tcs
 			}
-			gwMsgs = append(gwMsgs, gm)
+			rawMsgs = append(rawMsgs, gm)
 		default:
 			// "user" and any future roles pass through as plain content messages.
-			gwMsgs = append(gwMsgs, gateway.Message{
+			rawMsgs = append(rawMsgs, gateway.Message{
 				Role:    m.Role,
 				Content: m.Content,
 			})
 		}
 	}
+
+	// Apply the sliding-window trim. trimLevel > 0 drops additional oldest groups
+	// on context-length retries (harder trim on each attempt).
+	trimmed := trimToWindowBudget(rawMsgs, h.historyTokenBudget, trimLevel)
+
+	// Compose the per-turn system prompt (outside the budget).
+	systemPrompt := buildSystemPrompt(h.now(), profile)
+
+	gwMsgs := make([]gateway.Message, 0, len(trimmed)+1)
+	gwMsgs = append(gwMsgs, gateway.Message{Role: "system", Content: systemPrompt})
+	gwMsgs = append(gwMsgs, trimmed...)
 
 	return gateway.ChatRequest{
 		Messages: gwMsgs,
