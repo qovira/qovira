@@ -204,7 +204,9 @@ func New(
 	// Step 8: module registration loop.
 	for _, m := range modules {
 		m.Routes(router)
-		reg.Add(m.Name(), m.Tools())
+		if err := reg.Add(m); err != nil {
+			return nil, fmt.Errorf("app: register %s tools: %w", m.Name(), err)
+		}
 	}
 
 	// Step 9: build the HTTP server with the standard middleware chain.
