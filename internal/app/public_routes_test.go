@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/qovira/qovira/internal/app"
+	"github.com/qovira/qovira/internal/harness"
 )
 
 // TestIsPublicRoute_LoginEndpoint verifies that POST /api/v1/auth/login is
@@ -23,7 +24,7 @@ func TestIsPublicRoute_LoginEndpoint(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/qovira/qovira/internal/auth"
 	"github.com/qovira/qovira/internal/authhttp"
 	"github.com/qovira/qovira/internal/config"
+	"github.com/qovira/qovira/internal/harness"
 	"github.com/qovira/qovira/internal/httpx"
 	"github.com/qovira/qovira/internal/store"
 	"github.com/qovira/qovira/internal/store/db"
@@ -505,6 +506,7 @@ func TestEndToEnd_LoginThroughAppNew(t *testing.T) {
 		discardLogger(),
 		denyAllValidatorCtor,
 		"test",
+		harness.Config{},
 		app.AuthModuleCtor(fastParams, fastPolicy, auth.DefaultSessionConfig, discardLogger()),
 	)
 	if err != nil {

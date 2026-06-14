@@ -19,6 +19,8 @@ import (
 	"github.com/qovira/qovira/internal/capability"
 	"github.com/qovira/qovira/internal/config"
 	"github.com/qovira/qovira/internal/events"
+	"github.com/qovira/qovira/internal/gateway"
+	"github.com/qovira/qovira/internal/harness"
 	"github.com/qovira/qovira/internal/httpx"
 	"github.com/qovira/qovira/internal/store"
 )
@@ -135,6 +137,10 @@ func AuthModuleCtor(
 //
 //	func(s *store.Store) httpx.TokenValidator { return myFakeValidator{} }
 //
+// harnessCfg is the configuration for the AI harness. For production, pass the
+// value populated in serve.go; for tests pass harness.Config{} (the zero value
+// is valid for this slice).
+//
 // moduleCtors is a slice of module constructors — each receives the opened store
 // and returns a [Module].  This two-phase design mirrors newValidator: modules
 // can hold store references without being constructed before the store opens.
@@ -151,13 +157,15 @@ func AuthModuleCtor(
 //  7. Construct the HTTP router.
 //  8. For each module: mount routes onto the router, register tools in the
 //     registry.
-//  9. Build the HTTP server with the StandardChain middleware.
+//  9. Construct the AI harness and mount its routes.
+//  10. Build the HTTP server with the StandardChain middleware.
 func New(
 	ctx context.Context,
 	cfg *config.Config,
 	logger *slog.Logger,
 	newValidator func(*store.Store) httpx.TokenValidator,
 	version string,
+	harnessCfg harness.Config,
 	moduleCtors ...func(*store.Store) Module,
 ) (_ *App, err error) {
 	// Step 1: open the encrypted store.
@@ -209,7 +217,14 @@ func New(
 		}
 	}
 
-	// Step 9: build the HTTP server with the standard middleware chain.
+	// Step 9: construct the AI harness and mount its routes. The harness is wired
+	// with reg, gw, s, bus, and harnessCfg. It does not contribute capability tools
+	// (Tools() returns nil), so it is not passed through reg.Add.
+	gw := gateway.New(s.Settings())
+	h := harness.New(reg, gw, s, bus, harnessCfg, logger)
+	h.Routes(router)
+
+	// Step 10 (formerly 9): build the HTTP server with the standard middleware chain.
 	// The connection context (connCtx) is a cancelable parent given to every request via srv.BaseContext. Cancelling
 	// it before srv.Shutdown is called causes long-lived SSE handlers to return (they select on r.Context().Done()),
 	// so Shutdown drains quickly rather than waiting for the full timeout.

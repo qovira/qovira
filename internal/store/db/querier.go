@@ -36,6 +36,7 @@ type Querier interface {
 	// Delete a setting by key.  No-op when the key does not exist.
 	DeleteSetting(ctx context.Context, settingKey string) error
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
+	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
 	GetInstance(ctx context.Context) (Instance, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
@@ -51,6 +52,10 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
+	// Queries for the messages table.
+	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
+	// belongs to the bound Scope. Parameters use sqlc named params (@name).
+	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
 	// Scoped queries for the user_data exemplar table.
 	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
 	// comes from and is limited to the bound Scope. This pattern is the template
@@ -60,6 +65,7 @@ type Querier interface {
 	// Parameters use sqlc named params (@name) per the house convention; the
 	// generated Params structs carry typed fields (ID, UserID, Value).
 	InsertUserData(ctx context.Context, arg InsertUserDataParams) error
+	ListMessages(ctx context.Context, arg ListMessagesParams) ([]Message, error)
 	// List all settings whose key starts with @prefix, ordered by key. The caller
 	// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
 	// those escapes literal, so a prefix containing '_' or '%' matches literally
@@ -70,8 +76,20 @@ type Querier interface {
 	// TTL cutoffs (idle and absolute), so there is no meaningful user context available and a
 	// user_id predicate would prevent cross-user expiry from working.
 	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
+	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)
+	// Queries for the conversations table.
+	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
+	// belongs to the bound Scope. Parameters use sqlc named params (@name).
+	// Insert-if-new only. The store wrapper (conversations.go) enforces ownership by
+	// calling GetConversation immediately after: if the INSERT no-opped because the id
+	// belongs to another user, GetConversation (user-scoped) returns sql.ErrNoRows,
+	// which is mapped to ErrConversationNotOwned. When the caller re-posts to their
+	// own conversation, GetConversation finds the row and TouchConversation bumps
+	// updated_at. This three-step protocol is safe because the write pool is capped at
+	// one connection, serialising all writes and eliminating TOCTOU races.
+	UpsertConversation(ctx context.Context, arg UpsertConversationParams) error
 	// Upsert a setting by key.  Inserts a new row or replaces value and
 	// updated_at when the key already exists.
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error
