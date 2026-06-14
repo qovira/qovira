@@ -22,6 +22,7 @@ import (
 	"github.com/qovira/qovira/internal/gateway"
 	"github.com/qovira/qovira/internal/harness"
 	"github.com/qovira/qovira/internal/httpx"
+	"github.com/qovira/qovira/internal/scheduler"
 	"github.com/qovira/qovira/internal/store"
 )
 
@@ -94,6 +95,7 @@ type App struct {
 	srv         *http.Server
 	cancelConns context.CancelFunc
 	logger      *slog.Logger
+	sched       *scheduler.Scheduler
 }
 
 // AuthModuleCtor returns a module constructor that builds the auth HTTP module
@@ -153,6 +155,7 @@ func AuthModuleCtor(
 //  3. Build each module by calling moduleCtors[i](s).
 //  4. If cfg.AutoMigrate, run all pending migrations against the write pool.
 //  5. Construct the in-memory event bus.
+//     5a. Construct and start the scheduler (validates config, starts the poll loop).
 //  6. Construct the capability registry.
 //  7. Construct the HTTP router.
 //  8. For each module: mount routes onto the router, register tools in the
@@ -203,6 +206,19 @@ func New(
 	// Step 5: in-memory event bus.
 	bus := events.NewBus()
 
+	// Step 5a: build and start the scheduler. The config is validated here so that a
+	// bad config fails boot immediately (composition-root fail-fast).
+	schedCfg := scheduler.DefaultConfig()
+	if err = schedCfg.Validate(); err != nil {
+		return nil, fmt.Errorf("app: scheduler config: %w", err)
+	}
+	sched := scheduler.New(s, bus, schedCfg)
+	// TODO: register scheduler handlers here as slices are implemented.
+	// e.g. sched.Register("confirmations.sweep", harness.SweepExpiredConfirmations)
+	if err = sched.Start(ctx); err != nil {
+		return nil, fmt.Errorf("app: scheduler start: %w", err)
+	}
+
 	// Step 6: capability registry.
 	reg := capability.NewRegistry()
 
@@ -238,6 +254,7 @@ func New(
 		srv:         srv,
 		cancelConns: cancelConns,
 		logger:      logger,
+		sched:       sched,
 	}, nil
 }
 
@@ -247,7 +264,7 @@ func New(
 // On ctx cancellation Run performs an ordered, bounded shutdown:
 //  1. Cancel the connection context to unblock live SSE handlers, then call
 //     srv.Shutdown to drain in-flight HTTP requests.
-//  2. Stop the scheduler (placeholder — no scheduler is wired yet).
+//  2. Stop the scheduler: cancels in-flight handlers and drains the worker pool.
 //  3. Close both database pools.
 //
 // Shutdown errors are logged and returned so the caller can exit non-zero if any teardown step fails. All three steps
@@ -293,8 +310,13 @@ func (a *App) shutdown() error {
 		errs = append(errs, fmt.Errorf("app: http shutdown: %w", err))
 	}
 
-	// Step 2: stop the scheduler.
-	// TODO: wire scheduler.Stop(shutdownCtx) here once the scheduler is built.
+	// Step 2: stop the scheduler -- cancels in-flight handlers and drains the worker pool.
+	if a.sched != nil {
+		if schedErr := a.sched.Stop(shutdownCtx); schedErr != nil {
+			a.logger.Error("app: scheduler stop error", "err", schedErr)
+			errs = append(errs, fmt.Errorf("app: scheduler stop: %w", schedErr))
+		}
+	}
 
 	// Step 3: close the store. A non-nil joined error may surface a failed write-pool close (indicating
 	// uncheckpointed WAL data).

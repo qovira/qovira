@@ -21,6 +21,24 @@ type Instance struct {
 	CreatedAt string
 }
 
+type Job struct {
+	ID           string
+	Key          sql.NullString
+	Kind         string
+	Payload      string
+	UserID       sql.NullString
+	Status       string
+	RunAt        string
+	Attempt      int64
+	LockedAt     sql.NullString
+	Rrule        sql.NullString
+	Tz           sql.NullString
+	IntervalSecs sql.NullInt64
+	LastError    sql.NullString
+	CreatedAt    string
+	UpdatedAt    string
+}
+
 type Message struct {
 	ID             string
 	ConversationID string
