@@ -19,7 +19,6 @@ import (
 
 	rrulego "github.com/teambition/rrule-go"
 
-	"github.com/qovira/qovira/internal/capability"
 	"github.com/qovira/qovira/internal/events"
 	"github.com/qovira/qovira/internal/httpx"
 	"github.com/qovira/qovira/internal/id"
@@ -300,7 +299,7 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 		if _, err := time.LoadLocation(in.Tz); err != nil {
 			fields = append(fields, httpx.FieldError{
 				Pointer: "/tz",
-				Detail:  fmt.Sprintf("%q is not a valid IANA timezone", in.Tz),
+				Detail:  `tz must be a valid IANA timezone name, e.g. "America/Los_Angeles"`,
 			})
 			tzForRruleValidation = "" // tz invalid; skip rrule parse (tz will be the error)
 		}
@@ -1210,7 +1209,7 @@ func validateRrule(rruleStr, tz string) *httpx.FieldError {
 	if err != nil {
 		return &httpx.FieldError{
 			Pointer: "/rrule",
-			Detail:  fmt.Sprintf("rrule is not a valid RFC 5545 RRULE string: %v", err),
+			Detail:  `rrule must be a valid RFC 5545 recurrence rule string, e.g. "FREQ=WEEKLY;BYDAY=MO"`,
 		}
 	}
 	return nil
@@ -1330,9 +1329,6 @@ func (m *Module) Service() *Service { return m.svc }
 
 // Name returns the module name.
 func (m *Module) Name() string { return "reminders" }
-
-// Tools returns nil — AI tools are a later slice.
-func (m *Module) Tools() []capability.Tool { return nil }
 
 // Routes registers the reminders REST endpoints on r.
 //

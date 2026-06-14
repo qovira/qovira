@@ -1065,8 +1065,10 @@ func TestModule_Interface(t *testing.T) {
 	if m.Name() != "reminders" {
 		t.Errorf("Name() = %q, want %q", m.Name(), "reminders")
 	}
-	if m.Tools() != nil {
-		t.Errorf("Tools() should return nil for this slice, got: %v", m.Tools())
+	// Tools() now returns the four AI tool adapters (create/update/complete/delete).
+	// The nil-placeholder was replaced in slice 5 — verify non-nil and correct count.
+	if got := m.Tools(); len(got) != 4 {
+		t.Errorf("Tools() returned %d tools, want 4", len(got))
 	}
 
 	// Routes must not panic.
@@ -3349,6 +3351,105 @@ func TestUpdate_MalformedRrule_ValidationError(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected field error at /rrule; got: %+v", valErr.Fields)
+	}
+}
+
+// TestCreate_MalformedRrule_DetailIsClean verifies that the ValidationError
+// Detail for a bad rrule is model-safe: it must not embed the raw library error
+// text (no ": " separator that would precede Go/library internals) and must
+// include the RFC 5545 example string so the model/client knows how to fix it.
+func TestCreate_MalformedRrule_DetailIsClean(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-rrule-clean-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	_, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Bad rrule clean",
+		DueAt: time.Now().UTC().Add(time.Hour),
+		Tz:    "UTC",
+		Rrule: "FREQ=BOGUS;BYDAY=XY",
+	})
+	if err == nil {
+		t.Fatal("expected ValidationError, got nil")
+	}
+	var valErr *reminders.ValidationError
+	if !errors.As(err, &valErr) {
+		t.Fatalf("expected *reminders.ValidationError, got %T: %v", err, err)
+	}
+	var detail string
+	for _, fe := range valErr.Fields {
+		if fe.Pointer == "/rrule" {
+			detail = fe.Detail
+			break
+		}
+	}
+	if detail == "" {
+		t.Fatalf("no /rrule field error; got: %+v", valErr.Fields)
+	}
+	// Must not leak library error text: the old format was "...: <libErr>" where
+	// libErr is teambition/rrule-go's raw message. Guard against it by checking
+	// the detail does not contain a colon followed by non-example content that
+	// would indicate wrapped error interpolation.
+	// More directly: the detail must NOT contain " is not a valid RFC 5545 RRULE string:"
+	// (the old prefix+colon that introduced the library error).
+	if strings.Contains(detail, "string: ") {
+		t.Errorf("rrule Detail leaks library error text (contains 'string: …'): %q", detail)
+	}
+	// Must guide the caller with a concrete example.
+	if !strings.Contains(detail, "FREQ=") {
+		t.Errorf("rrule Detail lacks a concrete FREQ= example; got: %q", detail)
+	}
+}
+
+// TestCreate_MalformedTz_DetailIsClean verifies that the ValidationError Detail
+// for a bad tz includes an IANA example (e.g. America/Los_Angeles) so the
+// model/client knows the expected format.
+func TestCreate_MalformedTz_DetailIsClean(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-tz-clean-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	_, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Bad tz clean",
+		DueAt: time.Now().UTC().Add(time.Hour),
+		Tz:    "Not/A/Timezone",
+	})
+	if err == nil {
+		t.Fatal("expected ValidationError, got nil")
+	}
+	var valErr *reminders.ValidationError
+	if !errors.As(err, &valErr) {
+		t.Fatalf("expected *reminders.ValidationError, got %T: %v", err, err)
+	}
+	var detail string
+	for _, fe := range valErr.Fields {
+		if fe.Pointer == "/tz" {
+			detail = fe.Detail
+			break
+		}
+	}
+	if detail == "" {
+		t.Fatalf("no /tz field error; got: %+v", valErr.Fields)
+	}
+	// Must include a concrete IANA example so the model knows what to supply.
+	if !strings.Contains(detail, "America/") {
+		t.Errorf("tz Detail lacks an IANA example (want 'America/…'); got: %q", detail)
 	}
 }
 
