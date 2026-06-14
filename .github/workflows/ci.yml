@@ -46,6 +46,12 @@ jobs:
         # are derived from it. A drift means the spec changed without regenerating
         # the types (or vice versa) — both must move together.
         run: pnpm generate:api && git diff --exit-code src/lib/api/schema.d.ts
+      - name: Compile i18n
+        # Paraglide-JS generates src/lib/paraglide/ at build time. The directory is
+        # gitignored; generate it once here so svelte-check, lint, and test can all
+        # import the compiled message functions without each running Vite.
+        # pnpm check / pnpm lint / pnpm test also chain compile:i18n for local runs.
+        run: pnpm compile:i18n
       - name: svelte-check
         run: pnpm check
       - name: Lint

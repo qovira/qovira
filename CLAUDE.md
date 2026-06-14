@@ -65,13 +65,27 @@ pnpm build            # SvelteKit static build → web/build/
 
 **vitest projects**: the `web/vitest.config.ts` defines three projects — `node` (for `src/tests/`), `runes` (node + the Svelte compiler, for `*.svelte.test.ts` rune-logic suites), and `browser` (happy-dom, for `src/lib/**/*.test.ts` excluding the rune suites). Tests that need `document.cookie` or `globalThis.fetch` go under `src/lib/`; `$state`/`$derived` logic goes in a `*.svelte.test.ts`.
 
+### i18n (Paraglide)
+
+The SPA uses **Paraglide JS v2** (`@inlang/paraglide-js`) for i18n. Messages are authored in `web/messages/{locale}.json` (currently only `en.json` for v0.1) and compiled to a generated module at `web/src/lib/paraglide/`. The project is configured at `web/project.inlang/settings.json` (locale list, message plugin path pattern).
+
+**Adding strings:** add a key→value pair to `messages/en.json`. When a second locale is needed, add a parallel `messages/{locale}.json` — no code changes at string-call sites.
+
+**Using strings in `.svelte` and `.ts` files:** import the named message functions from `$lib/paraglide/messages.js` and call them inline (`nav_chat()`, `login_error_invalid_credentials()`, etc.).
+
+**Generated output:** `src/lib/paraglide/` is **gitignored** (Paraglide emits its own `.gitignore` in the dir, and the outer `web/.gitignore` excludes it too). Do not hand-edit generated files.
+
+**Compile step:** run `pnpm compile:i18n` from `web/` to regenerate the output. The `check`, `lint`, and `test` scripts chain this automatically (`pnpm compile:i18n && …`), so a clean checkout runs correctly locally. The Vite plugin (`paraglideVitePlugin` in `vite.config.ts`) recompiles on every `pnpm dev`/`pnpm build` invocation. CI runs an explicit `pnpm compile:i18n` step before the gate commands.
+
+**Locale strategy:** v0.1 uses `globalVariable` + `baseLocale` only (no URL/cookie negotiation, no locale switcher). The strategy is set in `vite.config.ts`; widening it later does not touch string call sites.
+
 ## Docker & runtime
 
 Multi-stage `Dockerfile`: `golang:1.26-bookworm` builds the CGO binary; the runtime stage is **`gcr.io/distroless/base-debian12:nonroot`** — *not* `static`/`scratch`, because the SQLCipher CGO binary needs glibc and the OpenSSL shared library. Runs as numeric nonroot `65532:65532`, exposes `:8080`, stores the encrypted DB under `/data`, `HEALTHCHECK` shells out to `qovira healthcheck` (no curl/shell in the image). **The master key is never baked in** — supply it at runtime via `QOVIRA_MASTER_KEY`, or `QOVIRA_MASTER_KEY_FILE` (Docker secret) in production so it never appears in `docker inspect` or image history. BuildKit is required (`make docker-build` sets `DOCKER_BUILDKIT=1`).
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every PR and push to `main`. The **`web` job** (Linux x64, Blacksmith) runs first and gates all Go jobs — it: regenerates API types and fails on schema drift (`pnpm generate:api && git diff --exit-code src/lib/api/schema.d.ts`), then runs svelte-check, lint, format:check, vitest, and the static build. **Go jobs** (**build**, **race**) run across Linux x86-64, Linux ARM64, and macOS ARM64 (SQLCipher CGO is platform-specific); **lint** (golangci-lint) and **vuln** (govulncheck) run once on Linux x64. Every job runs on a Blacksmith runner and shares `./.github/actions/setup` (OpenSSL + Go). A **docker** job builds the container image for both Linux arches — `push: false`. No release/publish workflow.
+`.github/workflows/ci.yml` runs on every PR and push to `main`. The **`web` job** (Linux x64, Blacksmith) runs first and gates all Go jobs — it: regenerates API types and fails on schema drift (`pnpm generate:api && git diff --exit-code src/lib/api/schema.d.ts`), then compiles i18n messages (`pnpm compile:i18n`) before running svelte-check, lint, format:check, vitest, and the static build. **Go jobs** (**build**, **race**) run across Linux x86-64, Linux ARM64, and macOS ARM64 (SQLCipher CGO is platform-specific); **lint** (golangci-lint) and **vuln** (govulncheck) run once on Linux x64. Every job runs on a Blacksmith runner and shares `./.github/actions/setup` (OpenSSL + Go). A **docker** job builds the container image for both Linux arches — `push: false`. No release/publish workflow.
 
 ## Conventions
 

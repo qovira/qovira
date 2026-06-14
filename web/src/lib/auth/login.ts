@@ -11,6 +11,11 @@
 
 import { Api, ProblemError } from "$lib/api/index.js";
 import { notifySessionReady, seedSession } from "$lib/stores/session.svelte.js";
+import {
+  login_error_invalid_credentials,
+  login_error_unexpected,
+  login_error_session_verify,
+} from "$lib/paraglide/messages.js";
 
 export interface LoginFieldErrors {
   email?: string;
@@ -49,12 +54,12 @@ export async function performLogin(email: string, password: string): Promise<Log
     // 401 = invalid credentials (uniform, user-safe); other = generic detail.
     return {
       ok: false,
-      message: loginError.status === 401 ? "Invalid email or password." : loginError.detail,
+      message: loginError.status === 401 ? login_error_invalid_credentials() : loginError.detail,
     };
   }
 
   if (!loginData) {
-    return { ok: false, message: "An unexpected error occurred. Please try again." };
+    return { ok: false, message: login_error_unexpected() };
   }
 
   // Probe /me to get the full user object and confirm the cookie is set.
@@ -63,7 +68,7 @@ export async function performLogin(email: string, password: string): Promise<Log
   if (!meData) {
     return {
       ok: false,
-      message: "Login succeeded but the session could not be verified. Please try again.",
+      message: login_error_session_verify(),
     };
   }
 

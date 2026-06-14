@@ -2,6 +2,7 @@
   import { Button } from "@qovira/ui";
 
   import { logout } from "$lib/auth/logout.js";
+  import { settings_heading, settings_logout } from "$lib/paraglide/messages.js";
 
   let loggingOut = $state(false);
 
@@ -17,8 +18,8 @@
   }
 </script>
 
-<h1 class="text-text text-xl font-semibold">Settings</h1>
+<h1 class="text-text text-xl font-semibold">{settings_heading()}</h1>
 
 <div class="mt-6">
-  <Button variant="secondary" loading={loggingOut} onclick={handleLogout}>Log out</Button>
+  <Button variant="secondary" loading={loggingOut} onclick={handleLogout}>{settings_logout()}</Button>
 </div>

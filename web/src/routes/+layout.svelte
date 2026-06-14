@@ -15,6 +15,17 @@
   import { getRailPinned, initPrefs, setRailPinned } from "$lib/stores/ui-preferences.svelte.js";
   import { isAuthenticated, notifyTearDown, resetSession, seedSession } from "$lib/stores/session.svelte.js";
   import RailEntry from "$lib/components/RailEntry.svelte";
+  import {
+    nav_aria_label,
+    nav_loading,
+    nav_account,
+    nav_pin,
+    nav_unpin,
+    nav_switch_to_evening,
+    nav_switch_to_daylight,
+    nav_chat,
+    nav_reminders,
+  } from "$lib/paraglide/messages.js";
 
   interface Props {
     children: Snippet;
@@ -153,7 +164,7 @@
     {@render children()}
   {:else if !booted}
     <div class="flex h-screen items-center justify-center">
-      <span class="sr-only">Loading…</span>
+      <span class="sr-only">{nav_loading()}</span>
     </div>
   {:else if isAuthenticated()}
     <div class="flex h-screen overflow-hidden">
@@ -162,7 +173,7 @@
         Width transitions honor prefers-reduced-motion via the CSS custom property.
       -->
       <nav
-        aria-label="Main navigation"
+        aria-label={nav_aria_label()}
         class="rail bg-surface border-border flex shrink-0 flex-col border-r transition-[width] duration-200 ease-in-out motion-reduce:transition-none {railOpen
           ? 'w-[200px]'
           : 'w-[56px]'}"
@@ -180,10 +191,16 @@
         -->
         <ul class="flex flex-1 flex-col gap-1 p-2" role="list">
           <li>
-            <RailEntry href="/" label="Chat" icon={ChatsIcon} active={isActive("/")} {expanded} />
+            <RailEntry href="/" label={nav_chat()} icon={ChatsIcon} active={isActive("/")} {expanded} />
           </li>
           <li>
-            <RailEntry href="/reminders" label="Reminders" icon={BellIcon} active={isActive("/reminders")} {expanded} />
+            <RailEntry
+              href="/reminders"
+              label={nav_reminders()}
+              icon={BellIcon}
+              active={isActive("/reminders")}
+              {expanded}
+            />
           </li>
         </ul>
 
@@ -193,7 +210,7 @@
           <div class="flex justify-end">
             <IconButton
               icon={getRailPinned() ? PushPinSlashIcon : PushPinIcon}
-              label={getRailPinned() ? "Unpin navigation" : "Pin navigation"}
+              label={getRailPinned() ? nav_unpin() : nav_pin()}
               variant="ghost"
               size="md"
               onclick={togglePin}
@@ -213,13 +230,13 @@
                    focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
           >
             <Avatar name="User" size="sm" />
-            <span class={railOpen ? "text-text text-sm" : "sr-only"}>Account</span>
+            <span class={railOpen ? "text-text text-sm" : "sr-only"}>{nav_account()}</span>
           </a>
 
           <!-- Theme toggle -->
           <IconButton
             icon={currentTheme === "daylight" ? MoonIcon : SunIcon}
-            label={currentTheme === "daylight" ? "Switch to Evening" : "Switch to Daylight"}
+            label={currentTheme === "daylight" ? nav_switch_to_evening() : nav_switch_to_daylight()}
             variant="ghost"
             size="md"
             onclick={handleToggleTheme}
@@ -237,7 +254,7 @@
   {:else}
     <!-- Unauthenticated on a guarded route: the boot probe is redirecting to /login. -->
     <div class="flex h-screen items-center justify-center">
-      <span class="sr-only">Loading…</span>
+      <span class="sr-only">{nav_loading()}</span>
     </div>
   {/if}
 </ToastProvider>

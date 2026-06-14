@@ -3,6 +3,13 @@
   import { Button, Field, Input } from "@qovira/ui";
 
   import { performLogin } from "$lib/auth/login.js";
+  import {
+    login_heading,
+    login_field_email,
+    login_field_password,
+    login_submit,
+    login_error_unexpected,
+  } from "$lib/paraglide/messages.js";
 
   // ---------------------------------------------------------------------------
   // Form state
@@ -37,7 +44,7 @@
       if (result.message !== undefined) errorMessage = result.message;
     } catch {
       // Raw network/parse failure (not a ProblemError) — surface a generic message.
-      errorMessage = "An unexpected error occurred. Please try again.";
+      errorMessage = login_error_unexpected();
     } finally {
       // Always reset so the submit button never sticks disabled.
       loading = false;
@@ -47,7 +54,7 @@
 
 <div class="flex min-h-screen items-center justify-center">
   <form class="flex w-full max-w-sm flex-col gap-4" onsubmit={handleSubmit}>
-    <h1 class="text-text text-xl font-semibold">Sign in</h1>
+    <h1 class="text-text text-xl font-semibold">{login_heading()}</h1>
 
     {#if errorMessage}
       <p class="text-sm text-red-600" role="alert">{errorMessage}</p>
@@ -57,7 +64,7 @@
       exactOptionalPropertyTypes: only pass `error` when it is defined.
       Input.value is not $bindable; use `value` + `oninput` instead.
     -->
-    <Field label="Email" {...emailError !== undefined ? { error: emailError } : {}}>
+    <Field label={login_field_email()} {...emailError !== undefined ? { error: emailError } : {}}>
       {#snippet children()}
         <Input
           type="email"
@@ -73,7 +80,7 @@
       {/snippet}
     </Field>
 
-    <Field label="Password" {...passwordError !== undefined ? { error: passwordError } : {}}>
+    <Field label={login_field_password()} {...passwordError !== undefined ? { error: passwordError } : {}}>
       {#snippet children()}
         <Input
           type="password"
@@ -89,6 +96,6 @@
       {/snippet}
     </Field>
 
-    <Button variant="primary" type="submit" {loading}>Sign in</Button>
+    <Button variant="primary" type="submit" {loading}>{login_submit()}</Button>
   </form>
 </div>

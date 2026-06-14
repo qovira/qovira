@@ -4,3 +4,7 @@ build/
 .svelte-kit/
 # openapi-typescript generated types
 src/lib/api/schema.d.ts
+# Paraglide-JS generated i18n runtime — compiled by pnpm compile:i18n
+src/lib/paraglide/
+# Inlang project directory — managed by the inlang SDK, not Prettier
+project.inlang/
