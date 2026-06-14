@@ -65,6 +65,23 @@ type PendingConfirmation struct {
 	ExpiresAt      string
 }
 
+type Reminder struct {
+	ID           string
+	UserID       string
+	Title        string
+	Notes        sql.NullString
+	DueAt        string
+	Rrule        sql.NullString
+	Tz           string
+	AutoComplete int64
+	Status       string
+	CompletedAt  sql.NullString
+	LastFiredAt  sql.NullString
+	FireJobID    sql.NullString
+	CreatedAt    string
+	UpdatedAt    string
+}
+
 type Session struct {
 	ID         string
 	UserID     string

@@ -51,6 +51,7 @@ type Querier interface {
 	// succeeds. The scheduler owns the row lifecycle; no user_id predicate is applicable.
 	DeleteJob(ctx context.Context, id string) error
 	DeleteOtherSessionsForUser(ctx context.Context, arg DeleteOtherSessionsForUserParams) (int64, error)
+	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; this path is used for single-session logout and best-effort
 	// delete-on-expiry, both keyed by the bearer token before a user_id is available.
@@ -81,6 +82,7 @@ type Querier interface {
 	// on the write pool to provide a consistent read-then-write with no TOCTOU window.
 	GetJobStatus(ctx context.Context, id string) (string, error)
 	GetPendingConfirmation(ctx context.Context, arg GetPendingConfirmationParams) (PendingConfirmation, error)
+	GetReminder(ctx context.Context, arg GetReminderParams) (Reminder, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
 	// predicate is possible or meaningful at this lookup stage.
@@ -103,6 +105,13 @@ type Querier interface {
 	// Every SELECT/UPDATE includes a user_id predicate so the row always
 	// belongs to the bound Scope. Parameters use sqlc named params (@name).
 	InsertPendingConfirmation(ctx context.Context, arg InsertPendingConfirmationParams) (PendingConfirmation, error)
+	// Scoped queries for the reminders table.
+	// reminders is user-owned: every SELECT/UPDATE/DELETE includes a user_id
+	// predicate so rows are always confined to the bound Scope.  The CI scope
+	// guard (TestScopeGuard_RealQueries) enforces this at build time.
+	//
+	// Parameters use sqlc named params (@name) per the house convention.
+	InsertReminder(ctx context.Context, arg InsertReminderParams) error
 	// Scoped queries for the user_data exemplar table.
 	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
 	// comes from and is limited to the bound Scope. This pattern is the template
@@ -154,6 +163,9 @@ type Querier interface {
 	// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
 	// and silently tolerated by the caller.
 	RetryJob(ctx context.Context, arg RetryJobParams) (int64, error)
+	SetReminderFireJobID(ctx context.Context, arg SetReminderFireJobIDParams) (int64, error)
+	StampFiredAutoComplete(ctx context.Context, arg StampFiredAutoCompleteParams) (int64, error)
+	StampFiredKeepActive(ctx context.Context, arg StampFiredKeepActiveParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
