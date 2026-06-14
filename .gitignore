@@ -12,6 +12,9 @@
 .env.*
 !.env.example
 
+# Agent tooling — transient git worktrees created for isolated subagent runs
+.claude/worktrees/
+
 # Editor / OS artefacts
 .DS_Store
 Thumbs.db

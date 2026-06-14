@@ -18,6 +18,7 @@
     "@internationalized/date": "^3.8.0",
     "@qovira/theme": "^1.1.0",
     "@qovira/ui": "^2.0.0",
+    "phosphor-svelte": "^3.1.0",
     "svelte": "^5.56.0"
   },
   "devDependencies": {

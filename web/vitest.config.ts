@@ -1,10 +1,31 @@
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vitest/config";
 
-// Unit tests run in node environment. Component tests would use
-// vitest-browser-svelte (Browser Mode), but this scaffold only has unit tests.
+// Two test projects:
+//   "unit"  — node environment, plain .ts (e.g. boot.test.ts)
+//   "runes" — node environment with the Svelte compiler transform so $state /
+//             $derived / $effect runes are available in .svelte.ts singletons.
+//             Uses flushSync / $effect.root for rune-logic tests per the
+//             conventions:writing-svelte skill.
 export default defineConfig({
   test: {
-    environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.svelte.test.ts"],
+    projects: [
+      {
+        test: {
+          name: "unit",
+          environment: "node",
+          include: ["src/**/*.test.ts"],
+          exclude: ["src/**/*.svelte.test.ts"],
+        },
+      },
+      {
+        plugins: [svelte()],
+        test: {
+          name: "runes",
+          environment: "node",
+          include: ["src/**/*.svelte.test.ts"],
+        },
+      },
+    ],
   },
 });
