@@ -361,6 +361,47 @@ func TestNew_AutoMigrate_True(t *testing.T) {
 	}
 }
 
+// TestNew_RegistersHarnessSweepPeriodic verifies that app.New wires the harness
+// sweep as a system-scoped periodic job: exactly one jobs row keyed
+// "harness.sweep_confirmations" exists, with a NULL user_id (system scope) and a
+// recurrence (interval) set. This is the wiring seam for the scheduler's periodic
+// machinery; the sweep handler's behavior itself lives in the harness.
+func TestNew_RegistersHarnessSweepPeriodic(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := testConfig(t, dir, true)
+
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	cleanupApp(t, a)
+
+	var (
+		count        int
+		userID       sql.NullString
+		intervalSecs sql.NullInt64
+	)
+	row := a.Store().Writer().QueryRowContext(context.Background(),
+		`SELECT count(*),
+		        max(user_id),
+		        max(interval_secs)
+		 FROM jobs WHERE key = 'harness.sweep_confirmations'`)
+	if err := row.Scan(&count, &userID, &intervalSecs); err != nil {
+		t.Fatalf("query harness sweep job: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("harness.sweep_confirmations job count = %d, want exactly 1", count)
+	}
+	if userID.Valid {
+		t.Errorf("harness sweep user_id = %q, want NULL (system scope)", userID.String)
+	}
+	if !intervalSecs.Valid || intervalSecs.Int64 != 60 {
+		t.Errorf("harness sweep interval_secs = %v, want 60 (every minute)", intervalSecs)
+	}
+}
+
 // TestNew_AutoMigrate_False verifies that when AutoMigrate=false, app.New opens
 // the store but does NOT apply migrations, so the instance table is absent.
 func TestNew_AutoMigrate_False(t *testing.T) {

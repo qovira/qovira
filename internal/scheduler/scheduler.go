@@ -972,6 +972,153 @@ func backoffDuration(cfg Config, attempt int) time.Duration {
 	return time.Duration(rand.Int64N(int64(ceiling) + 1)) //nolint:gosec // scheduling jitter, not a secret
 }
 
+// ── PeriodicJob / RegisterPeriodic ────────────────────────────────────────────
+
+// PeriodicJob declares a system-scoped, idempotent recurring job. The Key is a
+// stable singleton handle: exactly one row exists in the jobs table for a given
+// Key at any time, regardless of how many times RegisterPeriodic is called (i.e.
+// across restarts). The Kind field selects the registered Handler; the Recurrence
+// field must be non-nil and specify exactly one of (RRULE+TZ) or Every.
+type PeriodicJob struct {
+	// Key is the stable, unique singleton handle. Must be non-empty.
+	Key string
+	// Kind is the dispatch selector that maps to a registered Handler. Must be non-empty.
+	Kind string
+	// Payload is the opaque JSON text passed to the handler. Nil is stored as `{}`.
+	Payload json.RawMessage
+	// Recurrence controls how the job repeats. Must be non-nil and specify exactly
+	// one of (RRULE+TZ) or Every. A PeriodicJob with no recurrence is invalid.
+	Recurrence *Recurrence
+}
+
+// RegisterPeriodic upserts a system-scoped recurring job identified by p.Key.
+// Across any number of calls (restarts) with the same Key, exactly one row
+// exists in the jobs table.
+//
+// On INSERT (new row): status='pending', attempt=0, user_id NULL, run_at deferred
+// by one interval (now+Every for interval jobs) or the next RRULE occurrence after
+// now (for RRULE jobs) to avoid an immediate boot-time fire.
+//
+// On CONFLICT (existing row): the schedule columns (kind, payload, rrule, tz,
+// interval_secs) are always updated in place. Additionally:
+//   - If the existing row is dead-lettered (status='failed'), it is revived: status
+//     is reset to 'pending', attempt to 0, locked_at cleared, and run_at recomputed
+//     to the next future occurrence. This lets a re-registration (e.g. a restart that
+//     deploys a fix) bring a permanently-failed periodic job back to life.
+//   - If the existing row is in-flight (status='pending' or 'running'), the execution
+//     state (status, attempt, run_at, locked_at) is left undisturbed — the live cycle
+//     continues and picks up any changed schedule on its next self-reschedule.
+//
+// Validation: returns an error for an empty Key, empty Kind, nil or zero-valued
+// Recurrence (a periodic MUST recur), both RRULE+TZ and Every simultaneously, or
+// RRULE without TZ. These checks let the composition root fail fast on boot.
+//
+// The upsert uses raw SQL on the single-connection write pool, targeting the
+// partial unique index (key IS NOT NULL).
+func (s *Scheduler) RegisterPeriodic(p PeriodicJob) error {
+	if p.Key == "" {
+		return fmt.Errorf("scheduler: RegisterPeriodic: Key must not be empty")
+	}
+	if p.Kind == "" {
+		return fmt.Errorf("scheduler: RegisterPeriodic: Kind must not be empty")
+	}
+
+	// Validate recurrence. A PeriodicJob MUST recur — nil or zero-valued Recurrence is invalid.
+	rruleCol, tzCol, intervalCol, err := buildRecurrenceColumns(p.Recurrence)
+	if err != nil {
+		return fmt.Errorf("scheduler: RegisterPeriodic: %w", err)
+	}
+	if !rruleCol.Valid && !intervalCol.Valid {
+		// Neither kind of recurrence was specified (nil or zero Recurrence).
+		return fmt.Errorf("scheduler: RegisterPeriodic: Recurrence must specify RRULE+TZ or Every; a PeriodicJob must recur")
+	}
+
+	// Compute the initial run_at for a brand-new row (used only on INSERT, not on
+	// conflict). We defer the first fire by one interval or the next RRULE occurrence
+	// to avoid an immediate boot-time fire.
+	now := s.now()
+	var runAt time.Time
+	if intervalCol.Valid {
+		// Interval: first fire after one interval from now.
+		interval := time.Duration(intervalCol.Int64) * time.Second
+		runAt = now.Add(interval)
+	} else {
+		// RRULE: first fire at the next occurrence strictly after now, in the stored TZ.
+		loc, locErr := time.LoadLocation(tzCol.String)
+		if locErr != nil {
+			return fmt.Errorf("scheduler: RegisterPeriodic: load tz %q: %w", tzCol.String, locErr)
+		}
+		anchor := now.In(loc)
+		ropt, ruleErr := rrule.StrToROptionInLocation(rruleCol.String, loc)
+		if ruleErr != nil {
+			return fmt.Errorf("scheduler: RegisterPeriodic: parse rrule %q: %w", rruleCol.String, ruleErr)
+		}
+		ropt.Dtstart = anchor
+		rule, ruleErr := rrule.NewRRule(*ropt)
+		if ruleErr != nil {
+			return fmt.Errorf("scheduler: RegisterPeriodic: build rrule %q: %w", rruleCol.String, ruleErr)
+		}
+		next := rule.After(now, false) // strictly after now
+		if next.IsZero() {
+			return fmt.Errorf("scheduler: RegisterPeriodic: RRULE %q has no future occurrence from now", rruleCol.String)
+		}
+		runAt = next
+	}
+
+	payload := p.Payload
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+
+	nowStr := now.UTC().Format(time.RFC3339)
+	runAtStr := runAt.UTC().Format(time.RFC3339)
+	jobID := id.New()
+
+	// Upsert: target the partial unique index (key IS NOT NULL) with the conflict predicate.
+	//
+	// ON INSERT: new row with status='pending', attempt=0, user_id NULL (system scope),
+	// and run_at deferred by one interval/RRULE occurrence.
+	//
+	// ON CONFLICT (key already exists): always update the schedule columns (kind,
+	// payload, rrule, tz, interval_secs, updated_at). Additionally, use CASE
+	// expressions keyed on the pre-update status to conditionally revive a
+	// dead-lettered row (status='failed') back to 'pending' while leaving an
+	// in-flight row (status='pending' or 'running') completely undisturbed.
+	// In a SQLite DO UPDATE SET clause, bare column references (e.g. "status")
+	// refer to the existing row's value; "excluded.col" refers to the proposed
+	// insert value. All CASE expressions read the same pre-update status
+	// consistently within one atomic SET.
+	//
+	// sqlc cannot parse this upsert shape for SQLite, so we use raw SQL on the
+	// single-connection write pool (inherently serialised), matching the Enqueue pattern.
+	const upsertSQL = `
+INSERT INTO jobs (id, key, kind, payload, user_id, status, run_at, attempt, locked_at, rrule, tz, interval_secs, created_at, updated_at)
+VALUES (?, ?, ?, ?, NULL, 'pending', ?, 0, NULL, ?, ?, ?, ?, ?)
+ON CONFLICT(key) WHERE key IS NOT NULL
+DO UPDATE SET
+    kind          = excluded.kind,
+    payload       = excluded.payload,
+    rrule         = excluded.rrule,
+    tz            = excluded.tz,
+    interval_secs = excluded.interval_secs,
+    updated_at    = excluded.updated_at,
+    status        = CASE WHEN status = 'failed' THEN 'pending'      ELSE status    END,
+    attempt       = CASE WHEN status = 'failed' THEN 0              ELSE attempt   END,
+    locked_at     = CASE WHEN status = 'failed' THEN NULL           ELSE locked_at END,
+    run_at        = CASE WHEN status = 'failed' THEN excluded.run_at ELSE run_at   END`
+
+	_, err = s.st.Writer().ExecContext(context.Background(), upsertSQL,
+		jobID, p.Key, p.Kind, string(payload), runAtStr,
+		rruleCol, tzCol, intervalCol,
+		nowStr, nowStr,
+	)
+	if err != nil {
+		return fmt.Errorf("scheduler: RegisterPeriodic upsert: %w", err)
+	}
+
+	return nil
+}
+
 // ── Sentinel errors ───────────────────────────────────────────────────────────
 
 // ErrJobNotFound is returned by Cancel and Reschedule when the given job id does

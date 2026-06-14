@@ -155,13 +155,17 @@ func AuthModuleCtor(
 //  3. Build each module by calling moduleCtors[i](s).
 //  4. If cfg.AutoMigrate, run all pending migrations against the write pool.
 //  5. Construct the in-memory event bus.
-//     5a. Construct and start the scheduler (validates config, starts the poll loop).
-//  6. Construct the capability registry.
-//  7. Construct the HTTP router.
-//  8. For each module: mount routes onto the router, register tools in the
-//     registry.
-//  9. Construct the AI harness and mount its routes.
-//  10. Build the HTTP server with the StandardChain middleware.
+//  6. Construct the scheduler (validates config; does NOT start yet — all handlers
+//     and periodic jobs must be registered before Start is called).
+//  7. Construct the capability registry.
+//  8. Construct the HTTP router.
+//  9. For each module: mount routes onto the router, register tools in the registry.
+//  10. Construct the AI harness and mount its routes.
+//  11. Register the harness.sweep_confirmations handler on the scheduler.
+//  12. Upsert the harness.sweep_confirmations periodic job (idempotent on restart;
+//     a failure on an unmigrated DB is logged and tolerated, not fatal).
+//  13. Start the scheduler (all handlers and periodic jobs are now registered).
+//  14. Build the HTTP server with the StandardChain middleware.
 func New(
 	ctx context.Context,
 	cfg *config.Config,
@@ -206,26 +210,22 @@ func New(
 	// Step 5: in-memory event bus.
 	bus := events.NewBus()
 
-	// Step 5a: build and start the scheduler. The config is validated here so that a
-	// bad config fails boot immediately (composition-root fail-fast).
+	// Step 6: build the scheduler (validated here so a bad config fails boot immediately)
+	// but do NOT start it yet — it must start after the harness is constructed and all
+	// periodic jobs are registered (step 13 below).
 	schedCfg := scheduler.DefaultConfig()
 	if err = schedCfg.Validate(); err != nil {
 		return nil, fmt.Errorf("app: scheduler config: %w", err)
 	}
 	sched := scheduler.New(s, bus, schedCfg)
-	// TODO: register scheduler handlers here as slices are implemented.
-	// e.g. sched.Register("confirmations.sweep", harness.SweepExpiredConfirmations)
-	if err = sched.Start(ctx); err != nil {
-		return nil, fmt.Errorf("app: scheduler start: %w", err)
-	}
 
-	// Step 6: capability registry.
+	// Step 7: capability registry.
 	reg := capability.NewRegistry()
 
-	// Step 7: HTTP router.
+	// Step 8: HTTP router.
 	router := httpx.NewRouter()
 
-	// Step 8: module registration loop.
+	// Step 9: module registration loop.
 	for _, m := range modules {
 		m.Routes(router)
 		if err := reg.Add(m); err != nil {
@@ -233,14 +233,48 @@ func New(
 		}
 	}
 
-	// Step 9: construct the AI harness and mount its routes. The harness is wired
+	// Step 10: construct the AI harness and mount its routes. The harness is wired
 	// with reg, gw, s, bus, and harnessCfg. It does not contribute capability tools
 	// (Tools() returns nil), so it is not passed through reg.Add.
 	gw := gateway.New(s.Settings())
 	h := harness.New(reg, gw, s, bus, harnessCfg, logger)
 	h.Routes(router)
 
-	// Step 10 (formerly 9): build the HTTP server with the standard middleware chain.
+	// Step 11: register scheduler handlers that depend on the harness being constructed.
+	// The handler must be registered before RegisterPeriodic upserts the row, and both
+	// must run before sched.Start so the first tick can dispatch the job.
+	sched.Register("harness.sweep_confirmations", func(ctx context.Context, _ scheduler.Job) error {
+		_, sweepErr := h.SweepExpiredConfirmations(ctx)
+		return sweepErr
+	})
+
+	// Step 12: upsert the harness sweep as a system periodic job (idempotent across
+	// restarts). run_at = now+1m on INSERT so it never fires during fast boot-time tests
+	// and does not spam on restart. On CONFLICT the schedule is updated in place.
+	//
+	// Registration is unconditional: in every correctly-provisioned deployment the schema
+	// is present — whether applied by AutoMigrate or out-of-band via `qovira migrate` — so
+	// the sweep is always registered (gating on AutoMigrate would wrongly skip it on a
+	// migrate-then-serve deployment). A failure (e.g. the jobs table is absent on an
+	// intentionally-unmigrated DB) is logged and tolerated rather than failing boot,
+	// mirroring the scheduler's boot-sweep, which also soft-fails on a missing table —
+	// app.New does not require the schema to be present.
+	if regErr := sched.RegisterPeriodic(scheduler.PeriodicJob{
+		Key:  "harness.sweep_confirmations",
+		Kind: "harness.sweep_confirmations",
+		Recurrence: &scheduler.Recurrence{
+			Every: time.Minute,
+		},
+	}); regErr != nil {
+		logger.Warn("app: could not register harness sweep periodic job; continuing without it", "err", regErr)
+	}
+
+	// Step 13: start the scheduler now that all handlers and periodic jobs are registered.
+	if err = sched.Start(ctx); err != nil {
+		return nil, fmt.Errorf("app: scheduler start: %w", err)
+	}
+
+	// Step 14: build the HTTP server with the standard middleware chain.
 	// The connection context (connCtx) is a cancelable parent given to every request via srv.BaseContext. Cancelling
 	// it before srv.Shutdown is called causes long-lived SSE handlers to return (they select on r.Context().Done()),
 	// so Shutdown drains quickly rather than waiting for the full timeout.
