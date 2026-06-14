@@ -12,4 +12,4 @@ SELECT id, conversation_id, user_id, role, content, tool_calls, tool_call_id, fi
 FROM messages
 WHERE conversation_id = @conversation_id
   AND user_id = @user_id
-ORDER BY created_at;
+ORDER BY created_at, id;

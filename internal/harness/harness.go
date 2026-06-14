@@ -3,15 +3,19 @@
 // persists the user message, launches the turn asynchronously, and the turn
 // streams the assistant reply over the event bus.
 //
-// For this first slice, only text-only replies are supported; tool calls and
-// multi-round loops are out of scope.
+// Tool calls are fully supported: the harness accumulates tool calls from the
+// model stream, executes them in order through the capability registry, persists
+// results, and loops back to the model until a text-only reply ends the turn or
+// the configured step cap is reached.
 package harness
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"log/slog"
+	"unicode/utf8"
 
 	"github.com/qovira/qovira/internal/capability"
 	"github.com/qovira/qovira/internal/events"
@@ -103,23 +107,48 @@ type CompletedPayload struct {
 	FinishReason string `json:"finishReason"`
 }
 
+// ToolStartedPayload is the Data for a "tool.started" event, emitted before a
+// tool call is executed. Risk is rendered as its string name (e.g. "read",
+// "write", "external", "destructive"). ArgsSummary is compact JSON of the call
+// arguments, truncated to a reasonable length.
+type ToolStartedPayload struct {
+	CallID      string `json:"callId"`
+	Name        string `json:"name"`
+	Risk        string `json:"risk"`
+	ArgsSummary string `json:"argsSummary"`
+}
+
+// ToolCompletedPayload is the Data for a "tool.completed" event, emitted after
+// a tool call has been executed and its result persisted.
+type ToolCompletedPayload struct {
+	CallID string `json:"callId"`
+	Result any    `json:"result"`
+}
+
 // ── Config ────────────────────────────────────────────────────────────────────
 
-// Config holds boot-time configuration for the harness. It is intentionally
-// minimal for this first slice; additional knobs (step cap, sliding window, etc.)
-// are added in later issues.
-type Config struct{}
+// defaultStepCap is the maximum number of model rounds per turn when no explicit
+// cap is configured.
+const defaultStepCap = 8
+
+// Config holds boot-time configuration for the harness.
+type Config struct {
+	// StepCap limits the number of model-gateway rounds (including tool-call
+	// loops) per turn. If <= 0, the default of 8 is applied. On reaching the
+	// cap the turn ends gracefully with a final assistant message.
+	StepCap int
+}
 
 // ── Harness ───────────────────────────────────────────────────────────────────
 
 // Harness is the AI turn orchestrator. Obtain one via New; the zero value is not valid.
 type Harness struct {
-	reg    Cataloger
-	gw     Chatter
-	store  *store.Store
-	bus    events.Publisher
-	cfg    Config
-	logger *slog.Logger
+	reg     Cataloger
+	gw      Chatter
+	store   *store.Store
+	bus     events.Publisher
+	stepCap int
+	logger  *slog.Logger
 }
 
 // New constructs a Harness wired with the given collaborators.
@@ -134,13 +163,17 @@ func New(reg Cataloger, gw Chatter, st *store.Store, bus events.Publisher, cfg C
 	if logger == nil {
 		logger = slog.Default()
 	}
+	stepCap := cfg.StepCap
+	if stepCap <= 0 {
+		stepCap = defaultStepCap
+	}
 	return &Harness{
-		reg:    reg,
-		gw:     gw,
-		store:  st,
-		bus:    bus,
-		cfg:    cfg,
-		logger: logger,
+		reg:     reg,
+		gw:      gw,
+		store:   st,
+		bus:     bus,
+		stepCap: stepCap,
+		logger:  logger,
 	}
 }
 
@@ -182,32 +215,30 @@ func (h *Harness) StartTurn(
 
 // ── run ──────────────────────────────────────────────────────────────────────
 
-// run executes a single turn: assembles the gateway request from persisted state,
-// streams the reply, publishes delta events, and persists the assistant message
-// before emitting message.completed.
+// run executes a full turn, potentially spanning multiple model rounds when the
+// model requests tool calls. Each round:
+//  1. Assembles the gateway request from persisted conversation state.
+//  2. Streams the model reply, forwarding TextDelta events and accumulating ToolCalls.
+//  3. On Done with no tool calls: persists the assistant message and emits
+//     message.completed — turn ends.
+//  4. On Done with tool calls: persists the assistant message (with tool_calls),
+//     executes each call in order through the registry, persists each result, then
+//     loops for the next round.
+//
+// The loop is bounded by h.stepCap. If the cap is reached, a graceful "unable to
+// finish" assistant message is persisted and message.completed is emitted.
 func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.Principal) error {
 	scope := store.UserScope(principal)
 	sq := h.store.ForUser(scope)
 
-	// Build the gateway request from persisted message history.
-	msgs, err := sq.ListMessages(ctx, conv)
-	if err != nil {
-		return fmt.Errorf("harness: list messages: %w", err)
-	}
-
-	// Assemble gateway messages: prepend a minimal system prompt, then history.
-	const systemPrompt = "You are Qovira, a helpful personal assistant."
-	gwMsgs := make([]gateway.Message, 0, len(msgs)+1)
-	gwMsgs = append(gwMsgs, gateway.Message{Role: "system", Content: systemPrompt})
-	for _, m := range msgs {
-		gwMsgs = append(gwMsgs, gateway.Message{
-			Role:    m.Role,
-			Content: m.Content,
-		})
-	}
-
-	// Map the capability catalog to gateway tool schemas.
+	// Build a by-name lookup from the catalog for O(1) dispatch.
 	tools := h.reg.Catalog()
+	toolMap := make(map[string]capability.Tool, len(tools))
+	for _, t := range tools {
+		toolMap[t.Name] = t
+	}
+
+	// Map the capability catalog to gateway tool schemas for all rounds.
 	gwTools := make([]gateway.ToolSchema, 0, len(tools))
 	for _, t := range tools {
 		gwTools = append(gwTools, gateway.ToolSchema{
@@ -217,69 +248,290 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 		})
 	}
 
-	req := gateway.ChatRequest{
-		Messages: gwMsgs,
-		Tools:    gwTools,
-	}
-
-	seq, err := h.gw.Chat(ctx, req)
-	if err != nil {
-		return fmt.Errorf("harness: chat setup: %w", err)
-	}
-
-	// Stream the response, accumulating text and publishing delta events.
-	var textAccum []byte
-	for chunk, chunkErr := range seq {
-		if chunkErr != nil {
-			return fmt.Errorf("harness: stream error: %w", chunkErr)
+	for step := range h.stepCap {
+		// Re-assemble from persisted state on every round so tool-result messages
+		// are included in the context fed back to the model.
+		req, err := h.assembleChatRequest(ctx, sq, conv, gwTools)
+		if err != nil {
+			return fmt.Errorf("harness: assemble request (step %d): %w", step, err)
 		}
-		if chunk.TextDelta != "" {
-			textAccum = append(textAccum, chunk.TextDelta...)
+
+		seq, err := h.gw.Chat(ctx, req)
+		if err != nil {
+			return fmt.Errorf("harness: chat setup (step %d): %w", step, err)
+		}
+
+		var textAccum []byte
+		var calls []*gateway.ToolCall
+
+		for chunk, chunkErr := range seq {
+			if chunkErr != nil {
+				return fmt.Errorf("harness: stream error (step %d): %w", step, chunkErr)
+			}
+			if chunk.TextDelta != "" {
+				textAccum = append(textAccum, chunk.TextDelta...)
+				h.bus.Publish(principal.UserID, events.Event{
+					Type: "message.delta",
+					Data: DeltaPayload{
+						ConversationID: conv,
+						Text:           chunk.TextDelta,
+					},
+				})
+			}
+			if chunk.ToolCall != nil {
+				calls = append(calls, chunk.ToolCall)
+			}
+			if chunk.Done {
+				break
+			}
+		}
+
+		// Done with no tool calls: this is the final reply — persist and stop.
+		if len(calls) == 0 {
+			assistantID, err := persistAssistantMessage(ctx, sq, conv, string(textAccum), "")
+			if err != nil {
+				return fmt.Errorf("harness: persist final assistant message: %w", err)
+			}
 			h.bus.Publish(principal.UserID, events.Event{
-				Type: "message.delta",
-				Data: DeltaPayload{
-					ConversationID: conv,
-					Text:           chunk.TextDelta,
+				Type: "message.completed",
+				Data: CompletedPayload{
+					MessageID:    assistantID,
+					FinishReason: "stop",
 				},
 			})
+			return nil
 		}
-		if chunk.Done {
-			break
+
+		// Done with tool calls: persist the assistant message (with tool_calls JSON),
+		// then execute each call in order.
+		toolCallsJSON, err := json.Marshal(calls)
+		if err != nil {
+			return fmt.Errorf("harness: marshal tool_calls (step %d): %w", step, err)
 		}
+		if _, err := persistAssistantMessage(ctx, sq, conv, string(textAccum), string(toolCallsJSON)); err != nil {
+			return fmt.Errorf("harness: persist assistant message with tool_calls (step %d): %w", step, err)
+		}
+
+		// Execute tool calls in order, persisting each result immediately.
+		for _, c := range calls {
+			if err := h.executeAndPersistToolCall(ctx, sq, conv, principal.UserID, c, toolMap, scope); err != nil {
+				return fmt.Errorf("harness: execute tool call %q (step %d): %w", c.ID, step, err)
+			}
+		}
+		// Loop: next iteration will re-assemble and call the model again.
 	}
 
-	// Persist the assistant message BEFORE emitting message.completed.
-	assistantID, err := persistAssistantMessage(ctx, sq, conv, string(textAccum))
+	// Step cap reached: persist a graceful message and end the turn.
+	const capMessage = "I wasn't able to finish that — I reached the maximum number of steps. Please try again."
+	assistantID, err := persistAssistantMessage(ctx, sq, conv, capMessage, "")
 	if err != nil {
-		return fmt.Errorf("harness: persist assistant message: %w", err)
+		return fmt.Errorf("harness: persist step-cap message: %w", err)
 	}
-
-	// Emit message.completed.
 	h.bus.Publish(principal.UserID, events.Event{
 		Type: "message.completed",
 		Data: CompletedPayload{
 			MessageID:    assistantID,
-			FinishReason: "stop",
+			FinishReason: "step_cap",
+		},
+	})
+	return nil
+}
+
+// ── assembly ─────────────────────────────────────────────────────────────────
+
+// assembleChatRequest builds a gateway.ChatRequest from the persisted message
+// history. It prepends a system prompt and round-trips each message type:
+//   - role "user"      → gateway.Message{Role:"user", Content}
+//   - role "assistant" with non-null tool_calls → gateway.Message{Role:"assistant", Content, ToolCalls}
+//   - role "assistant" without tool_calls → gateway.Message{Role:"assistant", Content}
+//   - role "tool"      → gateway.Message{Role:"tool", ToolCallID, Content}
+func (h *Harness) assembleChatRequest(
+	ctx context.Context,
+	sq *store.ScopedQueries,
+	conv ConversationID,
+	gwTools []gateway.ToolSchema,
+) (gateway.ChatRequest, error) {
+	msgs, err := sq.ListMessages(ctx, conv)
+	if err != nil {
+		return gateway.ChatRequest{}, fmt.Errorf("list messages: %w", err)
+	}
+
+	const systemPrompt = "You are Qovira, a helpful personal assistant."
+	gwMsgs := make([]gateway.Message, 0, len(msgs)+1)
+	gwMsgs = append(gwMsgs, gateway.Message{Role: "system", Content: systemPrompt})
+
+	for _, m := range msgs {
+		switch m.Role {
+		case "tool":
+			gwMsgs = append(gwMsgs, gateway.Message{
+				Role:       "tool",
+				ToolCallID: m.ToolCallID.String,
+				Content:    m.Content,
+			})
+		case "assistant":
+			gm := gateway.Message{Role: "assistant", Content: m.Content}
+			if m.ToolCalls.Valid && m.ToolCalls.String != "" {
+				var tcs []gateway.ToolCall
+				if jsonErr := json.Unmarshal([]byte(m.ToolCalls.String), &tcs); jsonErr != nil {
+					// Malformed persisted JSON is a programming error; surface it.
+					return gateway.ChatRequest{}, fmt.Errorf("unmarshal tool_calls for message %s: %w", m.ID, jsonErr)
+				}
+				gm.ToolCalls = tcs
+			}
+			gwMsgs = append(gwMsgs, gm)
+		default:
+			// "user" and any future roles pass through as plain content messages.
+			gwMsgs = append(gwMsgs, gateway.Message{
+				Role:    m.Role,
+				Content: m.Content,
+			})
+		}
+	}
+
+	return gateway.ChatRequest{
+		Messages: gwMsgs,
+		Tools:    gwTools,
+	}, nil
+}
+
+// ── tool execution ────────────────────────────────────────────────────────────
+
+// executeAndPersistToolCall executes one tool call from the model, emits
+// tool.started and tool.completed events, and persists the result message.
+//
+// On a tool Execute returning an error, the error is persisted as the tool-result
+// content and the turn continues (error classification into ToolError vs.
+// infrastructure error is deferred to the error-classification slice).
+// refined in the error-classification slice
+//
+// If the model names a tool not in the catalog, a tool-result noting "unknown
+// tool" is persisted and the turn continues.
+func (h *Harness) executeAndPersistToolCall(
+	ctx context.Context,
+	sq *store.ScopedQueries,
+	conv, userID string,
+	call *gateway.ToolCall,
+	toolMap map[string]capability.Tool,
+	scope store.Scope,
+) error {
+	tool, found := toolMap[call.Name]
+
+	risk := ""
+	if found {
+		risk = riskTierString(tool.Risk)
+	}
+
+	// Emit tool.started.
+	h.bus.Publish(userID, events.Event{
+		Type: "tool.started",
+		Data: ToolStartedPayload{
+			CallID:      call.ID,
+			Name:        call.Name,
+			Risk:        risk,
+			ArgsSummary: argsSummary(call.Arguments),
+		},
+	})
+
+	var result any
+	if !found {
+		result = map[string]string{"error": "unknown tool: " + call.Name}
+	} else {
+		var execErr error
+		result, execErr = tool.Execute(ctx, scope, call.Arguments)
+		if execErr != nil {
+			// refined in the error-classification slice
+			result = map[string]string{"error": execErr.Error()}
+		}
+	}
+
+	// Persist tool-result message.
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("marshal tool result for call %s: %w", call.ID, err)
+	}
+	if _, err := sq.InsertMessage(ctx, store.InsertMessageParams{
+		ID:             generateID(),
+		ConversationID: conv,
+		Role:           "tool",
+		Content:        string(resultJSON),
+		ToolCallID:     call.ID,
+	}); err != nil {
+		return fmt.Errorf("persist tool result for call %s: %w", call.ID, err)
+	}
+
+	// Emit tool.completed.
+	h.bus.Publish(userID, events.Event{
+		Type: "tool.completed",
+		Data: ToolCompletedPayload{
+			CallID: call.ID,
+			Result: result,
 		},
 	})
 
 	return nil
 }
 
+// ── helpers ───────────────────────────────────────────────────────────────────
+
 // persistAssistantMessage inserts the assistant reply into the messages table
-// and returns the new message ID.
-func persistAssistantMessage(ctx context.Context, sq *store.ScopedQueries, conv, content string) (string, error) {
-	// Generate the ID here so we can return it without a second query.
+// and returns the new message ID. toolCallsJSON is the JSON array string for the
+// tool_calls column, or "" if the message has no tool calls.
+func persistAssistantMessage(
+	ctx context.Context,
+	sq *store.ScopedQueries,
+	conv, content, toolCallsJSON string,
+) (string, error) {
 	msgID := generateID()
 	_, err := sq.InsertMessage(ctx, store.InsertMessageParams{
 		ID:             msgID,
 		ConversationID: conv,
 		Role:           "assistant",
 		Content:        content,
+		ToolCalls:      toolCallsJSON,
 		FinishReason:   "stop",
 	})
 	if err != nil {
 		return "", err
 	}
 	return msgID, nil
+}
+
+// riskTierString returns the stable string label for a RiskTier.
+func riskTierString(r capability.RiskTier) string {
+	switch r {
+	case capability.RiskRead:
+		return "read"
+	case capability.RiskWrite:
+		return "write"
+	case capability.RiskExternal:
+		return "external"
+	case capability.RiskDestructive:
+		return "destructive"
+	default:
+		return "unknown"
+	}
+}
+
+// maxArgsSummaryBytes is the maximum number of bytes included in the argsSummary
+// field of a ToolStartedPayload. Longer JSON is truncated with "…".
+const maxArgsSummaryBytes = 256
+
+// argsSummary returns a compact JSON summary of the given raw arguments, truncated
+// to maxArgsSummaryBytes on a valid UTF-8 rune boundary. Truncating at a raw byte
+// offset can split a multi-byte rune and produce ill-formed UTF-8, which would
+// corrupt the JSON payload sent to the UI via "tool.started".
+func argsSummary(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	s := string(raw)
+	if len(s) <= maxArgsSummaryBytes {
+		return s
+	}
+	// Back up from the byte limit until we land on the start of a rune.
+	cut := maxArgsSummaryBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }

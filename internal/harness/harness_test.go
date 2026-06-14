@@ -113,11 +113,41 @@ func (b *fakeBus) snapshot() []fakeEvent {
 }
 
 // waitForEvents blocks until the bus has at least n events or the timeout expires.
+// Prefer waitForCompleted when testing turn completion — a raw event count is
+// satisfied mid-turn and misses the terminal message.completed event.
 func waitForEvents(t *testing.T, b *fakeBus, n int, timeout time.Duration) []fakeEvent {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if evs := b.snapshot(); len(evs) >= n {
+			return evs
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return b.snapshot()
+}
+
+// waitForCompleted blocks until a "message.completed" event is present on the
+// bus (and, optionally, until at least minToolStarted "tool.started" events
+// have also appeared). It returns the full event snapshot once the condition is
+// met, or the snapshot at timeout. Using this instead of waitForEvents avoids
+// sampling the bus mid-turn before the terminal event fires.
+func waitForCompleted(t *testing.T, b *fakeBus, minToolStarted int, timeout time.Duration) []fakeEvent {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		evs := b.snapshot()
+		completedCount := 0
+		toolStartedCount := 0
+		for _, e := range evs {
+			switch e.event.Type {
+			case "message.completed":
+				completedCount++
+			case "tool.started":
+				toolStartedCount++
+			}
+		}
+		if completedCount >= 1 && toolStartedCount >= minToolStarted {
 			return evs
 		}
 		time.Sleep(2 * time.Millisecond)

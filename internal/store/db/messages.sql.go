@@ -62,7 +62,7 @@ SELECT id, conversation_id, user_id, role, content, tool_calls, tool_call_id, fi
 FROM messages
 WHERE conversation_id = ?1
   AND user_id = ?2
-ORDER BY created_at
+ORDER BY created_at, id
 `
 
 type ListMessagesParams struct {
