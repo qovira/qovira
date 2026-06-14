@@ -1592,8 +1592,13 @@ func TestRetry_JobTimeoutIsTransient(t *testing.T) {
 	cfg.JobTimeout = 20 * time.Millisecond // very short so the test is fast
 	cfg.LeaseTimeout = 1 * time.Minute     // maintain invariant: LeaseTimeout > JobTimeout
 	cfg.MaxAttempts = 5                    // don't dead-letter on first attempt
-	cfg.BackoffBase = 1 * time.Millisecond
-	cfg.BackoffCap = 5 * time.Millisecond
+	// Large backoff so the retried run_at lands far in the future of the frozen
+	// clock: the job stays 'pending' and is never re-claimed, so it cannot churn
+	// through all MaxAttempts and dead-letter before the assertion samples the row.
+	// Without this, a slow/loaded runner can observe 'failed' instead of 'pending'
+	// (same fragility fixed in TestRecurring_FailureRetriesSameOccurrence).
+	cfg.BackoffBase = 1 * time.Hour
+	cfg.BackoffCap = 1 * time.Hour
 
 	handlerStarted := make(chan struct{}, 1)
 
