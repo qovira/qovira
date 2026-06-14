@@ -47,3 +47,41 @@ func (q *Queries) GetJobIDByKey(ctx context.Context, key sql.NullString) (string
 	err := row.Scan(&id)
 	return id, err
 }
+
+const getJobStatus = `-- name: GetJobStatus :one
+SELECT status FROM jobs WHERE id = ?1
+`
+
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler reads the status of any job
+// regardless of owner to implement Cancel/Reschedule atomicity. Called inside a transaction
+// on the write pool to provide a consistent read-then-write with no TOCTOU window.
+func (q *Queries) GetJobStatus(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getJobStatus, id)
+	var status string
+	err := row.Scan(&status)
+	return status, err
+}
+
+const rescheduleJob = `-- name: RescheduleJob :execrows
+UPDATE jobs SET run_at = ?1, updated_at = ?2
+WHERE id = ?3 AND status = 'pending'
+`
+
+type RescheduleJobParams struct {
+	RunAt     string
+	UpdatedAt string
+	ID        string
+}
+
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler moves run_at for any pending job.
+// Only updates rows with status='pending'; returns 0 rows affected when the job is not pending
+// (running or absent today; 'failed'/dead-letter is a later slice). The caller interprets a
+// non-pending status as ErrJobRunning or ErrJobNotFound
+// after reading the status inside the enclosing transaction.
+func (q *Queries) RescheduleJob(ctx context.Context, arg RescheduleJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rescheduleJob, arg.RunAt, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

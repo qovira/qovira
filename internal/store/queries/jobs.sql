@@ -20,3 +20,18 @@ SELECT id FROM jobs WHERE key = @key;
 -- scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler deletes the row after a handler
 -- succeeds. The scheduler owns the row lifecycle; no user_id predicate is applicable.
 DELETE FROM jobs WHERE id = @id;
+
+-- name: GetJobStatus :one
+-- scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler reads the status of any job
+-- regardless of owner to implement Cancel/Reschedule atomicity. Called inside a transaction
+-- on the write pool to provide a consistent read-then-write with no TOCTOU window.
+SELECT status FROM jobs WHERE id = @id;
+
+-- name: RescheduleJob :execrows
+-- scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler moves run_at for any pending job.
+-- Only updates rows with status='pending'; returns 0 rows affected when the job is not pending
+-- (running or absent today; 'failed'/dead-letter is a later slice). The caller interprets a
+-- non-pending status as ErrJobRunning or ErrJobNotFound
+-- after reading the status inside the enclosing transaction.
+UPDATE jobs SET run_at = @run_at, updated_at = @updated_at
+WHERE id = @id AND status = 'pending';

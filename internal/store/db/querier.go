@@ -62,6 +62,10 @@ type Querier interface {
 	// scopeguard:allow-unscoped: cross-user lookup by idempotency key. The scheduler resolves
 	// the existing job id when ON CONFLICT(key) DO NOTHING suppresses the insert.
 	GetJobIDByKey(ctx context.Context, key sql.NullString) (string, error)
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler reads the status of any job
+	// regardless of owner to implement Cancel/Reschedule atomicity. Called inside a transaction
+	// on the write pool to provide a consistent read-then-write with no TOCTOU window.
+	GetJobStatus(ctx context.Context, id string) (string, error)
 	GetPendingConfirmation(ctx context.Context, arg GetPendingConfirmationParams) (PendingConfirmation, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
@@ -115,6 +119,12 @@ type Querier interface {
 	// TTL cutoffs (idle and absolute), so there is no meaningful user context available and a
 	// user_id predicate would prevent cross-user expiry from working.
 	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler moves run_at for any pending job.
+	// Only updates rows with status='pending'; returns 0 rows affected when the job is not pending
+	// (running or absent today; 'failed'/dead-letter is a later slice). The caller interprets a
+	// non-pending status as ErrJobRunning or ErrJobNotFound
+	// after reading the status inside the enclosing transaction.
+	RescheduleJob(ctx context.Context, arg RescheduleJobParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)

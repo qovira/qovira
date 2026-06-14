@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -889,5 +890,336 @@ func TestStop_ConcurrentWithStart(t *testing.T) {
 			t.Errorf("Stop: %v", err)
 		}
 		_ = s.Close()
+	}
+}
+
+// ── Cancel / Reschedule tests (issue: Producers can cancel or reschedule a job) ──
+
+// TestCancel_PendingJob verifies criterion 1: Cancel removes a pending job so it is never claimed.
+func TestCancel_PendingJob(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	// Use a far-future RunAt so the poller cannot claim the job before we cancel it.
+	sched := scheduler.NewWithClock(s, fakeBus{}, defaultTestConfig(), fixedClock(now))
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "cancel.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+		RunAt:   now.Add(24 * time.Hour), // far future — will never be due during this test
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Row must exist before cancel.
+	if !jobExists(t, s.Writer(), jobID) {
+		t.Fatal("job row not found after Enqueue")
+	}
+
+	if err := sched.Cancel(context.Background(), jobID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	// Row must be gone.
+	if jobExists(t, s.Writer(), jobID) {
+		t.Error("job row still exists after Cancel; expected deletion")
+	}
+}
+
+// TestCancel_PendingNeverClaimed verifies that a cancelled job is never subsequently claimed
+// even when the scheduler is running (criterion 1 — integration).
+func TestCancel_PendingNeverClaimed(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	var runCount atomic.Int32
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+	sched.Register("cancel.never", func(_ context.Context, _ scheduler.Job) error {
+		runCount.Add(1)
+		return nil
+	})
+
+	// Enqueue due immediately.
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "cancel.never",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Cancel before starting the poller.
+	if err := sched.Cancel(context.Background(), jobID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Let the poller run a few ticks.
+	time.Sleep(100 * time.Millisecond)
+
+	if n := runCount.Load(); n != 0 {
+		t.Errorf("handler ran %d times after Cancel; expected 0", n)
+	}
+}
+
+// TestCancel_NotFound verifies criterion 3: Cancel of a missing id returns ErrJobNotFound.
+func TestCancel_NotFound(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	sched := scheduler.NewWithClock(s, fakeBus{}, defaultTestConfig(), fixedClock(time.Now()))
+
+	err := sched.Cancel(context.Background(), "01JNONEXISTENTJOB000000001")
+	if err == nil {
+		t.Fatal("Cancel returned nil for non-existent job; want ErrJobNotFound")
+	}
+	if !errors.Is(err, scheduler.ErrJobNotFound) {
+		t.Errorf("Cancel error = %v; want errors.Is(err, ErrJobNotFound)", err)
+	}
+}
+
+// TestCancel_RunningJob verifies criterion 4: Cancel of a running job deletes the row
+// without interrupting the handler and without causing a double-run.
+func TestCancel_RunningJob(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+
+	handlerStarted := make(chan struct{})
+	handlerBlock := make(chan struct{})
+	// release closes handlerBlock exactly once, whether the test body or the
+	// cleanup gets there first (an early t.Fatal can skip the body's release).
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(handlerBlock) }) }
+	var runCount atomic.Int32
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+	sched.Register("cancel.running", func(_ context.Context, _ scheduler.Job) error {
+		runCount.Add(1)
+		close(handlerStarted)
+		<-handlerBlock // block until the test releases it
+		return nil
+	})
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "cancel.running",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		release() // unblock the handler so Stop can drain
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for handler to start (row is now running).
+	select {
+	case <-handlerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not start within timeout")
+	}
+
+	// Cancel the running job — must succeed (no ErrJobRunning for Cancel).
+	if err := sched.Cancel(context.Background(), jobID); err != nil {
+		t.Fatalf("Cancel of running job returned error: %v; want nil", err)
+	}
+
+	// Row must be gone.
+	if jobExists(t, s.Writer(), jobID) {
+		t.Error("job row still exists after Cancel of running job; expected deletion")
+	}
+
+	// Release handler and let it finish (post-success delete is a harmless no-op).
+	release()
+
+	// Give the scheduler time to process the handler completion.
+	time.Sleep(100 * time.Millisecond)
+
+	// Handler must have run exactly once (no double-run).
+	if n := runCount.Load(); n != 1 {
+		t.Errorf("handler ran %d times; want exactly 1 (no double-run)", n)
+	}
+}
+
+// TestReschedule_PendingJob verifies criterion 2: Reschedule updates run_at and the
+// job fires at the new time, not the old.
+func TestReschedule_PendingJob(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+
+	handlerRan := make(chan struct{})
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+	sched.Register("reschedule.test", func(_ context.Context, _ scheduler.Job) error {
+		close(handlerRan)
+		return nil
+	})
+
+	// Enqueue far in the future.
+	future := now.Add(24 * time.Hour)
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "reschedule.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+		RunAt:   future,
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Verify run_at is set to future.
+	var runAt string
+	if err := s.Writer().QueryRow("SELECT run_at FROM jobs WHERE id = ?", jobID).Scan(&runAt); err != nil {
+		t.Fatalf("SELECT run_at: %v", err)
+	}
+	if runAt != future.UTC().Format(time.RFC3339) {
+		t.Errorf("run_at before reschedule = %q, want %q", runAt, future.UTC().Format(time.RFC3339))
+	}
+
+	// Reschedule to now (immediately due).
+	if err := sched.Reschedule(context.Background(), jobID, now); err != nil {
+		t.Fatalf("Reschedule: %v", err)
+	}
+
+	// Verify run_at is updated.
+	if err := s.Writer().QueryRow("SELECT run_at FROM jobs WHERE id = ?", jobID).Scan(&runAt); err != nil {
+		t.Fatalf("SELECT run_at after reschedule: %v", err)
+	}
+	if runAt != now.UTC().Format(time.RFC3339) {
+		t.Errorf("run_at after reschedule = %q, want %q", runAt, now.UTC().Format(time.RFC3339))
+	}
+
+	// Start the scheduler — the rescheduled job should fire at the new time.
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	select {
+	case <-handlerRan:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not run after Reschedule to now; want it to fire at new time")
+	}
+}
+
+// TestReschedule_NotFound verifies criterion 3: Reschedule of a missing id returns ErrJobNotFound.
+func TestReschedule_NotFound(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	sched := scheduler.NewWithClock(s, fakeBus{}, defaultTestConfig(), fixedClock(time.Now()))
+
+	err := sched.Reschedule(context.Background(), "01JNONEXISTENTJOB000000001", time.Now())
+	if err == nil {
+		t.Fatal("Reschedule returned nil for non-existent job; want ErrJobNotFound")
+	}
+	if !errors.Is(err, scheduler.ErrJobNotFound) {
+		t.Errorf("Reschedule error = %v; want errors.Is(err, ErrJobNotFound)", err)
+	}
+}
+
+// TestReschedule_RunningJob verifies criterion 4: Reschedule of a running job returns
+// ErrJobRunning and does NOT touch the row (no double-run risk).
+func TestReschedule_RunningJob(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+
+	handlerStarted := make(chan struct{})
+	handlerBlock := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(handlerBlock) }) }
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+	sched.Register("reschedule.running", func(_ context.Context, _ scheduler.Job) error {
+		close(handlerStarted)
+		<-handlerBlock
+		return nil
+	})
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "reschedule.running",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		release()
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for handler to be running.
+	select {
+	case <-handlerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not start within timeout")
+	}
+
+	// Reschedule must return ErrJobRunning.
+	newTime := now.Add(time.Hour)
+	err = sched.Reschedule(context.Background(), jobID, newTime)
+	if err == nil {
+		t.Fatal("Reschedule of running job returned nil; want ErrJobRunning")
+	}
+	if !errors.Is(err, scheduler.ErrJobRunning) {
+		t.Errorf("Reschedule error = %v; want errors.Is(err, ErrJobRunning)", err)
+	}
+
+	// Row must still be present in running state (no double-run risk).
+	if !jobExists(t, s.Writer(), jobID) {
+		t.Error("running job row disappeared during Reschedule; expected it to remain")
+	}
+	status, _, _, _ := jobRow(t, s.Writer(), jobID)
+	if status != "running" {
+		t.Errorf("job status after Reschedule = %q, want %q", status, "running")
 	}
 }

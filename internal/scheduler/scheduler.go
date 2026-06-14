@@ -516,6 +516,133 @@ func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 	}
 }
 
+// ── Sentinel errors ───────────────────────────────────────────────────────────
+
+// ErrJobNotFound is returned by Cancel and Reschedule when the given job id does
+// not exist in the jobs table. Use errors.Is to detect it.
+var ErrJobNotFound = errors.New("scheduler: job not found")
+
+// ErrJobRunning is returned by Reschedule when the target job is currently being
+// executed by a handler goroutine. Cancel does NOT return this error — it deletes
+// the row even for a running job (the in-flight handler completes once, the
+// post-success delete becomes a harmless no-op, and the job is never re-leased).
+// Use errors.Is to detect it.
+var ErrJobRunning = errors.New("scheduler: job is currently running")
+
+// ── Cancel / Reschedule ───────────────────────────────────────────────────────
+
+// Cancel removes the job with the given id so it never fires again.
+//
+// Behaviour by row state:
+//   - pending: the row is deleted immediately. The claim loop never sees it again
+//     because claim only selects status='pending' rows.
+//   - running: the row is deleted, but the in-flight handler is NOT interrupted.
+//     The handler will complete exactly once; its post-success DELETE becomes a
+//     harmless no-op (0 rows affected). The job can never be re-leased because the
+//     row is gone. This is safe and race-clean under -race.
+//   - absent: returns ErrJobNotFound.
+//
+// Note: this slice has no 'failed'/dead-letter status yet — an errored or
+// panicked handler currently leaves its row in 'running' (reclaim and
+// dead-letter land in later slices). When that status arrives, a failed row
+// will be deletable here the same as a pending one.
+//
+// Cancel uses a transaction on the single-connection write pool so that the
+// status read and the delete are one atomic unit, serialised against the claim loop.
+func (s *Scheduler) Cancel(ctx context.Context, jobID string) error {
+	tx, err := s.st.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("scheduler: cancel begin tx: %w", err)
+	}
+	// Always rollback on early return; a committed tx makes Rollback a no-op.
+	defer func() { _ = tx.Rollback() }()
+
+	q := db.New(tx)
+
+	// Read current status to determine whether the row exists at all.
+	_, err = q.GetJobStatus(ctx, jobID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("scheduler: cancel %q: %w", jobID, ErrJobNotFound)
+		}
+		return fmt.Errorf("scheduler: cancel get status %q: %w", jobID, err)
+	}
+
+	// Delete regardless of status (pending or running today). For a running row:
+	// the in-flight goroutine's post-success delete becomes a no-op; no double-run
+	// is possible because the row is gone and claim only selects pending rows.
+	if err := q.DeleteJob(ctx, jobID); err != nil {
+		return fmt.Errorf("scheduler: cancel delete %q: %w", jobID, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("scheduler: cancel commit %q: %w", jobID, err)
+	}
+	return nil
+}
+
+// Reschedule moves a pending job's earliest fire time to runAt.
+//
+// Behaviour by row state:
+//   - pending: run_at and updated_at are updated. The job will fire at the new
+//     time, not the old one.
+//   - running: returns ErrJobRunning. The row is NOT modified. Changing run_at or
+//     flipping a running row back to pending while a handler goroutine holds the
+//     lease could cause the job to be re-claimed and executed a second time — a
+//     double-run that the scheduler invariant forbids. The caller should retry after
+//     the job settles (row deleted on success, or left running on error).
+//   - absent: returns ErrJobNotFound.
+//
+// Reschedule uses a transaction on the single-connection write pool so that the
+// status read and the update are one atomic unit, serialised against the claim loop.
+func (s *Scheduler) Reschedule(ctx context.Context, jobID string, runAt time.Time) error {
+	tx, err := s.st.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("scheduler: reschedule begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	q := db.New(tx)
+
+	// Read current status first so we can distinguish not-found from running.
+	status, err := q.GetJobStatus(ctx, jobID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("scheduler: reschedule %q: %w", jobID, ErrJobNotFound)
+		}
+		return fmt.Errorf("scheduler: reschedule get status %q: %w", jobID, err)
+	}
+
+	if status == "running" {
+		// Do not touch the row — flipping run_at on a running row risks a double-run
+		// when the handler finishes and the claim loop re-sees it.
+		return fmt.Errorf("scheduler: reschedule %q: %w", jobID, ErrJobRunning)
+	}
+
+	nowStr := s.now().UTC().Format(time.RFC3339)
+	runAtStr := runAt.UTC().Format(time.RFC3339)
+
+	rows, err := q.RescheduleJob(ctx, db.RescheduleJobParams{
+		RunAt:     runAtStr,
+		UpdatedAt: nowStr,
+		ID:        jobID,
+	})
+	if err != nil {
+		return fmt.Errorf("scheduler: reschedule update %q: %w", jobID, err)
+	}
+	if rows == 0 {
+		// Status was not 'pending' (e.g. it transitioned between our SELECT and UPDATE,
+		// which cannot happen on a MaxOpenConns=1 write pool inside a tx, but be
+		// defensive). Treat as not-found to avoid a silent no-op.
+		return fmt.Errorf("scheduler: reschedule %q: %w", jobID, ErrJobNotFound)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("scheduler: reschedule commit %q: %w", jobID, err)
+	}
+	return nil
+}
+
 // isClosedError reports whether err indicates that the database pool was closed
 // (e.g. during application shutdown). The standard library's errDBClosed is
 // unexported, so we check the message string as a last resort.
