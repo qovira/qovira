@@ -2,16 +2,8 @@
 // boot time; the Capability Registry Spec (a later slice) fleshes out the full schema and runtime behaviour.
 package capability
 
-// Tool is a minimal descriptor for a capability exposed by a Module. The Capability Registry Spec defines the full
-// schema; this struct is intentionally thin so sibling modules can register without coupling to a specification that is
-// not yet finalised.
-type Tool struct {
-	// Name is the stable, unique identifier for the tool (e.g. "reminders.create").
-	Name string
-
-	// Description is a short human-readable summary of what the tool does.
-	Description string
-}
+// Tool is defined in tool.go. The type declaration lives there alongside Result,
+// RiskTier, ToolError, and NewTool so the full tool contract is co-located.
 
 // Registry holds the tools contributed by all registered modules.
 // The zero value is not valid; use NewRegistry.
