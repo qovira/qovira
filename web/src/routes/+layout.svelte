@@ -1,6 +1,7 @@
 <script lang="ts">
   import "../app.css";
 
+  import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { Avatar, Container, IconButton, Separator, ToastProvider } from "@qovira/ui";
   import { getTheme, subscribe, toggleTheme } from "@qovira/theme/runtime";
@@ -9,7 +10,10 @@
   import { onMount } from "svelte";
   import type { Snippet } from "svelte";
 
+  import { Api, onUnauthorized } from "$lib/api/index.js";
+  import { isExemptRoute, shouldRedirectToLogin } from "$lib/auth/guard.js";
   import { getRailPinned, initPrefs, setRailPinned } from "$lib/stores/ui-preferences.svelte.js";
+  import { isAuthenticated, notifyTearDown, resetSession, seedSession } from "$lib/stores/session.svelte.js";
   import RailEntry from "$lib/components/RailEntry.svelte";
 
   interface Props {
@@ -84,90 +88,156 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Fix C: one-shot browser-only init via onMount (not $effect)
+  // Boot probe + route guard + 401 handler — wired once on mount
   // ---------------------------------------------------------------------------
+  // `booted` gates rendering of guarded routes until the /me probe settles, so
+  // an authenticated reload never flashes the bare page (no shell) and an
+  // unauthenticated load never flashes guarded content before the redirect.
+  // Exempt routes (/login, /onboarding/*) render immediately, regardless.
+  let booted = $state(false);
+
   onMount(() => {
+    // Preferences are browser-only side effects.
     initPrefs();
+
+    // Register the centralised 401 handler. This is the single authority for
+    // "expired or revoked session": clear state, tear down SSE, bounce to /login.
+    onUnauthorized(() => {
+      notifyTearDown();
+      resetSession();
+      void goto("/login");
+    });
+
+    // Boot probe: GET /me — 200 → authenticated, 401 → redirect to /login.
+    // The probe runs on every fresh page load; the session cookie rides
+    // automatically (HttpOnly, credentials: "include"). The token is never
+    // read or stored by the client.
+    void (async () => {
+      try {
+        const { data } = await Api.GET("/me", {});
+
+        if (data) {
+          // 200: seed the session store with the user. The server does not return
+          // expiresAt on /me, so we seed it null — the soft pre-expiry seam stays
+          // disarmed until a login (which carries the real expiry) re-seeds it.
+          seedSession({ user: data.user, expiresAt: null });
+        }
+        // 401 is handled by the onUnauthorized hook above (clears session, redirects).
+
+        // Guard: after the probe settles, redirect if still unauthenticated on a
+        // guarded route.
+        if (shouldRedirectToLogin(page.url.pathname, isAuthenticated())) {
+          await goto("/login");
+        }
+      } finally {
+        // The probe has settled (success, 401, or network error): rendering of
+        // guarded routes can now resolve to either the shell or the redirect.
+        booted = true;
+      }
+    })();
   });
 </script>
 
 <ToastProvider>
-  <div class="flex h-screen overflow-hidden">
-    <!--
-      Rail — slim navigation sidebar.
-      Width transitions honor prefers-reduced-motion via the CSS custom property.
-    -->
-    <nav
-      aria-label="Main navigation"
-      class="rail bg-surface border-border flex shrink-0 flex-col border-r transition-[width] duration-200 ease-in-out motion-reduce:transition-none {railOpen
-        ? 'w-[200px]'
-        : 'w-[56px]'}"
-      onmouseenter={handleMouseEnter}
-      onmouseleave={handleMouseLeave}
-      onfocusin={handleFocusIn}
-      onfocusout={handleFocusOut}
-    >
-      <!-- Main nav entries -->
+  <!--
+    Render order:
+      1. Exempt routes (/login, /onboarding/*) render their children directly,
+         without the shell and without waiting on the boot probe.
+      2. On a guarded route, render a quiet splash until the /me probe settles
+         (`booted`) — no flash of bare page content or guarded content.
+      3. Probe settled + authenticated → the app shell (nav rail + content).
+      4. Probe settled + unauthenticated → the boot probe is redirecting to
+         /login; render the same quiet splash until navigation completes.
+  -->
+  {#if isExemptRoute(page.url.pathname)}
+    {@render children()}
+  {:else if !booted}
+    <div class="flex h-screen items-center justify-center">
+      <span class="sr-only">Loading…</span>
+    </div>
+  {:else if isAuthenticated()}
+    <div class="flex h-screen overflow-hidden">
       <!--
-        Fix A: each entry renders a single persistent <a> via RailEntry.
-        The anchor is NEVER recreated on expand/collapse — focus is preserved.
-        RailEntry keeps the Tooltip mounted and gates its open state to suppress
-        the popup when the rail is already expanded (label visible in DOM).
+        Rail — slim navigation sidebar.
+        Width transitions honor prefers-reduced-motion via the CSS custom property.
       -->
-      <ul class="flex flex-1 flex-col gap-1 p-2" role="list">
-        <li>
-          <RailEntry href="/" label="Chat" icon={ChatsIcon} active={isActive("/")} {expanded} />
-        </li>
-        <li>
-          <RailEntry href="/reminders" label="Reminders" icon={BellIcon} active={isActive("/reminders")} {expanded} />
-        </li>
-      </ul>
+      <nav
+        aria-label="Main navigation"
+        class="rail bg-surface border-border flex shrink-0 flex-col border-r transition-[width] duration-200 ease-in-out motion-reduce:transition-none {railOpen
+          ? 'w-[200px]'
+          : 'w-[56px]'}"
+        onmouseenter={handleMouseEnter}
+        onmouseleave={handleMouseLeave}
+        onfocusin={handleFocusIn}
+        onfocusout={handleFocusOut}
+      >
+        <!-- Main nav entries -->
+        <!--
+          Fix A: each entry renders a single persistent <a> via RailEntry.
+          The anchor is NEVER recreated on expand/collapse — focus is preserved.
+          RailEntry keeps the Tooltip mounted and gates its open state to suppress
+          the popup when the rail is already expanded (label visible in DOM).
+        -->
+        <ul class="flex flex-1 flex-col gap-1 p-2" role="list">
+          <li>
+            <RailEntry href="/" label="Chat" icon={ChatsIcon} active={isActive("/")} {expanded} />
+          </li>
+          <li>
+            <RailEntry href="/reminders" label="Reminders" icon={BellIcon} active={isActive("/reminders")} {expanded} />
+          </li>
+        </ul>
 
-      <!-- Rail footer: pin toggle, account affordance, theme toggle -->
-      <div class="flex flex-col gap-1 border-t border-inherit p-2">
-        <!-- Pin / unpin the rail -->
-        <div class="flex justify-end">
+        <!-- Rail footer: pin toggle, account affordance, theme toggle -->
+        <div class="flex flex-col gap-1 border-t border-inherit p-2">
+          <!-- Pin / unpin the rail -->
+          <div class="flex justify-end">
+            <IconButton
+              icon={getRailPinned() ? PushPinSlashIcon : PushPinIcon}
+              label={getRailPinned() ? "Unpin navigation" : "Pin navigation"}
+              variant="ghost"
+              size="md"
+              onclick={togglePin}
+            />
+          </div>
+
+          <Separator />
+
+          <!--
+            Fix D: drop aria-label so visible text and accessible name agree.
+            The label span is always in the DOM; visibility is toggled by CSS
+            (hidden when collapsed, visible when expanded) — same pattern as RailEntry.
+          -->
+          <a
+            href="/settings"
+            class="flex h-10 items-center gap-3 rounded px-2 transition-colors hover:bg-surface-raised
+                   focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+          >
+            <Avatar name="User" size="sm" />
+            <span class={railOpen ? "text-text text-sm" : "sr-only"}>Account</span>
+          </a>
+
+          <!-- Theme toggle -->
           <IconButton
-            icon={getRailPinned() ? PushPinSlashIcon : PushPinIcon}
-            label={getRailPinned() ? "Unpin navigation" : "Pin navigation"}
+            icon={currentTheme === "daylight" ? MoonIcon : SunIcon}
+            label={currentTheme === "daylight" ? "Switch to Evening" : "Switch to Daylight"}
             variant="ghost"
             size="md"
-            onclick={togglePin}
+            onclick={handleToggleTheme}
           />
         </div>
+      </nav>
 
-        <Separator />
-
-        <!--
-          Fix D: drop aria-label so visible text and accessible name agree.
-          The label span is always in the DOM; visibility is toggled by CSS
-          (hidden when collapsed, visible when expanded) — same pattern as RailEntry.
-        -->
-        <a
-          href="/settings"
-          class="flex h-10 items-center gap-3 rounded px-2 transition-colors hover:bg-surface-raised
-                 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
-        >
-          <Avatar name="User" size="sm" />
-          <span class={railOpen ? "text-text text-sm" : "sr-only"}>Account</span>
-        </a>
-
-        <!-- Theme toggle -->
-        <IconButton
-          icon={currentTheme === "daylight" ? MoonIcon : SunIcon}
-          label={currentTheme === "daylight" ? "Switch to Evening" : "Switch to Daylight"}
-          variant="ghost"
-          size="md"
-          onclick={handleToggleTheme}
-        />
-      </div>
-    </nav>
-
-    <!-- Content column -->
-    <main class="flex flex-1 flex-col overflow-y-auto">
-      <Container width="content" class="px-6 py-6">
-        {@render children()}
-      </Container>
-    </main>
-  </div>
+      <!-- Content column -->
+      <main class="flex flex-1 flex-col overflow-y-auto">
+        <Container width="content" class="px-6 py-6">
+          {@render children()}
+        </Container>
+      </main>
+    </div>
+  {:else}
+    <!-- Unauthenticated on a guarded route: the boot probe is redirecting to /login. -->
+    <div class="flex h-screen items-center justify-center">
+      <span class="sr-only">Loading…</span>
+    </div>
+  {/if}
 </ToastProvider>
