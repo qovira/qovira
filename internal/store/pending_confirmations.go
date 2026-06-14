@@ -27,7 +27,7 @@ var ErrConfirmationExpired = errors.New("store: pending confirmation has expired
 // does not exist for the bound user. Callers map this to HTTP 404.
 var ErrConfirmationNotFound = errors.New("store: pending confirmation not found")
 
-// ErrConfirmationAlreadyResolved is returned by UpdatePendingConfirmationStatus
+// ErrConfirmationAlreadyResolved is returned by UpdatePendingConfirmationStatusIfCurrent
 // when the row's current status is not "pending". Callers map this to HTTP 409.
 var ErrConfirmationAlreadyResolved = errors.New("store: pending confirmation already resolved")
 
@@ -132,66 +132,6 @@ func (sq *ScopedQueries) UpdatePendingConfirmationStatusIfCurrent(ctx context.Co
 		return fmt.Errorf("UpdatePendingConfirmationStatusIfCurrent: %w", ErrConfirmationExpired)
 	}
 	return nil
-}
-
-// UpdatePendingConfirmationStatus atomically transitions a pending_confirmations
-// row from "pending" to the given status (approved or denied) using a
-// compare-and-swap UPDATE (WHERE status='pending'). It returns:
-//   - nil on success (rowsAffected == 1).
-//   - ErrConfirmationNotFound when no row exists for callID + userID.
-//   - ErrConfirmationAlreadyResolved when the row exists but is not "pending"
-//     (rowsAffected == 0 after a successful UPDATE with status predicate).
-//
-// The CAS eliminates the non-atomic read-then-write from the previous
-// implementation, making concurrent Resolve calls on the same callID safe:
-// exactly one caller wins the UPDATE and proceeds; the other sees rowsAffected=0
-// and returns ErrConfirmationAlreadyResolved → HTTP 409.
-func (sq *ScopedQueries) UpdatePendingConfirmationStatus(ctx context.Context, callID, status string) error {
-	if err := sq.checkUserScope(); err != nil {
-		return fmt.Errorf("UpdatePendingConfirmationStatus: %w", err)
-	}
-	rowsAffected, err := sq.writeQ.UpdatePendingConfirmationStatus(ctx, db.UpdatePendingConfirmationStatusParams{
-		Status: status,
-		ID:     callID,
-		UserID: sq.scope.UserID(),
-	})
-	if err != nil {
-		return fmt.Errorf("UpdatePendingConfirmationStatus: %w", err)
-	}
-	if rowsAffected == 0 {
-		// Either the row does not exist or it is already resolved. Distinguish by
-		// looking it up (read-only; we only reach here on the rare contention path).
-		row, getErr := sq.readQ.GetPendingConfirmation(ctx, db.GetPendingConfirmationParams{
-			ID:     callID,
-			UserID: sq.scope.UserID(),
-		})
-		if getErr != nil {
-			if errors.Is(getErr, sql.ErrNoRows) {
-				return fmt.Errorf("UpdatePendingConfirmationStatus: %w", ErrConfirmationNotFound)
-			}
-			return fmt.Errorf("UpdatePendingConfirmationStatus: %w", getErr)
-		}
-		// Row exists but was not "pending" — another Resolve won the CAS race.
-		_ = row
-		return fmt.Errorf("UpdatePendingConfirmationStatus: %w", ErrConfirmationAlreadyResolved)
-	}
-	return nil
-}
-
-// ListPendingConfirmationsByConversation returns all pending_confirmations rows
-// for a conversation, ordered by (created_at, id), scoped to the bound user.
-func (sq *ScopedQueries) ListPendingConfirmationsByConversation(ctx context.Context, conversationID string) ([]db.PendingConfirmation, error) {
-	if err := sq.checkUserScope(); err != nil {
-		return nil, fmt.Errorf("ListPendingConfirmationsByConversation: %w", err)
-	}
-	rows, err := sq.readQ.ListPendingConfirmationsByConversation(ctx, db.ListPendingConfirmationsByConversationParams{
-		ConversationID: conversationID,
-		UserID:         sq.scope.UserID(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("ListPendingConfirmationsByConversation: %w", err)
-	}
-	return rows, nil
 }
 
 // MarkConfirmationExpired atomically transitions a pending_confirmations row from

@@ -13,13 +13,6 @@ FROM pending_confirmations
 WHERE id = @id
   AND user_id = @user_id;
 
--- name: UpdatePendingConfirmationStatus :execrows
-UPDATE pending_confirmations
-SET status = @status
-WHERE id = @id
-  AND user_id = @user_id
-  AND status = 'pending';
-
 -- name: UpdatePendingConfirmationStatusIfCurrent :execrows
 UPDATE pending_confirmations
 SET status = @status
@@ -27,13 +20,6 @@ WHERE id = @id
   AND user_id = @user_id
   AND status = 'pending'
   AND NOT (expires_at < @now);
-
--- name: ListPendingConfirmationsByConversation :many
-SELECT id, conversation_id, message_id, user_id, tool_name, args, risk, status, created_at, expires_at
-FROM pending_confirmations
-WHERE conversation_id = @conversation_id
-  AND user_id = @user_id
-ORDER BY created_at, id;
 
 -- name: MarkConfirmationExpired :execrows
 -- Atomic CAS: transitions a pending row to expired only when still pending.

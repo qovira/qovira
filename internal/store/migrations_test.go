@@ -90,12 +90,11 @@ func TestRunnerUp_CreatesSchema(t *testing.T) {
 }
 
 // TestRunnerDown_RevertsSchema verifies that Runner.Down rolls back the last
-// applied migration. With eight migrations in the chain, a single Down call
-// reverts migration 8 (00008_conversations_ownership_fk) — removing the
-// composite FK on messages and the supporting unique index — while leaving
-// migrations 1–7 (instance, user_data, settings, users, sessions,
-// conversations, messages) intact. The messages table must still be present
-// after this Down because it was created by migration 7.
+// applied migration. With eleven migrations in the chain, a single Down call
+// reverts migration 11 (00011_messages_abandoned) — dropping the abandoned
+// column from messages — while leaving migrations 1–10 intact. The messages
+// table must still be present after this Down because it was created by
+// migration 7.
 func TestRunnerDown_RevertsSchema(t *testing.T) {
 	t.Parallel()
 
@@ -112,29 +111,29 @@ func TestRunnerDown_RevertsSchema(t *testing.T) {
 	if err := runner.Down(context.Background(), s.Writer()); err != nil {
 		t.Fatalf("Runner.Down: %v", err)
 	}
-	// Migration 8 removed the FK from messages (table recreate + rename).
+	// Migration 11 dropped the abandoned column from messages (table recreate + rename).
 	// The messages table itself remains because migration 7 is still applied.
 	if !tableExists(t, s.Writer(), "messages") {
-		t.Error("messages table absent after migration-8 Down; it was created by migration 7 which was not rolled back")
+		t.Error("messages table absent after migration-11 Down; it was created by migration 7 which was not rolled back")
 	}
 	// Migrations 1–7 must still be applied.
 	if !tableExists(t, s.Writer(), "instance") {
-		t.Error("instance table absent after single Down; only migration 8 should have been rolled back")
+		t.Error("instance table absent after single Down; only migration 11 should have been rolled back")
 	}
 	if !tableExists(t, s.Writer(), "user_data") {
-		t.Error("user_data table absent after single Down; only migration 8 should have been rolled back")
+		t.Error("user_data table absent after single Down; only migration 11 should have been rolled back")
 	}
 	if !tableExists(t, s.Writer(), "settings") {
-		t.Error("settings table absent after single Down; only migration 8 should have been rolled back")
+		t.Error("settings table absent after single Down; only migration 11 should have been rolled back")
 	}
 	if !tableExists(t, s.Writer(), "users") {
-		t.Error("users table absent after single Down; only migration 8 should have been rolled back")
+		t.Error("users table absent after single Down; only migration 11 should have been rolled back")
 	}
 	if !tableExists(t, s.Writer(), "sessions") {
-		t.Error("sessions table absent after single Down; only migration 8 should have been rolled back")
+		t.Error("sessions table absent after single Down; only migration 11 should have been rolled back")
 	}
 	if !tableExists(t, s.Writer(), "conversations") {
-		t.Error("conversations table absent after single Down; only migration 8 should have been rolled back")
+		t.Error("conversations table absent after single Down; only migration 11 should have been rolled back")
 	}
 }
 
@@ -196,13 +195,13 @@ func TestRunnerUpDownStatus_RoundTrip(t *testing.T) {
 		t.Errorf("after Up: expected applied state in status output, got:\n%s", afterUp.String())
 	}
 
-	// Down: reverts migration 8 (conversations_ownership_fk). Migrations 1–7
-	// (instance, user_data, settings, users, sessions, conversations, messages) stay.
+	// Down: reverts migration 11 (messages_abandoned). Migrations 1–10
+	// (instance, user_data, settings, users, sessions, conversations, messages, and beyond) stay.
 	if err := runner.Down(ctx, s.Writer()); err != nil {
 		t.Fatalf("Runner.Down: %v", err)
 	}
 
-	// Status must show at least one pending migration (migration 8 was rolled back).
+	// Status must show at least one pending migration (migration 11 was rolled back).
 	var afterDown strings.Builder
 	if err := runner.Status(ctx, s.Writer(), &afterDown); err != nil {
 		t.Fatalf("Status after Down: %v", err)
@@ -210,10 +209,10 @@ func TestRunnerUpDownStatus_RoundTrip(t *testing.T) {
 	if !strings.Contains(afterDown.String(), string(goose.StatePending)) {
 		t.Errorf("after Down: expected pending state in status output, got:\n%s", afterDown.String())
 	}
-	// Migration 8 recreated messages (removing the FK); migration 7 is still applied,
-	// so the messages table must still be present.
+	// Migration 11 recreated messages (dropping the abandoned column); migration 7
+	// is still applied, so the messages table must still be present.
 	if !tableExists(t, s.Writer(), "messages") {
-		t.Error("messages table must be present after migration-8 Down (migration 7 is still applied)")
+		t.Error("messages table must be present after migration-11 Down (migration 7 is still applied)")
 	}
 	// Migrations 1–7 (instance, user_data, settings, users, sessions, conversations, messages) must remain applied.
 	if !tableExists(t, s.Writer(), "instance") {

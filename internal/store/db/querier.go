@@ -82,7 +82,6 @@ type Querier interface {
 	// the caller can scope per-row operations (abandon message, emit per-user event).
 	ListLapsedConfirmations(ctx context.Context, now string) ([]PendingConfirmation, error)
 	ListMessages(ctx context.Context, arg ListMessagesParams) ([]ListMessagesRow, error)
-	ListPendingConfirmationsByConversation(ctx context.Context, arg ListPendingConfirmationsByConversationParams) ([]PendingConfirmation, error)
 	// List all settings whose key starts with @prefix, ordered by key. The caller
 	// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
 	// those escapes literal, so a prefix containing '_' or '%' matches literally
@@ -99,7 +98,6 @@ type Querier interface {
 	// user_id predicate would prevent cross-user expiry from working.
 	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
-	UpdatePendingConfirmationStatus(ctx context.Context, arg UpdatePendingConfirmationStatusParams) (int64, error)
 	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)

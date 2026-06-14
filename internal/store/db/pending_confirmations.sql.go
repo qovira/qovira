@@ -160,53 +160,6 @@ func (q *Queries) ListLapsedConfirmations(ctx context.Context, now string) ([]Pe
 	return items, nil
 }
 
-const listPendingConfirmationsByConversation = `-- name: ListPendingConfirmationsByConversation :many
-SELECT id, conversation_id, message_id, user_id, tool_name, args, risk, status, created_at, expires_at
-FROM pending_confirmations
-WHERE conversation_id = ?1
-  AND user_id = ?2
-ORDER BY created_at, id
-`
-
-type ListPendingConfirmationsByConversationParams struct {
-	ConversationID string
-	UserID         string
-}
-
-func (q *Queries) ListPendingConfirmationsByConversation(ctx context.Context, arg ListPendingConfirmationsByConversationParams) ([]PendingConfirmation, error) {
-	rows, err := q.db.QueryContext(ctx, listPendingConfirmationsByConversation, arg.ConversationID, arg.UserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []PendingConfirmation
-	for rows.Next() {
-		var i PendingConfirmation
-		if err := rows.Scan(
-			&i.ID,
-			&i.ConversationID,
-			&i.MessageID,
-			&i.UserID,
-			&i.ToolName,
-			&i.Args,
-			&i.Risk,
-			&i.Status,
-			&i.CreatedAt,
-			&i.ExpiresAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const markConfirmationExpired = `-- name: MarkConfirmationExpired :execrows
 UPDATE pending_confirmations
 SET status = 'expired'
@@ -225,28 +178,6 @@ type MarkConfirmationExpiredParams struct {
 // (system-scope, but calls this per-row with the row's user_id from ListLapsedConfirmations).
 func (q *Queries) MarkConfirmationExpired(ctx context.Context, arg MarkConfirmationExpiredParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, markConfirmationExpired, arg.ID, arg.UserID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const updatePendingConfirmationStatus = `-- name: UpdatePendingConfirmationStatus :execrows
-UPDATE pending_confirmations
-SET status = ?1
-WHERE id = ?2
-  AND user_id = ?3
-  AND status = 'pending'
-`
-
-type UpdatePendingConfirmationStatusParams struct {
-	Status string
-	ID     string
-	UserID string
-}
-
-func (q *Queries) UpdatePendingConfirmationStatus(ctx context.Context, arg UpdatePendingConfirmationStatusParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, updatePendingConfirmationStatus, arg.Status, arg.ID, arg.UserID)
 	if err != nil {
 		return 0, err
 	}
