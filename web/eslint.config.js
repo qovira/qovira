@@ -19,7 +19,9 @@ export default tseslint.config(
           // Config files not covered by the SvelteKit-generated tsconfig:
           // svelte.config.js (JS) and vitest.config.ts.
           // vite.config.ts is already included via .svelte-kit/tsconfig.json.
-          allowDefaultProject: ["*.config.js", "vitest.config.ts"],
+          // service-worker.ts is excluded by .svelte-kit/tsconfig.json (it uses
+          // the webworker lib instead of DOM); add it here so ESLint can parse it.
+          allowDefaultProject: ["*.config.js", "vitest.config.ts", "src/service-worker.ts"],
         },
         tsconfigRootDir: import.meta.dirname,
         extraFileExtensions: [".svelte"],
