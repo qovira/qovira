@@ -185,6 +185,11 @@ type Querier interface {
 	StampFiredKeepActive(ctx context.Context, arg StampFiredKeepActiveParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
+	// Writes all mutable columns for a single reminder row.
+	// last_fired_at is intentionally excluded: the fire handler is its sole writer.
+	// fire_job_id is included so Service owns all fire-job lifecycle transitions.
+	// MANDATORY user_id predicate enforced by scope guard.
+	UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)
 	// Queries for the conversations table.

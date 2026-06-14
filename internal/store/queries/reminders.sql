@@ -47,6 +47,24 @@ SET fire_job_id = @fire_job_id,
 WHERE id = @id
   AND user_id = @user_id;
 
+-- name: UpdateReminder :execrows
+-- Writes all mutable columns for a single reminder row.
+-- last_fired_at is intentionally excluded: the fire handler is its sole writer.
+-- fire_job_id is included so Service owns all fire-job lifecycle transitions.
+-- MANDATORY user_id predicate enforced by scope guard.
+UPDATE reminders
+SET title = @title,
+    notes = @notes,
+    due_at = @due_at,
+    rrule = @rrule,
+    auto_complete = @auto_complete,
+    status = @status,
+    completed_at = @completed_at,
+    fire_job_id = @fire_job_id,
+    updated_at = @updated_at
+WHERE id = @id
+  AND user_id = @user_id;
+
 -- name: DeleteReminder :execrows
 DELETE FROM reminders
 WHERE id      = @id

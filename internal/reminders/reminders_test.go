@@ -31,14 +31,23 @@ var (
 
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
-// fakeProducer records Enqueue and Cancel calls and allows controlled returns.
+// fakeProducer records Enqueue, Reschedule, and Cancel calls and allows
+// controlled returns. The Reschedule field was extended in the
+// edit/complete/delete slice (AC1 guard test).
 type fakeProducer struct {
-	mu        sync.Mutex
-	enqueued  []scheduler.EnqueueRequest
-	returnID  string
-	returnErr error
-	cancelled []string
-	cancelErr error
+	mu          sync.Mutex
+	enqueued    []scheduler.EnqueueRequest
+	returnID    string
+	returnErr   error
+	cancelled   []string
+	cancelErr   error
+	rescheduled []rescheduleCall
+}
+
+// rescheduleCall records a single Reschedule invocation.
+type rescheduleCall struct {
+	jobID string
+	runAt time.Time
 }
 
 func (f *fakeProducer) Enqueue(_ context.Context, req scheduler.EnqueueRequest) (string, error) {
@@ -55,7 +64,10 @@ func (f *fakeProducer) Enqueue(_ context.Context, req scheduler.EnqueueRequest) 
 	return jobID, nil
 }
 
-func (f *fakeProducer) Reschedule(_ context.Context, _ string, _ time.Time) error {
+func (f *fakeProducer) Reschedule(_ context.Context, jobID string, runAt time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rescheduled = append(f.rescheduled, rescheduleCall{jobID: jobID, runAt: runAt})
 	return nil
 }
 
@@ -72,6 +84,24 @@ func (f *fakeProducer) allEnqueued() []scheduler.EnqueueRequest {
 	defer f.mu.Unlock()
 	out := make([]scheduler.EnqueueRequest, len(f.enqueued))
 	copy(out, f.enqueued)
+	return out
+}
+
+// allRescheduled returns a snapshot of all recorded Reschedule calls.
+func (f *fakeProducer) allRescheduled() []rescheduleCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]rescheduleCall, len(f.rescheduled))
+	copy(out, f.rescheduled)
+	return out
+}
+
+// allCancelled returns a snapshot of all recorded Cancel job IDs.
+func (f *fakeProducer) allCancelled() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.cancelled))
+	copy(out, f.cancelled)
 	return out
 }
 
@@ -1861,5 +1891,1229 @@ func TestList_NextCursorNullOnLastPage(t *testing.T) {
 	}
 	if resp3.Pagination.NextCursor == nil {
 		t.Error("expected non-null nextCursor on first page (hasMore=true)")
+	}
+}
+
+// ── Edit / Complete / Delete slice tests ──────────────────────────────────────
+//
+// These tests cover:
+//   AC1  PATCH dueAt → row updated + Reschedule called with correct jobID+time
+//   AC2  PATCH {status:"completed"} → Complete path (status+completedAt set, job Cancelled)
+//   AC3  PATCH {status:"active"} on completed → re-open (completedAt cleared, fresh Enqueue)
+//   AC4  DELETE → row removed, job Cancelled, 204
+//   AC5  Each mutation emits its fat event (reminder.updated/completed/deleted)
+//   AC6  All operations are user-scoped (another user's id → 404)
+//   +guard  dueAt change on COMPLETED reminder updates row but does NOT Reschedule
+
+// ── AC1: PATCH dueAt → Reschedule ────────────────────────────────────────────
+
+// TestService_Update_DueAt_Reschedules verifies that Update with a new dueAt on
+// an active reminder updates the row AND calls Reschedule on the producer with
+// the existing fire_job_id and the new canonical time.
+func TestService_Update_DueAt_Reschedules(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-upd-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-upd-due-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	origDue := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Update dueAt test",
+		DueAt: origDue,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	origJobID := r.FireJobID
+
+	newDue := origDue.Add(2 * time.Hour)
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		DueAt: &newDue,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// Row has the new dueAt.
+	wantDueStr := newDue.UTC().Truncate(time.Second).Format(time.RFC3339)
+	if updated.DueAt != wantDueStr {
+		t.Errorf("got DueAt %q, want %q", updated.DueAt, wantDueStr)
+	}
+
+	// Reschedule was called with the original job ID and the new canonical time.
+	rescheduled := prod.allRescheduled()
+	if len(rescheduled) == 0 {
+		t.Fatal("expected Reschedule to be called, got none")
+	}
+	rc := rescheduled[0]
+	if rc.jobID != origJobID {
+		t.Errorf("Reschedule called with jobID=%q, want %q", rc.jobID, origJobID)
+	}
+	wantRunAt := newDue.UTC().Truncate(time.Second)
+	if !rc.runAt.Equal(wantRunAt) {
+		t.Errorf("Reschedule called with runAt=%v, want %v", rc.runAt, wantRunAt)
+	}
+
+	// Verify AC5: reminder.updated event was published.
+	evts := bus.allEvents()
+	var foundUpd bool
+	for _, e := range evts {
+		if e.event.Type == "reminder.updated" && e.userID == userID {
+			foundUpd = true
+		}
+	}
+	if !foundUpd {
+		t.Error("expected reminder.updated event, not found")
+	}
+}
+
+// TestHTTP_Patch_DueAt_200 verifies PATCH /api/v1/reminders/{id} with a new
+// dueAt returns 200 and the updated reminder JSON.
+func TestHTTP_Patch_DueAt_200(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-http-upd-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-http-upd-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "HTTP PATCH dueAt",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	router := httpx.NewRouter()
+	m.Routes(router)
+
+	newDue := time.Now().UTC().Add(3 * time.Hour).Format(time.RFC3339)
+	body, _ := json.Marshal(map[string]any{"dueAt": newDue})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/reminders/"+r.ID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(httpx.ContextWithPrincipal(ctx, store.Principal{UserID: userID, Role: "member"}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("got %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp reminders.Reminder
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.DueAt != time.Now().UTC().Add(3*time.Hour).Truncate(time.Second).Format(time.RFC3339) {
+		// Allow slight skew: just check it changed from the original.
+		if resp.DueAt == r.DueAt {
+			t.Errorf("dueAt not updated: still %q", resp.DueAt)
+		}
+	}
+}
+
+// ── AC2: PATCH {status:"completed"} → Complete ───────────────────────────────
+
+// TestService_Complete_CancelsJob verifies that Complete sets status=completed,
+// sets completed_at, and Cancels the fire-job.
+func TestService_Complete_CancelsJob(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-cmp-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-cmp-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Complete me",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	origJobID := r.FireJobID
+
+	completed, err := svc.Complete(ctx, scope, r.ID)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Status and completedAt.
+	if completed.Status != "completed" {
+		t.Errorf("got status %q, want %q", completed.Status, "completed")
+	}
+	if completed.CompletedAt == "" {
+		t.Error("expected non-empty completedAt after Complete")
+	}
+	// FireJobID cleared.
+	if completed.FireJobID != "" {
+		t.Errorf("expected empty FireJobID after Complete, got %q", completed.FireJobID)
+	}
+
+	// Cancel was called with the original job ID.
+	cancelled := prod.allCancelled()
+	// First cancel may be from Create compensation (not in this path); find the
+	// cancel matching the original job.
+	var found bool
+	for _, jid := range cancelled {
+		if jid == origJobID {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Cancel not called with jobID=%q; cancelled: %v", origJobID, cancelled)
+	}
+
+	// Verify AC5: reminder.completed event.
+	evts := bus.allEvents()
+	var foundCmp bool
+	for _, e := range evts {
+		if e.event.Type == "reminder.completed" && e.userID == userID {
+			foundCmp = true
+		}
+	}
+	if !foundCmp {
+		t.Error("expected reminder.completed event, not found")
+	}
+}
+
+// TestService_Complete_Idempotent verifies that calling Complete on an already-
+// completed reminder does not error and does not double-cancel a nil job.
+func TestService_Complete_Idempotent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-idm-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-idm-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Idempotent complete",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Complete once.
+	if _, err := svc.Complete(ctx, scope, r.ID); err != nil {
+		t.Fatalf("Complete (1st): %v", err)
+	}
+	// Complete again — must not error.
+	if _, err := svc.Complete(ctx, scope, r.ID); err != nil {
+		t.Fatalf("Complete (2nd, idempotent): %v", err)
+	}
+}
+
+// TestHTTP_Patch_Complete_200 verifies PATCH with status:"completed" routes to
+// Complete and returns 200.
+func TestHTTP_Patch_Complete_200(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-http-cmp-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-http-cmp-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "HTTP Complete",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	router := httpx.NewRouter()
+	m.Routes(router)
+
+	body, _ := json.Marshal(map[string]any{"status": "completed"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/reminders/"+r.ID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(httpx.ContextWithPrincipal(ctx, store.Principal{UserID: userID, Role: "member"}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("got %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp reminders.Reminder
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "completed" {
+		t.Errorf("got status %q, want %q", resp.Status, "completed")
+	}
+	if resp.CompletedAt == "" {
+		t.Error("expected non-empty completedAt in response")
+	}
+}
+
+// ── AC3: PATCH {status:"active"} on completed → re-open ──────────────────────
+
+// TestService_Update_Reopen_EnqueuesNewJob verifies that Update with
+// status="active" on a completed reminder clears completedAt, enqueues a fresh
+// fire-job, stores the new fire_job_id, and emits reminder.updated.
+func TestService_Update_Reopen_EnqueuesNewJob(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-reopen-create-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-reopen-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	dueAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Reopen me",
+		DueAt: dueAt,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Complete it first.
+	if _, err := svc.Complete(ctx, scope, r.ID); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Change the returnID so the re-open Enqueue gets a distinct job ID.
+	prod.mu.Lock()
+	prod.returnID = "job-reopen-fresh-002"
+	prod.mu.Unlock()
+
+	// Re-open via Update.
+	statusActive := "active"
+	reopened, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Status: &statusActive,
+	})
+	if err != nil {
+		t.Fatalf("Update (reopen): %v", err)
+	}
+
+	// Status is active.
+	if reopened.Status != "active" {
+		t.Errorf("got status %q, want %q", reopened.Status, "active")
+	}
+	// completedAt cleared.
+	if reopened.CompletedAt != "" {
+		t.Errorf("expected empty CompletedAt after reopen, got %q", reopened.CompletedAt)
+	}
+	// A new fire_job_id was stored.
+	if reopened.FireJobID == "" {
+		t.Error("expected non-empty FireJobID after reopen")
+	}
+	if reopened.FireJobID == r.FireJobID {
+		t.Errorf("expected new FireJobID after reopen, still got original %q", r.FireJobID)
+	}
+
+	// A fresh Enqueue was called (the second one, after Create's first).
+	enqueued := prod.allEnqueued()
+	if len(enqueued) < 2 {
+		t.Fatalf("expected at least 2 Enqueue calls (create + reopen), got %d", len(enqueued))
+	}
+	// The last enqueue should carry the reminder's ID.
+	last := enqueued[len(enqueued)-1]
+	var payload struct {
+		ReminderID string `json:"reminderId"`
+	}
+	if err := json.Unmarshal(last.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal reopen payload: %v", err)
+	}
+	if payload.ReminderID != r.ID {
+		t.Errorf("reopen Enqueue payload reminderId=%q, want %q", payload.ReminderID, r.ID)
+	}
+	// RunAt should match the reminder's dueAt.
+	if !last.RunAt.Equal(dueAt) {
+		t.Errorf("reopen Enqueue RunAt=%v, want %v", last.RunAt, dueAt)
+	}
+
+	// Verify AC5: reminder.updated event.
+	evts := bus.allEvents()
+	var foundUpd bool
+	for _, e := range evts {
+		if e.event.Type == "reminder.updated" && e.userID == userID {
+			foundUpd = true
+		}
+	}
+	if !foundUpd {
+		t.Error("expected reminder.updated event after reopen, not found")
+	}
+}
+
+// TestHTTP_Patch_Reopen_200 verifies PATCH {status:"active"} on a completed
+// reminder returns 200 with the re-opened reminder.
+func TestHTTP_Patch_Reopen_200(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-http-reopen-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-http-reopen-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "HTTP Reopen",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := svc.Complete(ctx, scope, r.ID); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	router := httpx.NewRouter()
+	m.Routes(router)
+
+	body, _ := json.Marshal(map[string]any{"status": "active"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/reminders/"+r.ID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(httpx.ContextWithPrincipal(ctx, store.Principal{UserID: userID, Role: "member"}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("got %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp reminders.Reminder
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "active" {
+		t.Errorf("got status %q, want %q", resp.Status, "active")
+	}
+	if resp.CompletedAt != "" {
+		t.Errorf("expected empty completedAt after reopen, got %q", resp.CompletedAt)
+	}
+}
+
+// ── AC4: DELETE → 204 ────────────────────────────────────────────────────────
+
+// TestService_Delete_CancelsJobAndRemovesRow verifies that Delete removes the
+// row, Cancels the fire-job, and publishes reminder.deleted.
+func TestService_Delete_CancelsJobAndRemovesRow(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-del-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-del-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Delete me",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	origJobID := r.FireJobID
+
+	if err := svc.Delete(ctx, scope, r.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	// Row is gone.
+	_, err = svc.Get(ctx, scope, r.ID)
+	if err == nil {
+		t.Fatal("expected ErrNotFound after Delete, got nil")
+	}
+	if !isNotFoundError(err) {
+		t.Errorf("expected ErrNotFound, got: %v", err)
+	}
+
+	// Cancel was called with the original job ID.
+	cancelled := prod.allCancelled()
+	var found bool
+	for _, jid := range cancelled {
+		if jid == origJobID {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Cancel not called with jobID=%q; cancelled: %v", origJobID, cancelled)
+	}
+
+	// Verify AC5: reminder.deleted event carries the deleted reminder.
+	evts := bus.allEvents()
+	var foundDel bool
+	for _, e := range evts {
+		if e.event.Type == "reminder.deleted" && e.userID == userID {
+			foundDel = true
+			// Payload should carry the reminder.
+			data, _ := json.Marshal(e.event.Data)
+			var payload reminders.Reminder
+			if err := json.Unmarshal(data, &payload); err != nil {
+				t.Fatalf("unmarshal deleted event payload: %v", err)
+			}
+			if payload.ID != r.ID {
+				t.Errorf("deleted event payload.id=%q, want %q", payload.ID, r.ID)
+			}
+		}
+	}
+	if !foundDel {
+		t.Error("expected reminder.deleted event, not found")
+	}
+}
+
+// TestHTTP_Delete_204 verifies DELETE /api/v1/reminders/{id} returns 204.
+func TestHTTP_Delete_204(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-http-del-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-http-del-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "HTTP Delete",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	router := httpx.NewRouter()
+	m.Routes(router)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/reminders/"+r.ID, nil)
+	req = req.WithContext(httpx.ContextWithPrincipal(ctx, store.Principal{UserID: userID, Role: "member"}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("got %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+
+	// Row must be gone.
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/reminders/"+r.ID, nil)
+	req2 = req2.WithContext(httpx.ContextWithPrincipal(ctx, store.Principal{UserID: userID, Role: "member"}))
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusNotFound {
+		t.Errorf("after DELETE: got %d, want 404", w2.Code)
+	}
+}
+
+// ── AC6: user-scoping ─────────────────────────────────────────────────────────
+
+// TestService_Update_OtherUser_NotFound verifies that Update on another user's
+// reminder returns ErrNotFound (not a mutation of the wrong row).
+func TestService_Update_OtherUser_NotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-scope-upd-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const ownerID = "user-scope-owner-01"
+	const otherID = "user-scope-other-01"
+	seedUser(t, st, ownerID, "UTC")
+	seedUser(t, st, otherID, "UTC")
+	ownerScope := newScopeFor(ownerID)
+	otherScope := newScopeFor(otherID)
+
+	r, err := svc.Create(ctx, ownerScope, reminders.CreateInput{
+		Title: "Owner's reminder",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	newTitle := "Hijacked"
+	_, err = svc.Update(ctx, otherScope, r.ID, reminders.UpdateInput{Title: &newTitle})
+	if err == nil {
+		t.Fatal("expected error updating another user's reminder")
+	}
+	if !isNotFoundError(err) {
+		t.Errorf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+// TestService_Complete_OtherUser_NotFound verifies that Complete on another
+// user's reminder returns ErrNotFound.
+func TestService_Complete_OtherUser_NotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-scope-cmp-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const ownerID = "user-scope-cowner-01"
+	const otherID = "user-scope-cother-01"
+	seedUser(t, st, ownerID, "UTC")
+	seedUser(t, st, otherID, "UTC")
+	ownerScope := newScopeFor(ownerID)
+	otherScope := newScopeFor(otherID)
+
+	r, err := svc.Create(ctx, ownerScope, reminders.CreateInput{
+		Title: "Owner's reminder",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err = svc.Complete(ctx, otherScope, r.ID)
+	if err == nil {
+		t.Fatal("expected error completing another user's reminder")
+	}
+	if !isNotFoundError(err) {
+		t.Errorf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+// TestService_Delete_OtherUser_NotFound verifies that Delete on another user's
+// reminder returns ErrNotFound.
+func TestService_Delete_OtherUser_NotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-scope-del-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const ownerID = "user-scope-downer-01"
+	const otherID = "user-scope-dother-01"
+	seedUser(t, st, ownerID, "UTC")
+	seedUser(t, st, otherID, "UTC")
+	ownerScope := newScopeFor(ownerID)
+	otherScope := newScopeFor(otherID)
+
+	r, err := svc.Create(ctx, ownerScope, reminders.CreateInput{
+		Title: "Owner's reminder",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	err = svc.Delete(ctx, otherScope, r.ID)
+	if err == nil {
+		t.Fatal("expected error deleting another user's reminder")
+	}
+	if !isNotFoundError(err) {
+		t.Errorf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+// TestHTTP_Patch_OtherUser_404 verifies that PATCH on another user's reminder
+// returns 404.
+func TestHTTP_Patch_OtherUser_404(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-http-scope-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const ownerID = "user-http-scope-owner-01"
+	const otherID = "user-http-scope-other-01"
+	seedUser(t, st, ownerID, "UTC")
+	seedUser(t, st, otherID, "UTC")
+	ownerScope := newScopeFor(ownerID)
+
+	r, err := svc.Create(ctx, ownerScope, reminders.CreateInput{
+		Title: "Owner's reminder",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	router := httpx.NewRouter()
+	m.Routes(router)
+
+	body, _ := json.Marshal(map[string]any{"title": "Hijacked"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/reminders/"+r.ID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(httpx.ContextWithPrincipal(ctx, store.Principal{UserID: otherID, Role: "member"}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("got %d, want 404 (other user's reminder)", w.Code)
+	}
+}
+
+// TestHTTP_Delete_OtherUser_404 verifies that DELETE on another user's reminder
+// returns 404.
+func TestHTTP_Delete_OtherUser_404(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-http-dscope-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const ownerID = "user-http-dscope-owner-01"
+	const otherID = "user-http-dscope-other-01"
+	seedUser(t, st, ownerID, "UTC")
+	seedUser(t, st, otherID, "UTC")
+	ownerScope := newScopeFor(ownerID)
+
+	r, err := svc.Create(ctx, ownerScope, reminders.CreateInput{
+		Title: "Owner's reminder",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	router := httpx.NewRouter()
+	m.Routes(router)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/reminders/"+r.ID, nil)
+	req = req.WithContext(httpx.ContextWithPrincipal(ctx, store.Principal{UserID: otherID, Role: "member"}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("got %d, want 404 (other user's reminder)", w.Code)
+	}
+}
+
+// ── Guard test: dueAt change on COMPLETED reminder does NOT Reschedule ────────
+
+// TestService_Update_DueAt_Completed_NoReschedule verifies that changing dueAt
+// on a completed reminder (no active fire-job) updates the row but does NOT
+// call Reschedule — there is no live job to reschedule.
+func TestService_Update_DueAt_Completed_NoReschedule(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-guard-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-guard-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	dueAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Guard test",
+		DueAt: dueAt,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Complete to remove the fire-job.
+	if _, err := svc.Complete(ctx, scope, r.ID); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Clear the rescheduled slice so we only see new calls from Update.
+	prod.mu.Lock()
+	prod.rescheduled = nil
+	prod.mu.Unlock()
+
+	// Update dueAt on the now-completed reminder.
+	newDue := dueAt.Add(4 * time.Hour)
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		DueAt: &newDue,
+	})
+	if err != nil {
+		t.Fatalf("Update (completed, new dueAt): %v", err)
+	}
+
+	// Row should reflect the new dueAt.
+	wantDueStr := newDue.UTC().Truncate(time.Second).Format(time.RFC3339)
+	if updated.DueAt != wantDueStr {
+		t.Errorf("got DueAt %q, want %q", updated.DueAt, wantDueStr)
+	}
+
+	// Reschedule must NOT have been called (no active fire-job).
+	rescheduled := prod.allRescheduled()
+	if len(rescheduled) > 0 {
+		t.Errorf("expected no Reschedule calls on completed reminder, got %d: %v",
+			len(rescheduled), rescheduled)
+	}
+}
+
+// ── Merge semantics: null clears nullable fields ──────────────────────────────
+
+// TestService_Update_NullClears verifies that PATCH merge semantics correctly
+// handle null (clear nullable fields) vs absent (leave unchanged) for notes and
+// rrule. Semantics: absent→unchanged; null→clear; value→set.
+func TestService_Update_MergeSemantics_NullClears(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-merge-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-merge-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Merge test",
+		Notes: "original notes",
+		DueAt: time.Now().UTC().Add(time.Hour),
+		Rrule: "FREQ=DAILY",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Update with absent notes (nil pointer) — notes must remain unchanged.
+	newTitle := "Updated title"
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Title: &newTitle,
+		// Notes: nil (absent) → unchanged
+	})
+	if err != nil {
+		t.Fatalf("Update (absent notes): %v", err)
+	}
+	if updated.Notes != "original notes" {
+		t.Errorf("absent notes: got %q, want %q (unchanged)", updated.Notes, "original notes")
+	}
+	if updated.Title != "Updated title" {
+		t.Errorf("title: got %q, want %q", updated.Title, "Updated title")
+	}
+
+	// Update with notes = Optional cleared (null) — notes must be cleared.
+	updated2, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Notes: reminders.ClearString(),
+	})
+	if err != nil {
+		t.Fatalf("Update (null notes): %v", err)
+	}
+	if updated2.Notes != "" {
+		t.Errorf("null notes: got %q, want empty (cleared)", updated2.Notes)
+	}
+	// Rrule should be unchanged (absent).
+	if updated2.Rrule != "FREQ=DAILY" {
+		t.Errorf("rrule unchanged: got %q, want %q", updated2.Rrule, "FREQ=DAILY")
+	}
+
+	// Update with rrule = Optional cleared (null) — rrule must be cleared.
+	updated3, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Rrule: reminders.ClearString(),
+	})
+	if err != nil {
+		t.Fatalf("Update (null rrule): %v", err)
+	}
+	if updated3.Rrule != "" {
+		t.Errorf("null rrule: got %q, want empty (cleared)", updated3.Rrule)
+	}
+}
+
+// ── Item 1 / Item 2: combined-PATCH correctness ───────────────────────────────
+
+// TestHTTP_Patch_StatusCompleted_WithOtherFields verifies that PATCH with
+// {"status":"completed","title":"NewTitle"} persists BOTH the completion AND the
+// title change in one atomic write, and emits exactly one "reminder.completed"
+// event (not "reminder.updated").
+//
+// Before the fix, patchHandler routed to Service.Complete the moment
+// body.Status=="completed", discarding the merged UpdateInput that carried the
+// title change.
+func TestHTTP_Patch_StatusCompleted_WithOtherFields(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-combined-patch-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-combined-patch-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "OriginalTitle",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	router := httpx.NewRouter()
+	m.Routes(router)
+
+	// PATCH both status=completed AND a new title in a single request.
+	body, _ := json.Marshal(map[string]any{
+		"status": "completed",
+		"title":  "NewTitle",
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/reminders/"+r.ID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(httpx.ContextWithPrincipal(ctx, store.Principal{UserID: userID, Role: "member"}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp reminders.Reminder
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Both changes must be present in the response.
+	if resp.Status != "completed" {
+		t.Errorf("got status %q, want %q", resp.Status, "completed")
+	}
+	if resp.CompletedAt == "" {
+		t.Error("expected non-empty completedAt")
+	}
+	if resp.Title != "NewTitle" {
+		t.Errorf("got title %q, want %q (title change must be persisted with completion)", resp.Title, "NewTitle")
+	}
+
+	// The row in the DB must reflect both changes.
+	got, err := svc.Get(ctx, scope, r.ID)
+	if err != nil {
+		t.Fatalf("Get after combined PATCH: %v", err)
+	}
+	if got.Title != "NewTitle" {
+		t.Errorf("DB row title=%q, want %q", got.Title, "NewTitle")
+	}
+	if got.Status != "completed" {
+		t.Errorf("DB row status=%q, want %q", got.Status, "completed")
+	}
+	if got.CompletedAt == "" {
+		t.Error("DB row: expected non-empty completedAt")
+	}
+
+	// Exactly one reminder.completed event must be emitted (not reminder.updated).
+	evts := bus.allEvents()
+	var completedCount, updatedCount int
+	for _, e := range evts {
+		if e.userID != userID {
+			continue
+		}
+		switch e.event.Type {
+		case "reminder.completed":
+			completedCount++
+		case "reminder.updated":
+			updatedCount++
+		}
+	}
+	if completedCount != 1 {
+		t.Errorf("expected exactly 1 reminder.completed event, got %d", completedCount)
+	}
+	if updatedCount != 0 {
+		t.Errorf("expected 0 reminder.updated events for an active→completed transition, got %d", updatedCount)
+	}
+}
+
+// TestService_Update_StatusCompleted_EmitsCompletedEvent verifies that calling
+// Update with status="completed" on an active reminder emits "reminder.completed",
+// not "reminder.updated". This covers the Update code path directly (as opposed
+// to via HTTP).
+func TestService_Update_StatusCompleted_EmitsCompletedEvent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-upd-cmp-evt-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-upd-cmp-evt-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Event type test",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	statusCompleted := "completed"
+	_, err = svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Status: &statusCompleted,
+	})
+	if err != nil {
+		t.Fatalf("Update (status=completed): %v", err)
+	}
+
+	evts := bus.allEvents()
+	var completedCount, updatedCount int
+	for _, e := range evts {
+		if e.userID != userID {
+			continue
+		}
+		switch e.event.Type {
+		case "reminder.completed":
+			completedCount++
+		case "reminder.updated":
+			updatedCount++
+		}
+	}
+	// Only the Create event and the completion event; no reminder.updated for this transition.
+	if completedCount != 1 {
+		t.Errorf("expected 1 reminder.completed event from Update, got %d", completedCount)
+	}
+	if updatedCount != 0 {
+		t.Errorf("expected 0 reminder.updated events for active→completed via Update, got %d", updatedCount)
+	}
+}
+
+// TestService_Complete_EmitsCompletedEvent verifies Service.Complete emits
+// "reminder.completed" (it already does — this test documents the contract so
+// any future refactor can't accidentally regress the event type).
+func TestService_Complete_EmitsCompletedEvent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-svc-cmp-evt-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-svc-cmp-evt-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Direct complete event test",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if _, err := svc.Complete(ctx, scope, r.ID); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	evts := bus.allEvents()
+	var completedCount int
+	for _, e := range evts {
+		if e.userID == userID && e.event.Type == "reminder.completed" {
+			completedCount++
+		}
+	}
+	if completedCount != 1 {
+		t.Errorf("expected 1 reminder.completed event from Service.Complete, got %d", completedCount)
+	}
+}
+
+// TestService_Update_Reopen_EmitsUpdatedEvent verifies that re-opening a
+// completed reminder (status: active) emits "reminder.updated", not
+// "reminder.completed".
+func TestService_Update_Reopen_EmitsUpdatedEvent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-reopen-evt-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-reopen-evt-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Reopen event test",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := svc.Complete(ctx, scope, r.ID); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Clear events so we only check what reopen emits.
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	statusActive := "active"
+	prod.mu.Lock()
+	prod.returnID = "job-reopen-evt-002"
+	prod.mu.Unlock()
+
+	_, err = svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Status: &statusActive,
+	})
+	if err != nil {
+		t.Fatalf("Update (reopen): %v", err)
+	}
+
+	evts := bus.allEvents()
+	var updatedCount, completedCount int
+	for _, e := range evts {
+		if e.userID != userID {
+			continue
+		}
+		switch e.event.Type {
+		case "reminder.updated":
+			updatedCount++
+		case "reminder.completed":
+			completedCount++
+		}
+	}
+	if updatedCount != 1 {
+		t.Errorf("expected 1 reminder.updated event for reopen, got %d", updatedCount)
+	}
+	if completedCount != 0 {
+		t.Errorf("expected 0 reminder.completed events for reopen, got %d", completedCount)
+	}
+}
+
+// TestService_Update_PlainField_EmitsUpdatedEvent verifies a plain field update
+// (no status change) emits "reminder.updated".
+func TestService_Update_PlainField_EmitsUpdatedEvent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-plain-upd-evt-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-plain-upd-evt-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Plain update event test",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Clear creation event.
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	newTitle := "Plain Updated Title"
+	_, err = svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Title: &newTitle,
+	})
+	if err != nil {
+		t.Fatalf("Update (plain field): %v", err)
+	}
+
+	evts := bus.allEvents()
+	var updatedCount, completedCount int
+	for _, e := range evts {
+		if e.userID != userID {
+			continue
+		}
+		switch e.event.Type {
+		case "reminder.updated":
+			updatedCount++
+		case "reminder.completed":
+			completedCount++
+		}
+	}
+	if updatedCount != 1 {
+		t.Errorf("expected 1 reminder.updated event for plain update, got %d", updatedCount)
+	}
+	if completedCount != 0 {
+		t.Errorf("expected 0 reminder.completed events for plain update, got %d", completedCount)
+	}
+}
+
+// TestService_Update_Active_AlreadyActive_NoNewJob verifies that calling Update
+// with status="active" on an already-active reminder is a no-op: no new fire-job
+// is enqueued (no duplicate job) and the reminder stays active.
+func TestService_Update_Active_AlreadyActive_NoNewJob(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-noop-reopen-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-noop-reopen-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Already active",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	enqueuesBefore := len(prod.allEnqueued())
+
+	statusActive := "active"
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Status: &statusActive,
+	})
+	if err != nil {
+		t.Fatalf("Update (status=active on active): %v", err)
+	}
+
+	// Reminder must still be active.
+	if updated.Status != "active" {
+		t.Errorf("got status %q, want %q", updated.Status, "active")
+	}
+
+	// No new enqueue must have happened.
+	enqueuesAfter := len(prod.allEnqueued())
+	if enqueuesAfter != enqueuesBefore {
+		t.Errorf("expected no new Enqueue call for no-op status=active on active reminder; got %d new call(s)",
+			enqueuesAfter-enqueuesBefore)
 	}
 }

@@ -296,3 +296,56 @@ func (q *Queries) StampFiredKeepActive(ctx context.Context, arg StampFiredKeepAc
 	}
 	return result.RowsAffected()
 }
+
+const updateReminder = `-- name: UpdateReminder :execrows
+UPDATE reminders
+SET title = ?1,
+    notes = ?2,
+    due_at = ?3,
+    rrule = ?4,
+    auto_complete = ?5,
+    status = ?6,
+    completed_at = ?7,
+    fire_job_id = ?8,
+    updated_at = ?9
+WHERE id = ?10
+  AND user_id = ?11
+`
+
+type UpdateReminderParams struct {
+	Title        string
+	Notes        sql.NullString
+	DueAt        string
+	Rrule        sql.NullString
+	AutoComplete int64
+	Status       string
+	CompletedAt  sql.NullString
+	FireJobID    sql.NullString
+	UpdatedAt    string
+	ID           string
+	UserID       string
+}
+
+// Writes all mutable columns for a single reminder row.
+// last_fired_at is intentionally excluded: the fire handler is its sole writer.
+// fire_job_id is included so Service owns all fire-job lifecycle transitions.
+// MANDATORY user_id predicate enforced by scope guard.
+func (q *Queries) UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateReminder,
+		arg.Title,
+		arg.Notes,
+		arg.DueAt,
+		arg.Rrule,
+		arg.AutoComplete,
+		arg.Status,
+		arg.CompletedAt,
+		arg.FireJobID,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.UserID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
