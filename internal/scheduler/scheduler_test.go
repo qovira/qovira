@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -746,6 +747,19 @@ func TestConfig_Validate_RejectsInvalidLeaseTimeout(t *testing.T) {
 				BackoffBase:  10 * time.Second,
 				BackoffCap:   1 * time.Hour,
 				MaxAttempts:  5,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid: MaxAttempts < 1",
+			cfg: scheduler.Config{
+				PollInterval: 1 * time.Second,
+				Workers:      4,
+				JobTimeout:   30 * time.Second,
+				LeaseTimeout: 5 * time.Minute,
+				BackoffBase:  10 * time.Second,
+				BackoffCap:   1 * time.Hour,
+				MaxAttempts:  0, // would dead-letter every job before it ever runs
 			},
 			wantErr: true,
 		},
@@ -1619,13 +1633,15 @@ func TestRetry_JobTimeoutIsTransient(t *testing.T) {
 		t.Fatal("handler not invoked within timeout")
 	}
 
-	// Wait for the job to be re-armed (status=pending after the timeout).
-	var finalStatus string
+	// Wait for the job to be re-armed (status=pending after the timeout). Use jobRow to
+	// read status and locked_at atomically so the test does not observe a re-claimed row
+	// between two separate SELECT calls on high-load parallel runs (when backoff is 0ms
+	// and the frozen clock makes run_at immediately due, the poller can re-claim the row
+	// between a status read and a separate locked_at read).
+	var finalStatus, finalLockedAt string
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&finalStatus); err != nil {
-			t.Fatalf("SELECT status: %v", err)
-		}
+		finalStatus, finalLockedAt, _, _ = jobRow(t, s.Writer(), jobID)
 		if finalStatus == "pending" {
 			break
 		}
@@ -1636,10 +1652,9 @@ func TestRetry_JobTimeoutIsTransient(t *testing.T) {
 		t.Errorf("status after JobTimeout = %q; want %q (deadline fires = transient, retried)", finalStatus, "pending")
 	}
 
-	// locked_at must be cleared.
-	_, lockedAt, _, _ := jobRow(t, s.Writer(), jobID)
-	if lockedAt != "" {
-		t.Errorf("locked_at = %q after retry; want empty (cleared)", lockedAt)
+	// locked_at must be cleared (read atomically with status above).
+	if finalLockedAt != "" {
+		t.Errorf("locked_at = %q after retry; want empty (cleared)", finalLockedAt)
 	}
 }
 
@@ -1782,6 +1797,306 @@ func TestCancel_FailedJob(t *testing.T) {
 	// Row must be gone.
 	if jobExists(t, s.Writer(), jobID) {
 		t.Error("failed job row still exists after Cancel; expected deletion (operator cleanup)")
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Reclaim tests (issue: crashed or wedged jobs are reclaimed)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// insertRunningJob directly inserts a row into the jobs table with status='running'
+// and the given locked_at timestamp, bypassing the scheduler claim path. This
+// simulates a row orphaned by a process crash.
+func insertRunningJob(t *testing.T, db *sql.DB, kind, lockedAt string, attempt int) string {
+	t.Helper()
+	jobID := "01TEST" + kind[:min(len(kind), 10)] + fmt.Sprintf("%014d", attempt)
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO jobs (id, kind, payload, user_id, status, run_at, attempt, locked_at, created_at, updated_at)
+		VALUES (?, ?, '{}', NULL, 'running', ?, ?, ?, ?, ?)`,
+		jobID, kind, now, attempt, lockedAt, now, now,
+	)
+	if err != nil {
+		t.Fatalf("insertRunningJob: %v", err)
+	}
+	return jobID
+}
+
+// TestReclaim_BootSweepReclaimsStaleLeasedRow verifies acceptance criterion 1:
+// a row left running with a locked_at older than LeaseTimeout is reclaimed to pending
+// by the boot sweep (before the poll loop ticks).
+func TestReclaim_BootSweepReclaimsStaleLeasedRow(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+
+	// Freeze the clock so "now" is well after the stale locked_at.
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 10 * time.Second // very long — we want only the boot sweep to fire
+
+	// Insert a running row with locked_at = now - 2*LeaseTimeout (definitely stale).
+	staleLockedAt := now.Add(-2 * cfg.LeaseTimeout).UTC().Format(time.RFC3339)
+	jobID := insertRunningJob(t, s.Writer(), "reclaim.boot", staleLockedAt, 1)
+
+	// Confirm the row is running before Start.
+	status, _, attempt, _ := jobRow(t, s.Writer(), jobID)
+	if status != "running" {
+		t.Fatalf("pre-condition: status = %q, want %q", status, "running")
+	}
+	if attempt != 1 {
+		t.Fatalf("pre-condition: attempt = %d, want 1", attempt)
+	}
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+	// No handler registered — we just want to observe the reclaim, not dispatch.
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// The boot sweep is synchronous before the poll loop, so after Start returns the
+	// reclaim has already happened. Give it a brief moment to be safe.
+	time.Sleep(50 * time.Millisecond)
+
+	// Row must be pending now, locked_at cleared, attempt preserved.
+	status, lockedAt, attemptAfter, _ := jobRow(t, s.Writer(), jobID)
+	if status != "pending" {
+		t.Errorf("after boot sweep: status = %q, want %q", status, "pending")
+	}
+	if lockedAt != "" {
+		t.Errorf("after boot sweep: locked_at = %q, want empty (cleared)", lockedAt)
+	}
+	if attemptAfter != 1 {
+		t.Errorf("after boot sweep: attempt = %d, want 1 (reclaim must not reset attempt)", attemptAfter)
+	}
+}
+
+// TestReclaim_PeriodicTickReclaimsStaleLeasedRow verifies acceptance criterion 2:
+// a row inserted AFTER Start (so the boot sweep has already run) is reclaimed to
+// pending by the periodic in-loop check when its locked_at goes stale.
+func TestReclaim_PeriodicTickReclaimsStaleLeasedRow(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+
+	clk := &advanceable{now: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)}
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 10 * time.Millisecond
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, clk.Now)
+	// No handler registered — we just want to observe the reclaim.
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for the boot sweep tick to have fired (at least one poll cycle).
+	time.Sleep(50 * time.Millisecond)
+
+	// NOW insert the stale running row — after Start, so the boot sweep already ran.
+	// locked_at is at the current clock time (not yet stale).
+	lockedAtNow := clk.Now().UTC().Format(time.RFC3339)
+	jobID := insertRunningJob(t, s.Writer(), "reclaim.tick", lockedAtNow, 2)
+
+	// Confirm status=running.
+	status, _, _, _ := jobRow(t, s.Writer(), jobID)
+	if status != "running" {
+		t.Fatalf("pre-condition: status = %q, want %q", status, "running")
+	}
+
+	// Advance the clock past LeaseTimeout so locked_at is now stale.
+	clk.Advance(cfg.LeaseTimeout + time.Second)
+
+	// Wait for the periodic reclaim to fire (a few poll intervals).
+	var finalStatus, finalLockedAt string
+	var finalAttempt int
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		finalStatus, finalLockedAt, finalAttempt, _ = jobRow(t, s.Writer(), jobID)
+		if finalStatus == "pending" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if finalStatus != "pending" {
+		t.Errorf("after periodic reclaim: status = %q, want %q", finalStatus, "pending")
+	}
+	if finalLockedAt != "" {
+		t.Errorf("after periodic reclaim: locked_at = %q, want empty (cleared)", finalLockedAt)
+	}
+	if finalAttempt != 2 {
+		t.Errorf("after periodic reclaim: attempt = %d, want 2 (reclaim must not reset attempt)", finalAttempt)
+	}
+}
+
+// TestReclaim_NotStaleRowIsNotReclaimed verifies acceptance criterion 4:
+// a still-running job with locked_at within LeaseTimeout is NOT reclaimed.
+func TestReclaim_NotStaleRowIsNotReclaimed(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 10 * time.Millisecond
+	cfg.LeaseTimeout = 5 * time.Minute
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for the boot sweep to complete.
+	time.Sleep(50 * time.Millisecond)
+
+	// Insert a running row with locked_at = now - (LeaseTimeout / 2): NOT yet stale.
+	freshLockedAt := now.Add(-cfg.LeaseTimeout / 2).UTC().Format(time.RFC3339)
+	jobID := insertRunningJob(t, s.Writer(), "reclaim.fresh", freshLockedAt, 1)
+
+	// Let several poll ticks run.
+	time.Sleep(100 * time.Millisecond)
+
+	// Row must still be running — not reclaimed.
+	status, _, _, _ := jobRow(t, s.Writer(), jobID)
+	if status != "running" {
+		t.Errorf("fresh job: status = %q, want %q (must not be reclaimed when within LeaseTimeout)", status, "running")
+	}
+}
+
+// TestReclaim_PoisonJobDeadLettersViaAttemptCeiling verifies acceptance criterion 3:
+// a process-crashing poison job (simulated by inserting running row with
+// attempt=MaxAttempts) is reclaimed → pending (attempt preserved), then re-leased
+// (attempt becomes MaxAttempts+1), and the dispatch-time guard dead-letters it
+// WITHOUT invoking the handler. The job.failed event is published (user-scoped).
+func TestReclaim_PoisonJobDeadLettersViaAttemptCeiling(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 10 * time.Millisecond
+	cfg.MaxAttempts = 3
+	cfg.BackoffBase = 1 * time.Millisecond
+	cfg.BackoffCap = 1 * time.Millisecond
+
+	const testUserID = "01JXYZ000USER0000000000000"
+	bus := &capturingBus{}
+
+	sched := scheduler.NewWithClock(s, bus, cfg, fixedClock(now))
+
+	// Register a handler that records if it was ever invoked.
+	var handlerInvoked atomic.Bool
+	sched.Register("poison.job", func(_ context.Context, _ scheduler.Job) error {
+		handlerInvoked.Store(true)
+		return nil
+	})
+
+	// Insert a running row with attempt=MaxAttempts and a stale locked_at.
+	// This simulates a job that already used all its attempts and is now orphaned.
+	staleLockedAt := now.Add(-2 * cfg.LeaseTimeout).UTC().Format(time.RFC3339)
+
+	// Insert directly with user_id so we can assert job.failed event.
+	jobID := "01TESTPOISONJOB0000000000001"
+	insertNow := now.UTC().Format(time.RFC3339)
+	_, err := s.Writer().ExecContext(context.Background(), `
+		INSERT INTO jobs (id, kind, payload, user_id, status, run_at, attempt, locked_at, created_at, updated_at)
+		VALUES (?, 'poison.job', '{}', ?, 'running', ?, ?, ?, ?, ?)`,
+		jobID, testUserID, insertNow, cfg.MaxAttempts, staleLockedAt, insertNow, insertNow,
+	)
+	if err != nil {
+		t.Fatalf("insert poison job: %v", err)
+	}
+
+	// Verify pre-condition: attempt = MaxAttempts, status = running.
+	status, _, attempt, _ := jobRow(t, s.Writer(), jobID)
+	if status != "running" {
+		t.Fatalf("pre-condition: status = %q, want %q", status, "running")
+	}
+	if attempt != cfg.MaxAttempts {
+		t.Fatalf("pre-condition: attempt = %d, want %d", attempt, cfg.MaxAttempts)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for the job to reach status=failed.
+	var finalStatus string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&finalStatus); err != nil {
+			t.Fatalf("SELECT status: %v", err)
+		}
+		if finalStatus == "failed" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if finalStatus != "failed" {
+		t.Errorf("poison job status = %q; want %q (dispatch guard must dead-letter)", finalStatus, "failed")
+	}
+
+	// Handler must NEVER have been invoked — the dispatch guard fires before the handler.
+	if handlerInvoked.Load() {
+		t.Error("handler was invoked for poison job; want it dead-lettered before handler runs")
+	}
+
+	// last_error must be set.
+	lastErr := jobLastError(t, s.Writer(), jobID)
+	if !lastErr.Valid || lastErr.String == "" {
+		t.Error("last_error is NULL/empty after dispatch-guard dead-letter; expected error text")
+	}
+
+	// job.failed event must be published on the user's bus.
+	var gotEvent *publishedEvent
+	for i, ev := range bus.published() {
+		if ev.event.Type == "job.failed" && ev.userID == testUserID {
+			evts := bus.published()
+			gotEvent = &evts[i]
+			break
+		}
+	}
+	if gotEvent == nil {
+		t.Fatal("no job.failed event published for poison job; want job.failed on user's bus")
+	}
+
+	payload, ok := gotEvent.event.Data.(scheduler.JobFailedEvent)
+	if !ok {
+		t.Errorf("event.Data type = %T, want scheduler.JobFailedEvent", gotEvent.event.Data)
+	} else {
+		if payload.Kind != "poison.job" {
+			t.Errorf("JobFailedEvent.Kind = %q, want %q", payload.Kind, "poison.job")
+		}
+		if payload.LastError == "" {
+			t.Error("JobFailedEvent.LastError is empty; want the error text")
+		}
 	}
 }
 

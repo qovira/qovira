@@ -131,15 +131,20 @@ func DefaultConfig() Config {
 	}
 }
 
-// Validate checks the one cross-field invariant: LeaseTimeout must be strictly
-// greater than JobTimeout. The composition root calls this and returns the error
-// from app.New if invalid, so a bad config fails boot immediately.
+// Validate checks the config invariants. The cross-field invariant is that
+// LeaseTimeout must be strictly greater than JobTimeout. MaxAttempts must also be
+// at least 1, otherwise the dispatch-time attempt-ceiling guard would dead-letter
+// every job before its handler ever runs. The composition root calls this and
+// returns the error from app.New if invalid, so a bad config fails boot immediately.
 func (c Config) Validate() error {
 	if c.LeaseTimeout <= c.JobTimeout {
 		return fmt.Errorf(
 			"scheduler: LeaseTimeout (%v) must be greater than JobTimeout (%v)",
 			c.LeaseTimeout, c.JobTimeout,
 		)
+	}
+	if c.MaxAttempts < 1 {
+		return fmt.Errorf("scheduler: MaxAttempts (%d) must be at least 1", c.MaxAttempts)
 	}
 	return nil
 }
@@ -275,6 +280,9 @@ VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)`
 // Start begins the poll→claim→execute loop. It is safe to call Start only once;
 // subsequent calls are no-ops. The provided ctx is the application context; it is
 // used as the parent for the poller goroutine and all handler contexts.
+//
+// A one-shot reclaim sweep runs before the poll loop begins, recovering any rows
+// that were left in running state by a prior process crash.
 func (s *Scheduler) Start(ctx context.Context) error {
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
@@ -282,6 +290,10 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		return nil
 	}
 	s.started = true
+
+	// Boot sweep: reclaim running rows older than LeaseTimeout before the loop starts.
+	// Uses context.Background() so it is not affected by a concurrent early Stop.
+	s.reclaim(context.Background())
 
 	pollCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
@@ -382,8 +394,13 @@ WHERE id IN (
 )
 RETURNING id, kind, payload, user_id, attempt`
 
-// tick executes one claim-and-dispatch cycle.
+// tick executes one reclaim-then-claim-and-dispatch cycle.
 func (s *Scheduler) tick(ctx context.Context) {
+	// Periodic reclaim: return stale running rows to pending before claiming new ones.
+	// This handles wedged-but-alive workers that ignored cancellation, as well as any
+	// rows missed by the boot sweep (e.g. inserted between boot and this tick).
+	s.reclaim(ctx)
+
 	// batch = number of free worker slots. len(s.sem) is an intentionally
 	// approximate count: the poller is the sole owner of the semaphore, so this
 	// read is effectively single-threaded; at worst it under-claims by one slot on
@@ -435,6 +452,31 @@ func (s *Scheduler) tick(ctx context.Context) {
 	}
 }
 
+// reclaim sweeps running rows whose locked_at is older than LeaseTimeout and flips
+// them back to pending so they can be re-leased. It does NOT reset attempt: the retry
+// ceiling must still apply to reclaimed rows. It is called both on boot (boot sweep)
+// and on each poll tick (periodic sweep).
+func (s *Scheduler) reclaim(ctx context.Context) {
+	threshold := s.now().Add(-s.cfg.LeaseTimeout).UTC().Format(time.RFC3339)
+	nowStr := s.now().UTC().Format(time.RFC3339)
+
+	n, err := db.New(s.st.Writer()).ReclaimStaleJobs(ctx, db.ReclaimStaleJobsParams{
+		UpdatedAt: nowStr,
+		Threshold: sql.NullString{String: threshold, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+			errors.Is(err, sql.ErrConnDone) || isClosedError(err) {
+			return // expected during shutdown
+		}
+		s.logger.Error("scheduler: reclaim stale jobs failed", "err", err)
+		return
+	}
+	if n > 0 {
+		s.logger.Info("scheduler: reclaimed stale running jobs", "count", n)
+	}
+}
+
 // dispatch runs the handler for one claimed job row. It resolves scope, builds
 // the Job struct, calls the handler under a JobTimeout-bounded context, and on
 // success deletes the row. On failure it either re-arms the row with jittered
@@ -454,6 +496,19 @@ func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 		Payload: json.RawMessage(r.payload),
 		Attempt: int(r.attempt),
 		Scope:   scope,
+	}
+
+	// Dispatch-time attempt-ceiling guard: if attempt > MaxAttempts, the job was
+	// reclaimed from a prior crash-loop (attempt was already at MaxAttempts, reclaim
+	// preserved it, and the claim incremented it to MaxAttempts+1). Dead-letter
+	// immediately without running the handler — this prevents reclaim-loop poisoning.
+	// Normal dead-lettering via handleFailure sets attempt == MaxAttempts at failure;
+	// this guard only fires at MaxAttempts+1 or beyond, so it does not interfere with
+	// normal retries (which never reach MaxAttempts+1).
+	if int(r.attempt) > s.cfg.MaxAttempts {
+		s.deadLetter(r, scope, int(r.attempt),
+			fmt.Errorf("exceeded max attempts after repeated reclaim"))
+		return
 	}
 
 	// Look up the handler.

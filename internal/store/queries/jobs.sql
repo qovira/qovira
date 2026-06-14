@@ -55,3 +55,14 @@ WHERE id = @id AND status = 'running';
 -- and silently tolerated by the caller.
 UPDATE jobs SET status = 'failed', last_error = @last_error, locked_at = NULL, updated_at = @updated_at
 WHERE id = @id AND status = 'running';
+
+-- name: ReclaimStaleJobs :execrows
+-- scopeguard:allow-unscoped: SYSTEM ENGINE -- cross-user reclaim sweep. The scheduler reclaims
+-- running rows whose locked_at is older than the lease threshold, returning them to pending so
+-- they can be re-leased. This fires on boot (to recover rows orphaned by a prior process crash)
+-- and on each poll tick (to recover wedged-but-alive workers that ignore cancellation). The
+-- locked_at comparison uses RFC3339 UTC strings, which are lexicographically ordered, matching
+-- the pattern used by the claim query's run_at comparison. attempt is deliberately NOT reset:
+-- the retry ceiling must still apply to reclaimed jobs.
+UPDATE jobs SET status = 'pending', locked_at = NULL, updated_at = @updated_at
+WHERE status = 'running' AND locked_at IS NOT NULL AND locked_at < @threshold;

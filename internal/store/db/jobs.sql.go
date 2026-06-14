@@ -87,6 +87,31 @@ func (q *Queries) GetJobStatus(ctx context.Context, id string) (string, error) {
 	return status, err
 }
 
+const reclaimStaleJobs = `-- name: ReclaimStaleJobs :execrows
+UPDATE jobs SET status = 'pending', locked_at = NULL, updated_at = ?1
+WHERE status = 'running' AND locked_at IS NOT NULL AND locked_at < ?2
+`
+
+type ReclaimStaleJobsParams struct {
+	UpdatedAt string
+	Threshold sql.NullString
+}
+
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- cross-user reclaim sweep. The scheduler reclaims
+// running rows whose locked_at is older than the lease threshold, returning them to pending so
+// they can be re-leased. This fires on boot (to recover rows orphaned by a prior process crash)
+// and on each poll tick (to recover wedged-but-alive workers that ignore cancellation). The
+// locked_at comparison uses RFC3339 UTC strings, which are lexicographically ordered, matching
+// the pattern used by the claim query's run_at comparison. attempt is deliberately NOT reset:
+// the retry ceiling must still apply to reclaimed jobs.
+func (q *Queries) ReclaimStaleJobs(ctx context.Context, arg ReclaimStaleJobsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reclaimStaleJobs, arg.UpdatedAt, arg.Threshold)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const rescheduleJob = `-- name: RescheduleJob :execrows
 UPDATE jobs SET run_at = ?1, updated_at = ?2
 WHERE id = ?3 AND status = 'pending'

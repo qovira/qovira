@@ -126,6 +126,14 @@ type Querier interface {
 	// TTL cutoffs (idle and absolute), so there is no meaningful user context available and a
 	// user_id predicate would prevent cross-user expiry from working.
 	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- cross-user reclaim sweep. The scheduler reclaims
+	// running rows whose locked_at is older than the lease threshold, returning them to pending so
+	// they can be re-leased. This fires on boot (to recover rows orphaned by a prior process crash)
+	// and on each poll tick (to recover wedged-but-alive workers that ignore cancellation). The
+	// locked_at comparison uses RFC3339 UTC strings, which are lexicographically ordered, matching
+	// the pattern used by the claim query's run_at comparison. attempt is deliberately NOT reset:
+	// the retry ceiling must still apply to reclaimed jobs.
+	ReclaimStaleJobs(ctx context.Context, arg ReclaimStaleJobsParams) (int64, error)
 	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler moves run_at for any pending job.
 	// Only updates rows with status='pending'; returns 0 rows affected when the job is not pending
 	// (running or absent today; 'failed'/dead-letter is a later slice). The caller interprets a
