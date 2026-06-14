@@ -265,7 +265,7 @@ func (h *Harness) StartTurn(
 	_ context.Context,
 	conv ConversationID,
 	_ InboundMessage,
-	_ Origin,
+	origin Origin,
 	principal store.Principal,
 ) error {
 	//nolint:gosec // Intentional: the turn must outlive the request context; background context is correct here.
@@ -283,7 +283,7 @@ func (h *Harness) StartTurn(
 			}
 		}()
 
-		if err := h.run(context.Background(), conv, principal); err != nil {
+		if err := h.run(context.Background(), conv, origin, principal); err != nil {
 			// run only returns errors that are not already handled (i.e., infra
 			// errors that abort the turn). Log the detail server-side and emit
 			// a generic code to the bus so no internal detail leaks to clients.
@@ -321,7 +321,7 @@ func (h *Harness) StartTurn(
 //
 // run returns only infrastructure errors; ToolError and ErrContextLength are
 // handled internally and never returned.
-func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.Principal) error {
+func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, principal store.Principal) error {
 	scope := store.UserScope(principal)
 	sq := h.store.ForUser(scope)
 
@@ -331,16 +331,25 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 		return fmt.Errorf("harness: load user profile: %w", err)
 	}
 
-	// Build a by-name lookup from the catalog for O(1) dispatch.
-	tools := h.reg.Catalog()
-	toolMap := make(map[string]capability.Tool, len(tools))
-	for _, t := range tools {
+	// Build a by-name lookup from the full catalog for O(1) dispatch.
+	// The full catalog (not the trust-filtered one) is used for the toolMap so that
+	// the execution gate can enforce Block on any tool the model calls, even those
+	// filtered from the offered catalog.
+	allTools := h.reg.Catalog()
+	toolMap := make(map[string]capability.Tool, len(allTools))
+	for _, t := range allTools {
 		toolMap[t.Name] = t
 	}
 
-	// Map the capability catalog to gateway tool schemas for all rounds.
-	gwTools := make([]gateway.ToolSchema, 0, len(tools))
-	for _, t := range tools {
+	// Apply the advisory catalog filter: omit tools whose policy(risk, trust) == Block.
+	// This is Layer 1 (advisory): the model is not offered blocked tools.
+	// Layer 2 (execution gate in executeAndPersistToolCall) enforces Block even if
+	// the model calls a filtered tool anyway.
+	filteredTools := filterCatalogForTrust(allTools, origin.Trust)
+
+	// Map the filtered capability catalog to gateway tool schemas for all rounds.
+	gwTools := make([]gateway.ToolSchema, 0, len(filteredTools))
+	for _, t := range filteredTools {
 		gwTools = append(gwTools, gateway.ToolSchema{
 			Name:        t.Name,
 			Description: t.Description,
@@ -398,10 +407,18 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, principal store.
 
 		// Execute tool calls in order, persisting each result immediately.
 		for _, c := range sr.calls {
-			if err := h.executeAndPersistToolCall(ctx, sq, conv, principal.UserID, c, toolMap, scope); err != nil {
+			done, err := h.executeAndPersistToolCall(ctx, sq, conv, principal.UserID, c, toolMap, scope, origin)
+			if err != nil {
 				// executeAndPersistToolCall only returns infrastructure errors;
-				// ToolErrors are handled internally (persisted + tool.failed emitted).
+				// ToolErrors and Block refusals are handled internally (persisted + event emitted).
 				return fmt.Errorf("harness: execute tool call %q (step %d): %w", c.ID, step, err)
+			}
+			if done {
+				// A Confirm decision suspended the turn. The turn goroutine ends here;
+				// no terminal event is emitted (the turn is paused, not finished).
+				// confirmation-suspend-resume slice persists the pending_confirmations row,
+				// emits confirmation.required, and lets Resolve re-enter run.
+				return nil
 			}
 		}
 		// Loop: next iteration will re-assemble and call the model again.
@@ -678,15 +695,24 @@ func (h *Harness) assembleChatRequest(
 // executeAndPersistToolCall executes one tool call from the model, emits
 // tool lifecycle events, and persists the result message.
 //
+// The second return value, done, is true when a Confirm decision has suspended
+// the turn (the caller must stop processing further calls and return without
+// emitting a terminal event). It is always false for Auto and Block decisions.
+//
 // Error classification:
 //   - If the model names an unknown tool: treated as a model fault (hallucinated
 //     tool name), produces a *capability.ToolError so the model can self-correct.
+//   - If policy(tool.Risk, origin.Trust) == Block: persist a model-visible "not
+//     permitted" refusal as the tool-result, emit tool.failed, loop continues
+//     (done=false, nil error).
+//   - If policy == Confirm: route to requestConfirmation seam — suspends the turn;
+//     returns (true, nil) so the caller stops without a terminal event.
 //   - If tool.Execute returns a *capability.ToolError: persisted as tool-result
 //     (model-safe message only), emits tool.failed, turn continues.
 //   - If tool.Execute returns any other error: infrastructure — the error is
 //     returned so the caller aborts the turn and emits turn.failed.
 //
-// This method returns only infrastructure errors; ToolError paths return nil.
+// This method returns only infrastructure errors; ToolError and Block paths return nil.
 func (h *Harness) executeAndPersistToolCall(
 	ctx context.Context,
 	sq *store.ScopedQueries,
@@ -694,15 +720,70 @@ func (h *Harness) executeAndPersistToolCall(
 	call *gateway.ToolCall,
 	toolMap map[string]capability.Tool,
 	scope store.Scope,
-) error {
+	origin Origin,
+) (done bool, err error) {
 	tool, found := toolMap[call.Name]
 
-	risk := ""
-	if found {
-		risk = riskTierString(tool.Risk)
+	// Unknown tool: the model hallucinated a tool name — model fault, not infra.
+	// Emit tool.started (the model made an attempt) then produce a *capability.ToolError
+	// so it flows through the same tool.failed + continue path.
+	// Unknown tools have no risk tier, so the policy gate is skipped (no tier to check).
+	if !found {
+		h.bus.Publish(userID, events.Event{
+			Type: "tool.started",
+			Data: ToolStartedPayload{
+				CallID:      call.ID,
+				Name:        call.Name,
+				Risk:        "",
+				ArgsSummary: argsSummary(call.Arguments),
+			},
+		})
+		toolErr := &capability.ToolError{
+			Code:    "unknown_tool",
+			Message: "unknown tool: " + call.Name,
+		}
+		return false, h.persistToolError(ctx, sq, conv, userID, call.ID, toolErr)
 	}
 
-	// Emit tool.started.
+	risk := riskTierString(tool.Risk)
+
+	// ── Policy gate (execution gate — Layer 2) ────────────────────────────────
+	// This is the real enforcement boundary. Even if a tool leaked through the
+	// catalog filter (Layer 1), the execution gate refuses it here.
+	//
+	// tool.started is emitted AFTER the policy decision so that:
+	//   - Auto: tool.started fires immediately before execution, always paired with
+	//     tool.completed or tool.failed.
+	//   - Block: no tool.started — this is a refusal, not an attempt; the UI sees
+	//     only tool.failed with the model-visible refusal message.
+	//   - Confirm: no tool.started — the turn suspends here; confirmation.required
+	//     belongs to the confirmation-suspend-resume slice and is emitted there.
+	//     Emitting tool.started without a resolving tool.completed/tool.failed would
+	//     leave a permanently spinning UI chip.
+	switch policy(tool.Risk, origin.Trust) {
+	case Block:
+		// Not permitted from this source: persist a model-visible refusal as the
+		// tool-result so the model sees it and the loop continues. No tool.started
+		// is emitted — Block is a refusal, not an execution attempt.
+		toolErr := &capability.ToolError{
+			Code:    "not_permitted",
+			Message: "this operation is not permitted from the current source",
+		}
+		return false, h.persistToolError(ctx, sq, conv, userID, call.ID, toolErr)
+
+	case Confirm:
+		// Route to the confirmation seam. No tool.started is emitted here: the turn
+		// suspends without executing the tool, and the next slice
+		// (confirmation-suspend-resume) will persist pending_confirmations, emit
+		// confirmation.required, and let Resolve re-enter run.
+		return h.requestConfirmation(ctx, sq, conv, userID, call, tool)
+
+	case Auto:
+		// Fall through to execution below.
+	}
+
+	// Emit tool.started immediately before execution so it is always paired with
+	// either tool.completed (success) or tool.failed (ToolError).
 	h.bus.Publish(userID, events.Event{
 		Type: "tool.started",
 		Data: ToolStartedPayload{
@@ -713,16 +794,6 @@ func (h *Harness) executeAndPersistToolCall(
 		},
 	})
 
-	// Unknown tool: the model hallucinated a tool name — model fault, not infra.
-	// Produce a *capability.ToolError so it flows through the same tool.failed + continue path.
-	if !found {
-		toolErr := &capability.ToolError{
-			Code:    "unknown_tool",
-			Message: "unknown tool: " + call.Name,
-		}
-		return h.persistToolError(ctx, sq, conv, userID, call.ID, toolErr)
-	}
-
 	result, execErr := tool.Execute(ctx, scope, call.Arguments)
 	if execErr != nil {
 		if classify(execErr) == faultToolError {
@@ -730,17 +801,17 @@ func (h *Harness) executeAndPersistToolCall(
 			var toolErr *capability.ToolError
 			// errors.As is guaranteed to succeed since classify returned faultToolError.
 			_ = errors.As(execErr, &toolErr)
-			return h.persistToolError(ctx, sq, conv, userID, call.ID, toolErr)
+			return false, h.persistToolError(ctx, sq, conv, userID, call.ID, toolErr)
 		}
 		// faultContextLength and faultInfrastructure: context-length from a tool is
 		// not something the model can self-correct, so treat both as infra — abort.
-		return fmt.Errorf("execute tool %q: %w", call.Name, execErr)
+		return false, fmt.Errorf("execute tool %q: %w", call.Name, execErr)
 	}
 
 	// Persist tool-result message.
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("marshal tool result for call %s: %w", call.ID, err)
+		return false, fmt.Errorf("marshal tool result for call %s: %w", call.ID, err)
 	}
 	if _, err := sq.InsertMessage(ctx, store.InsertMessageParams{
 		ID:             generateID(),
@@ -749,7 +820,7 @@ func (h *Harness) executeAndPersistToolCall(
 		Content:        string(resultJSON),
 		ToolCallID:     call.ID,
 	}); err != nil {
-		return fmt.Errorf("persist tool result for call %s: %w", call.ID, err)
+		return false, fmt.Errorf("persist tool result for call %s: %w", call.ID, err)
 	}
 
 	// Emit tool.completed.
@@ -761,7 +832,31 @@ func (h *Harness) executeAndPersistToolCall(
 		},
 	})
 
-	return nil
+	return false, nil
+}
+
+// requestConfirmation is the seam for the confirmation-suspend-resume slice.
+// It suspends the current turn by returning (true, nil) — the caller stops
+// processing further tool calls and returns without emitting a terminal event.
+//
+// In this slice (gate-tool-execution-by-risk-and-trust) the seam does NOT:
+//   - persist a pending_confirmations row
+//   - emit confirmation.required
+//   - fabricate a tool result
+//
+// The next slice fills this function with the full suspend/resume logic.
+// confirmation-suspend-resume slice persists the pending_confirmations row, emits
+// confirmation.required, and lets Resolve re-enter run.
+func (h *Harness) requestConfirmation(
+	_ context.Context,
+	_ *store.ScopedQueries,
+	_ string,
+	_ string,
+	_ *gateway.ToolCall,
+	_ capability.Tool,
+) (done bool, err error) {
+	// Suspend the turn without a terminal event.
+	return true, nil
 }
 
 // persistToolError persists a *capability.ToolError as the tool-result message
