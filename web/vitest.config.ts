@@ -1,21 +1,21 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vitest/config";
 
-// Two test projects:
-//   "unit"  — node environment, plain .ts (e.g. boot.test.ts)
-//   "runes" — node environment with the Svelte compiler transform so $state /
-//             $derived / $effect runes are available in .svelte.ts singletons.
-//             Uses flushSync / $effect.root for rune-logic tests per the
-//             conventions:writing-svelte skill.
+// Three test projects, each in the environment its suite needs:
+//   node    — pure-Node unit tests (file I/O, no DOM), e.g. boot.test.ts
+//   runes   — .svelte.ts rune logic; node env + the Svelte compiler transform
+//             so $state/$derived/$effect work (flushSync / $effect.root), per
+//             the conventions:writing-svelte skill
+//   browser — DOM-dependent tests (document.cookie / fetch), e.g. the Api
+//             client; happy-dom env, excluding the rune suites above
 export default defineConfig({
   test: {
     projects: [
       {
         test: {
-          name: "unit",
+          name: "node",
           environment: "node",
-          include: ["src/**/*.test.ts"],
-          exclude: ["src/**/*.svelte.test.ts"],
+          include: ["src/tests/**/*.test.ts"],
         },
       },
       {
@@ -24,6 +24,14 @@ export default defineConfig({
           name: "runes",
           environment: "node",
           include: ["src/**/*.svelte.test.ts"],
+        },
+      },
+      {
+        test: {
+          name: "browser",
+          environment: "happy-dom",
+          include: ["src/lib/**/*.test.ts"],
+          exclude: ["src/**/*.svelte.test.ts"],
         },
       },
     ],

@@ -12,12 +12,14 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "generate:api": "openapi-typescript ../openapi.yaml -o src/lib/api/schema.d.ts",
     "test": "vitest run"
   },
   "dependencies": {
     "@internationalized/date": "^3.8.0",
     "@qovira/theme": "^1.1.0",
     "@qovira/ui": "^2.0.0",
+    "openapi-fetch": "0.17.0",
     "phosphor-svelte": "^3.1.0",
     "svelte": "^5.56.0"
   },
@@ -33,6 +35,8 @@
     "eslint": "^9.0.0",
     "eslint-plugin-svelte": "^2.46.0",
     "globals": "^15.0.0",
+    "happy-dom": "^20.10.3",
+    "openapi-typescript": "7.13.0",
     "prettier": "^3.0.0",
     "prettier-plugin-svelte": "^3.0.0",
     "svelte-check": "^4.6.0",

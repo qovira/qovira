@@ -22,7 +22,7 @@ jobs:
   # jobs below — a broken frontend build blocks the pipeline before the slower
   # CGo matrix legs start. Runs on Linux x64 only (platform-agnostic JS build).
   web:
-    name: Web (svelte-check, lint, format, test, build)
+    name: Web (api-drift-gate, svelte-check, lint, format, test, build)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     defaults:
       run:
@@ -40,6 +40,12 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: API types drift gate
+        # Regenerate TypeScript types from openapi.yaml and fail if the committed
+        # schema.d.ts is stale. The spec (openapi.yaml) is the contract; the types
+        # are derived from it. A drift means the spec changed without regenerating
+        # the types (or vice versa) — both must move together.
+        run: pnpm generate:api && git diff --exit-code src/lib/api/schema.d.ts
       - name: svelte-check
         run: pnpm check
       - name: Lint

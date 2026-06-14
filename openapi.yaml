@@ -1,0 +1,714 @@
+openapi: "3.1.0"
+info:
+  title: Qovira API
+  version: "0.1"
+  description: >-
+    The Qovira server API. All endpoints are under /api/v1 and speak
+    application/json. Error responses use application/problem+json (RFC 9457)
+    with a `code` extension field that clients branch on.
+
+    Authentication: session cookie __Host-qovira_session (set by POST /auth/login).
+    CSRF: POST/PATCH/DELETE require a CSRF-Token header echoed from the qovira_csrf
+    cookie (double-submit pattern).
+
+servers:
+  - url: /api/v1
+    description: Qovira v1 API (same-origin)
+
+# ---------------------------------------------------------------------------
+# Reusable schemas
+# ---------------------------------------------------------------------------
+components:
+  schemas:
+    # RFC 9457 problem+json shape (with Qovira extensions)
+    Problem:
+      type: object
+      required: [type, title, status, detail, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: >-
+            Stable URL identifying the problem kind.
+            Always "https://qovira.ai/errors/" + code.
+          example: "https://qovira.ai/errors/not_found"
+        title:
+          type: string
+          description: Short, stable, human-readable summary of the problem type.
+          example: "Not found"
+        status:
+          type: integer
+          description: HTTP status code; matches the response status line.
+          example: 404
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
+          example: "The requested resource was not found."
+        code:
+          type: string
+          description: Snake_case machine slug; the primary client branching key.
+          example: "not_found"
+        requestId:
+          type: string
+          description: >-
+            Correlation ID tying this response to server logs.
+            Always present; sentinel "unknown" if none in context.
+          example: "a1b2c3d4e5f6"
+        errors:
+          type: array
+          description: Per-field validation errors. Present on 422 only.
+          items:
+            $ref: "#/components/schemas/FieldError"
+
+    FieldError:
+      type: object
+      required: [pointer, detail]
+      properties:
+        pointer:
+          type: string
+          description: RFC 6901 JSON Pointer to the offending field.
+          example: "/email"
+        detail:
+          type: string
+          description: Human-readable explanation of why the value is invalid.
+          example: "must be a valid email address"
+
+    User:
+      type: object
+      required: [id, email, displayName, role, timezone, locale, language]
+      properties:
+        id:
+          type: string
+          description: Opaque user identifier.
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        role:
+          type: string
+        timezone:
+          type: string
+          description: IANA timezone name (e.g. "America/New_York").
+        locale:
+          type: string
+          description: BCP 47 locale tag (e.g. "en-US").
+        language:
+          type: string
+          description: BCP 47 language tag (e.g. "en").
+
+    Reminder:
+      type: object
+      required: [id, userId, title, dueAt, tz, autoComplete, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        title:
+          type: string
+        notes:
+          type: string
+          description: Optional free-text notes. Absent when not set.
+        dueAt:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp of when the reminder is due.
+        rrule:
+          type: string
+          description: RFC 5545 RRULE string for recurring reminders. Absent for one-shot.
+        tz:
+          type: string
+          description: >-
+            Snapshotted IANA timezone. NOTE: field name is `tz` (not `timezone`)
+            to distinguish from User.timezone.
+        autoComplete:
+          type: boolean
+          description: >-
+            When true (the default), firing the reminder automatically completes it.
+            When false, firing leaves status active (used for recurring reminders
+            that fire but stay active until the user completes them manually).
+        status:
+          type: string
+          enum: [active, completed]
+        completedAt:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp. Absent when status != completed.
+        lastFiredAt:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp of last fire. Absent until first fire.
+        fireJobId:
+          type: string
+          description: Internal scheduler job ID. Absent until scheduled.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MessageResponse:
+      type: object
+      required: [id, conversationId, role, content, createdAt]
+      properties:
+        id:
+          type: string
+        conversationId:
+          type: string
+        role:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Pagination:
+      type: object
+      required: [nextCursor, hasMore]
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+          description: Opaque cursor for the next page. null when no more pages.
+        hasMore:
+          type: boolean
+
+  responses:
+    ProblemUnauthorized:
+      description: Authentication required (unauthenticated or invalid_credentials).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    ProblemForbidden:
+      description: CSRF validation failed (csrf_failed).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    ProblemNotFound:
+      description: Resource not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    ProblemConflict:
+      description: Conflict (e.g. confirmation already resolved or expired).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    ProblemUnprocessableEntity:
+      description: Validation error (validation_error, validation_failed, invalid_decision).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    ProblemBadRequest:
+      description: Malformed body or unknown query parameter.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    ProblemInternalServerError:
+      description: Internal server error (internal_error).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+  # ---------- Health (public) ----------
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Health check
+      description: >-
+        Public health probe. Returns 200 with service status and version.
+        Not under /api/v1 — served directly at /healthz.
+      tags: [health]
+      servers:
+        - url: /
+          description: Root (no /api/v1 prefix)
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version]
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+                  version:
+                    type: string
+                    example: "0.1.0"
+
+  # ---------- Auth ----------
+  /auth/login:
+    post:
+      operationId: postAuthLogin
+      summary: Log in
+      description: >-
+        Public endpoint. Authenticates with email + password, mints a session,
+        and sets the __Host-qovira_session (HttpOnly) and qovira_csrf (readable)
+        cookies. The session token is never returned in the body.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Authentication successful. Cookies are set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expiresAt, user]
+                properties:
+                  expiresAt:
+                    type: string
+                    format: date-time
+                    description: RFC 3339 session expiry timestamp.
+                  user:
+                    $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "422":
+          $ref: "#/components/responses/ProblemUnprocessableEntity"
+
+  /auth/session:
+    delete:
+      operationId: deleteAuthSession
+      summary: Log out (current session)
+      description: Invalidates the current session and clears both auth cookies.
+      tags: [auth]
+      responses:
+        "204":
+          description: Session cleared.
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "403":
+          $ref: "#/components/responses/ProblemForbidden"
+
+  /auth/sessions:
+    delete:
+      operationId: deleteAuthSessions
+      summary: Log out (all sessions)
+      description: Invalidates all sessions for the current user and clears auth cookies.
+      tags: [auth]
+      responses:
+        "204":
+          description: All sessions cleared.
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "403":
+          $ref: "#/components/responses/ProblemForbidden"
+
+  # ---------- Me ----------
+  /me:
+    get:
+      operationId: getMe
+      summary: Get current user
+      tags: [me]
+      responses:
+        "200":
+          description: Current authenticated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+
+    patch:
+      operationId: patchMe
+      summary: Update current user profile
+      description: >-
+        Merge-patch semantics: present fields are set, absent fields unchanged.
+        null is not accepted (use an explicit empty string if you need to clear).
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                timezone:
+                  type: string
+                locale:
+                  type: string
+                language:
+                  type: string
+      responses:
+        "200":
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "403":
+          $ref: "#/components/responses/ProblemForbidden"
+        "422":
+          $ref: "#/components/responses/ProblemUnprocessableEntity"
+
+  /me/password:
+    post:
+      operationId: postMePassword
+      summary: Change password
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        "204":
+          description: Password changed successfully.
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "403":
+          $ref: "#/components/responses/ProblemForbidden"
+        "422":
+          $ref: "#/components/responses/ProblemUnprocessableEntity"
+
+  # ---------- Conversations ----------
+  /conversations/{id}/messages:
+    post:
+      operationId: postConversationMessage
+      summary: Send a message to a conversation
+      description: >-
+        Persists the user message and returns 202 immediately with the persisted
+        message body. The AI response streams over the /events SSE channel tagged
+        by conversationId — the turn outlives this request.
+      tags: [conversations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Conversation ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+      responses:
+        "202":
+          description: Message persisted. AI response will stream over SSE.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "403":
+          $ref: "#/components/responses/ProblemForbidden"
+        "404":
+          $ref: "#/components/responses/ProblemNotFound"
+
+  /conversations/{id}/confirmations/{callId}:
+    post:
+      operationId: postConversationConfirmation
+      summary: Resolve a pending tool confirmation
+      description: >-
+        Approve or deny a pending tool call confirmation. Returns 202 with no
+        body. The harness re-enters the turn asynchronously via SSE.
+      tags: [conversations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Conversation ID.
+        - name: callId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Pending confirmation call ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, deny]
+      responses:
+        "202":
+          description: Decision recorded. No body.
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "403":
+          $ref: "#/components/responses/ProblemForbidden"
+        "404":
+          $ref: "#/components/responses/ProblemNotFound"
+        "409":
+          $ref: "#/components/responses/ProblemConflict"
+        "422":
+          $ref: "#/components/responses/ProblemUnprocessableEntity"
+
+  # ---------- Reminders ----------
+  /reminders:
+    post:
+      operationId: postReminder
+      summary: Create a reminder
+      tags: [reminders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, dueAt]
+              properties:
+                title:
+                  type: string
+                notes:
+                  type: string
+                  description: Optional free-text notes.
+                dueAt:
+                  type: string
+                  format: date-time
+                  description: RFC 3339 UTC timestamp.
+                tz:
+                  type: string
+                  description: IANA timezone (defaults to user's profile timezone).
+                autoComplete:
+                  type: boolean
+                  default: true
+                  description: Whether to auto-complete on fire.
+                rrule:
+                  type: string
+                  description: RFC 5545 RRULE for recurring reminders.
+      responses:
+        "201":
+          description: Reminder created.
+          headers:
+            Location:
+              schema:
+                type: string
+              description: "/api/v1/reminders/{id}"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reminder"
+        "400":
+          $ref: "#/components/responses/ProblemBadRequest"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "403":
+          $ref: "#/components/responses/ProblemForbidden"
+        "422":
+          $ref: "#/components/responses/ProblemUnprocessableEntity"
+
+    get:
+      operationId: listReminders
+      summary: List reminders (cursor-paginated)
+      description: >-
+        Returns a cursor-paginated list of reminders. Unknown query parameters
+        are rejected with 400 unknown_query_param.
+      tags: [reminders]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Opaque pagination cursor from a previous response.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+            maximum: 100
+          description: Page size (default 25, max 100).
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, completed]
+          description: Filter by reminder status.
+        - name: dueBefore
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Filter reminders due before this RFC 3339 timestamp.
+        - name: dueAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Filter reminders due after this RFC 3339 timestamp.
+      responses:
+        "200":
+          description: Paginated list of reminders.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Reminder"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "400":
+          $ref: "#/components/responses/ProblemBadRequest"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+
+  /reminders/{id}:
+    get:
+      operationId: getReminder
+      summary: Get a reminder by ID
+      tags: [reminders]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The reminder.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reminder"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "404":
+          $ref: "#/components/responses/ProblemNotFound"
+
+    patch:
+      operationId: patchReminder
+      summary: Update a reminder
+      description: >-
+        Merge-patch semantics: present fields are set, absent fields unchanged.
+        null explicitly clears a nullable field (notes, rrule).
+        `status` field routes to complete/reopen logic.
+      tags: [reminders]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                notes:
+                  type: string
+                  nullable: true
+                  description: null clears the notes field.
+                dueAt:
+                  type: string
+                  format: date-time
+                rrule:
+                  type: string
+                  nullable: true
+                  description: null clears the rrule (makes it one-shot).
+                autoComplete:
+                  type: boolean
+                status:
+                  type: string
+                  enum: [active, completed]
+      responses:
+        "200":
+          description: Updated reminder.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reminder"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "403":
+          $ref: "#/components/responses/ProblemForbidden"
+        "404":
+          $ref: "#/components/responses/ProblemNotFound"
+        "422":
+          $ref: "#/components/responses/ProblemUnprocessableEntity"
+
+    delete:
+      operationId: deleteReminder
+      summary: Delete a reminder
+      tags: [reminders]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Reminder deleted.
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "403":
+          $ref: "#/components/responses/ProblemForbidden"
+        "404":
+          $ref: "#/components/responses/ProblemNotFound"
