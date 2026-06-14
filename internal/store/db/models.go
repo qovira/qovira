@@ -4,9 +4,47 @@
 
 package db
 
+import (
+	"database/sql"
+)
+
+type Conversation struct {
+	ID        string
+	UserID    string
+	Summary   sql.NullString
+	CreatedAt string
+	UpdatedAt string
+}
+
 type Instance struct {
 	ID        int64
 	CreatedAt string
+}
+
+type Message struct {
+	ID             string
+	ConversationID string
+	UserID         string
+	Role           string
+	Content        string
+	ToolCalls      sql.NullString
+	ToolCallID     sql.NullString
+	FinishReason   sql.NullString
+	CreatedAt      string
+	Abandoned      int64
+}
+
+type PendingConfirmation struct {
+	ID             string
+	ConversationID string
+	MessageID      string
+	UserID         string
+	ToolName       string
+	Args           string
+	Risk           string
+	Status         string
+	CreatedAt      string
+	ExpiresAt      string
 }
 
 type Session struct {

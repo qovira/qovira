@@ -11,6 +11,12 @@ import (
 
 type Querier interface {
 	BumpSessionLastUsedByID(ctx context.Context, arg BumpSessionLastUsedByIDParams) (int64, error)
+	// Returns the count of pending_confirmations rows for a given assistant message
+	// that are NOT in 'expired' status (i.e. 'pending', 'approved', or 'denied').
+	// Used to gate MarkMessageAbandoned: the assistant message is only abandoned when
+	// this count is zero (no siblings remain pending or were resolved by the user).
+	// User-scoped: requires user_id to prevent cross-user information leakage.
+	CountNonExpiredConfirmationsByMessageID(ctx context.Context, arg CountNonExpiredConfirmationsByMessageIDParams) (int64, error)
 	// Queries for the sessions table.
 	// sessions is per-user data (it has a user_id column and belongs to individual users), but
 	// some queries operate on a token_hash key (the bearer capability itself) rather than a
@@ -36,7 +42,9 @@ type Querier interface {
 	// Delete a setting by key.  No-op when the key does not exist.
 	DeleteSetting(ctx context.Context, settingKey string) error
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
+	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
 	GetInstance(ctx context.Context) (Instance, error)
+	GetPendingConfirmation(ctx context.Context, arg GetPendingConfirmationParams) (PendingConfirmation, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
 	// predicate is possible or meaningful at this lookup stage.
@@ -51,6 +59,14 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
+	// Queries for the messages table.
+	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
+	// belongs to the bound Scope. Parameters use sqlc named params (@name).
+	InsertMessage(ctx context.Context, arg InsertMessageParams) (InsertMessageRow, error)
+	// Queries for the pending_confirmations table.
+	// Every SELECT/UPDATE includes a user_id predicate so the row always
+	// belongs to the bound Scope. Parameters use sqlc named params (@name).
+	InsertPendingConfirmation(ctx context.Context, arg InsertPendingConfirmationParams) (PendingConfirmation, error)
 	// Scoped queries for the user_data exemplar table.
 	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
 	// comes from and is limited to the bound Scope. This pattern is the template
@@ -60,18 +76,42 @@ type Querier interface {
 	// Parameters use sqlc named params (@name) per the house convention; the
 	// generated Params structs carry typed fields (ID, UserID, Value).
 	InsertUserData(ctx context.Context, arg InsertUserDataParams) error
+	// scopeguard:allow-unscoped: SYSTEM-HOUSEKEEPING cross-user sweep. The scheduler
+	// calls SweepExpiredConfirmations across all users by TTL cutoff, so no single
+	// user_id predicate is applicable. Each returned row carries its own user_id so
+	// the caller can scope per-row operations (abandon message, emit per-user event).
+	ListLapsedConfirmations(ctx context.Context, now string) ([]PendingConfirmation, error)
+	ListMessages(ctx context.Context, arg ListMessagesParams) ([]ListMessagesRow, error)
 	// List all settings whose key starts with @prefix, ordered by key. The caller
 	// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
 	// those escapes literal, so a prefix containing '_' or '%' matches literally
 	// rather than as a wildcard.
 	ListSettingsByPrefix(ctx context.Context, prefix sql.NullString) ([]Setting, error)
 	ListUserData(ctx context.Context, userID string) ([]UserDatum, error)
+	// Atomic CAS: transitions a pending row to expired only when still pending.
+	// Used by both the lazy check (user-scoped, includes user_id) and the sweep
+	// (system-scope, but calls this per-row with the row's user_id from ListLapsedConfirmations).
+	MarkConfirmationExpired(ctx context.Context, arg MarkConfirmationExpiredParams) (int64, error)
+	MarkMessageAbandoned(ctx context.Context, arg MarkMessageAbandonedParams) (int64, error)
 	// scopeguard:allow-unscoped: system housekeeping; the scheduler purges across all users by
 	// TTL cutoffs (idle and absolute), so there is no meaningful user context available and a
 	// user_id predicate would prevent cross-user expiry from working.
 	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
+	TouchConversation(ctx context.Context, arg TouchConversationParams) error
+	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)
+	// Queries for the conversations table.
+	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
+	// belongs to the bound Scope. Parameters use sqlc named params (@name).
+	// Insert-if-new only. The store wrapper (conversations.go) enforces ownership by
+	// calling GetConversation immediately after: if the INSERT no-opped because the id
+	// belongs to another user, GetConversation (user-scoped) returns sql.ErrNoRows,
+	// which is mapped to ErrConversationNotOwned. When the caller re-posts to their
+	// own conversation, GetConversation finds the row and TouchConversation bumps
+	// updated_at. This three-step protocol is safe because the write pool is capped at
+	// one connection, serialising all writes and eliminating TOCTOU races.
+	UpsertConversation(ctx context.Context, arg UpsertConversationParams) error
 	// Upsert a setting by key.  Inserts a new row or replaces value and
 	// updated_at when the key already exists.
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error

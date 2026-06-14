@@ -17,6 +17,7 @@ import (
 	"github.com/qovira/qovira/internal/capability"
 	"github.com/qovira/qovira/internal/config"
 	"github.com/qovira/qovira/internal/events"
+	"github.com/qovira/qovira/internal/harness"
 	"github.com/qovira/qovira/internal/httpx"
 	"github.com/qovira/qovira/internal/store"
 )
@@ -76,7 +77,7 @@ func TestNew_FailFast_EmptyKey(t *testing.T) {
 		AutoMigrate: false,
 	}
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err == nil {
 		t.Fatal("app.New returned nil error for empty MasterKey; want non-nil")
 	}
@@ -93,7 +94,7 @@ func TestNew_Success_AutoMigrateTrue(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New: unexpected error: %v", err)
 	}
@@ -116,7 +117,7 @@ func TestNew_Healthz_Returns200AndVersion(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, wantVersion)
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, wantVersion, harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestNew_ProtectedRoute_NoToken_Returns401(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestNew_ProtectedRoute_WithBearerToken_Returns401(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, false)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestRun_GracefulShutdown(t *testing.T) {
 	cfg := testConfig(t, dir, false)
 	cfg.HTTPAddr = "127.0.0.1:0"
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -279,7 +280,7 @@ func TestNew_ModuleSeam_RouteAndAuth(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, false)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", fakeModuleCtor)
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{}, fakeModuleCtor)
 	if err != nil {
 		t.Fatalf("app.New with fakeModule: %v", err)
 	}
@@ -346,7 +347,7 @@ func TestNew_AutoMigrate_True(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New(AutoMigrate=true): %v", err)
 	}
@@ -368,7 +369,7 @@ func TestNew_AutoMigrate_False(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, false)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New(AutoMigrate=false): %v", err)
 	}
@@ -389,7 +390,7 @@ func TestNew_AutoMigrate_ReaderSeesSchema(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, true)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
@@ -408,7 +409,7 @@ func TestNew_DBPath(t *testing.T) {
 	dir := t.TempDir()
 	cfg := testConfig(t, dir, false)
 
-	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{})
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}

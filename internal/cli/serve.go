@@ -10,6 +10,7 @@ import (
 	"github.com/qovira/qovira/internal/app"
 	"github.com/qovira/qovira/internal/auth"
 	"github.com/qovira/qovira/internal/config"
+	"github.com/qovira/qovira/internal/harness"
 	"github.com/qovira/qovira/internal/httpx"
 	"github.com/qovira/qovira/internal/logging"
 	"github.com/qovira/qovira/internal/store"
@@ -48,7 +49,7 @@ func newServeCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			a, err := app.New(ctx, cfg, logger, newValidator, version, authCtor)
+			a, err := app.New(ctx, cfg, logger, newValidator, version, harness.Config{}, authCtor)
 			if err != nil {
 				return err
 			}
