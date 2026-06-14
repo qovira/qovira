@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/oklog/ulid/v2 v2.1.1
-	github.com/omnilium/go-sqlcipher v0.1.0
+	github.com/omnilium/go-sqlcipher v0.3.0
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.53.0

@@ -67,8 +67,8 @@ github.com/ncruces/julianday v1.0.0 h1:fH0OKwa7NWvniGQtxdJRxAgkBMolni2BjDHaWTxqt
 github.com/ncruces/julianday v1.0.0/go.mod h1:Dusn2KvZrrovOMJuOt0TNXL6tB7U2E8kvza5fFc9G7g=
 github.com/oklog/ulid/v2 v2.1.1 h1:suPZ4ARWLOJLegGFiZZ1dFAkqzhMjL3J1TzI+5wHz8s=
 github.com/oklog/ulid/v2 v2.1.1/go.mod h1:rcEKHmBBKfef9DhnvX7y1HZBYxjXb0cP5ExxNsTT1QQ=
-github.com/omnilium/go-sqlcipher v0.1.0 h1:4yPlGdfZiu/iFPkxFyoQidjujyPB9pjEb1B8o9Wza84=
-github.com/omnilium/go-sqlcipher v0.1.0/go.mod h1:zIFpuv0hRdQHwa5jdEbIOpozrSL2UhrXJloHZV9OiCc=
+github.com/omnilium/go-sqlcipher v0.3.0 h1:MxB7ZvviI+Ui8iY7zmpHKNXjwulXxPIl5o2j9LeLMxk=
+github.com/omnilium/go-sqlcipher v0.3.0/go.mod h1:zIFpuv0hRdQHwa5jdEbIOpozrSL2UhrXJloHZV9OiCc=
 github.com/pborman/getopt v0.0.0-20170112200414-7148bc3a4c30/go.mod h1:85jBQOZwpVEaDAr341tbn15RS4fCAsIst0qp7i8ex1o=
 github.com/pganalyze/pg_query_go/v6 v6.2.2 h1:O0L6zMC226R82RF3X5n0Ki6HjytDsoAzuzp4ATVAHNo=
 github.com/pganalyze/pg_query_go/v6 v6.2.2/go.mod h1:Cn6+j4870kJz3iYNsb0VsNG04vpSWgEvBwc590J4qD0=
