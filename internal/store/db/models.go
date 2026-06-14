@@ -33,6 +33,19 @@ type Message struct {
 	CreatedAt      string
 }
 
+type PendingConfirmation struct {
+	ID             string
+	ConversationID string
+	MessageID      string
+	UserID         string
+	ToolName       string
+	Args           string
+	Risk           string
+	Status         string
+	CreatedAt      string
+	ExpiresAt      string
+}
+
 type Session struct {
 	ID         string
 	UserID     string

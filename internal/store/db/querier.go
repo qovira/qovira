@@ -38,6 +38,7 @@ type Querier interface {
 	DeleteUserData(ctx context.Context, arg DeleteUserDataParams) error
 	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
 	GetInstance(ctx context.Context) (Instance, error)
+	GetPendingConfirmation(ctx context.Context, arg GetPendingConfirmationParams) (PendingConfirmation, error)
 	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
 	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
 	// predicate is possible or meaningful at this lookup stage.
@@ -56,6 +57,10 @@ type Querier interface {
 	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
 	// belongs to the bound Scope. Parameters use sqlc named params (@name).
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
+	// Queries for the pending_confirmations table.
+	// Every SELECT/UPDATE includes a user_id predicate so the row always
+	// belongs to the bound Scope. Parameters use sqlc named params (@name).
+	InsertPendingConfirmation(ctx context.Context, arg InsertPendingConfirmationParams) (PendingConfirmation, error)
 	// Scoped queries for the user_data exemplar table.
 	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
 	// comes from and is limited to the bound Scope. This pattern is the template
@@ -66,6 +71,7 @@ type Querier interface {
 	// generated Params structs carry typed fields (ID, UserID, Value).
 	InsertUserData(ctx context.Context, arg InsertUserDataParams) error
 	ListMessages(ctx context.Context, arg ListMessagesParams) ([]Message, error)
+	ListPendingConfirmationsByConversation(ctx context.Context, arg ListPendingConfirmationsByConversationParams) ([]PendingConfirmation, error)
 	// List all settings whose key starts with @prefix, ordered by key. The caller
 	// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
 	// those escapes literal, so a prefix containing '_' or '%' matches literally
@@ -77,6 +83,7 @@ type Querier interface {
 	// user_id predicate would prevent cross-user expiry from working.
 	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
+	UpdatePendingConfirmationStatus(ctx context.Context, arg UpdatePendingConfirmationStatusParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)
 	// Queries for the conversations table.
