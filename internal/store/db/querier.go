@@ -10,6 +10,13 @@ import (
 )
 
 type Querier interface {
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler self-reschedules a
+	// recurring job after its handler succeeds: resets status to 'pending', sets run_at
+	// to the next occurrence, clears locked_at, and resets attempt to 0. Only updates
+	// rows with status = 'running' (the job the scheduler just leased) to guard against
+	// a future double-processor. A 0-row result (e.g. the row was deleted by Cancel) is
+	// harmless and silently tolerated by the caller.
+	AdvanceRecurringJob(ctx context.Context, arg AdvanceRecurringJobParams) (int64, error)
 	BumpSessionLastUsedByID(ctx context.Context, arg BumpSessionLastUsedByIDParams) (int64, error)
 	// Returns the count of pending_confirmations rows for a given assistant message
 	// that are NOT in 'expired' status (i.e. 'pending', 'approved', or 'denied').

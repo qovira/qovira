@@ -29,6 +29,8 @@ import (
 	"sync"
 	"time"
 
+	rrule "github.com/teambition/rrule-go"
+
 	"github.com/qovira/qovira/internal/events"
 	"github.com/qovira/qovira/internal/id"
 	"github.com/qovira/qovira/internal/store"
@@ -79,18 +81,34 @@ type EnqueueRequest struct {
 	// ON CONFLICT(key) DO NOTHING, and the second Enqueue returns the existing id
 	// without creating a new row. Leave empty for fire-and-forget jobs.
 	Key string
-	// Recurrence is accepted but one-shot here; recurrence behavior is a later slice.
+	// Recurrence controls how the job repeats after a successful execution. When
+	// nil or zero-valued the job is one-shot (deleted on success). See the
+	// Recurrence type for field semantics and the "exactly one of" constraint.
 	Recurrence *Recurrence
 }
 
-// Recurrence is a placeholder for future recurring job support. Fields are
-// accepted but not persisted or acted on in this slice.
+// Recurrence controls how a job repeats after a successful execution (or after
+// exhausting MaxAttempts without a Permanent error). Exactly one of (RRULE+TZ) or
+// Every must be specified; both and neither are both accepted as "one-shot".
+//
+//   - RRULE+TZ: wall-clock recurrence (iCalendar RFC 5545 RRULE string + IANA
+//     timezone). "Every day at 8am America/New_York" stays at 8am local time
+//     across DST boundaries. The next instant is computed in the stored TZ and
+//     persisted back as UTC.
+//   - Every: interval-based recurrence (e.g. 6*time.Hour for "every 6h"). Phase
+//     drift is acceptable for housekeeping jobs; next = now + Every.
+//
+// Both RRULE+TZ and Every set simultaneously is invalid and Enqueue returns an
+// error. RRULE without TZ is also invalid (a wall-clock rule needs a timezone to
+// resolve DST). If the RRULE is finite (COUNT/UNTIL exhausted and no further
+// occurrence), the series is completed: the row is deleted and the completion is
+// logged.
 type Recurrence struct {
-	// RRULE is an iCalendar RRULE string (e.g. "FREQ=DAILY;COUNT=10").
+	// RRULE is an iCalendar RRULE string (e.g. "FREQ=DAILY").
 	RRULE string
-	// TZ is the timezone name for the recurrence (e.g. "America/New_York").
+	// TZ is the IANA timezone for the recurrence (e.g. "America/New_York").
 	TZ string
-	// Every is the interval in seconds between recurrences (alternative to RRULE).
+	// Every is the interval between recurrences (alternative to RRULE).
 	Every time.Duration
 }
 
@@ -208,9 +226,17 @@ func (s *Scheduler) Register(kind string, h Handler) {
 // idempotent: a second Enqueue with the same Key returns the existing id without
 // creating a new row.
 //
-// The Recurrence field is accepted but one-shot here; recurrence columns are
-// stored as NULL until the recurrence slice is implemented.
+// When req.Recurrence is non-nil, the recurrence columns (rrule, tz,
+// interval_secs) are persisted. Enqueue validates the "exactly one of"
+// constraint: specifying both (RRULE+TZ) and Every is an error, as is RRULE
+// without TZ. Both empty (or nil Recurrence) is one-shot.
 func (s *Scheduler) Enqueue(ctx context.Context, req EnqueueRequest) (string, error) {
+	// Validate and derive recurrence columns before any DB work.
+	rruleCol, tzCol, intervalSecsCol, err := buildRecurrenceColumns(req.Recurrence)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: enqueue: %w", err)
+	}
+
 	runAt := req.RunAt
 	if runAt.IsZero() {
 		runAt = s.now()
@@ -243,13 +269,16 @@ func (s *Scheduler) Enqueue(ctx context.Context, req EnqueueRequest) (string, er
 	// constraint can match (NULL != NULL in SQL), so every fire-and-forget job is inserted.
 	//
 	// sqlc cannot model the ON CONFLICT(col) DO NOTHING upsert clause for SQLite, so this
-	// uses raw SQL on the single-connection write pool (inherently serialised).
+	// uses raw SQL on the single-connection write pool (inherently serialised). Recurrence
+	// columns (rrule, tz, interval_secs) are included; NULL for one-shot jobs.
 	const insertSQL = `
-INSERT OR IGNORE INTO jobs (id, key, kind, payload, user_id, status, run_at, attempt, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)`
+INSERT OR IGNORE INTO jobs (id, key, kind, payload, user_id, status, run_at, attempt, rrule, tz, interval_secs, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, ?)`
 
 	res, err := s.st.Writer().ExecContext(ctx, insertSQL,
-		jobID, key, req.Kind, string(payload), userID, runAtStr, nowStr, nowStr,
+		jobID, key, req.Kind, string(payload), userID, runAtStr,
+		rruleCol, tzCol, intervalSecsCol,
+		nowStr, nowStr,
 	)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: enqueue insert: %w", err)
@@ -275,6 +304,42 @@ VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)`
 	}
 
 	return jobID, nil
+}
+
+// buildRecurrenceColumns validates the Recurrence and returns the (rrule, tz,
+// interval_secs) column values to persist. Returns NULL NullStrings/NullInt64
+// for a one-shot job (nil or zero Recurrence). Returns an error if both kinds
+// are specified, or if RRULE is set without TZ.
+func buildRecurrenceColumns(r *Recurrence) (rruleCol, tzCol sql.NullString, intervalCol sql.NullInt64, err error) {
+	if r == nil {
+		return // all NULL — one-shot
+	}
+
+	hasRRule := r.RRULE != ""
+	hasEvery := r.Every > 0
+
+	if hasRRule && hasEvery {
+		err = fmt.Errorf("recurrence: cannot specify both RRULE+TZ and Every; choose one")
+		return
+	}
+	if hasRRule && r.TZ == "" {
+		err = fmt.Errorf("recurrence: RRULE requires TZ (an IANA timezone name)")
+		return
+	}
+
+	if hasRRule {
+		rruleCol = sql.NullString{String: r.RRULE, Valid: true}
+		tzCol = sql.NullString{String: r.TZ, Valid: true}
+		return
+	}
+
+	if hasEvery {
+		intervalCol = sql.NullInt64{Int64: int64(r.Every.Seconds()), Valid: true}
+		return
+	}
+
+	// Neither set — one-shot (all NULL).
+	return
 }
 
 // Start begins the poll→claim→execute loop. It is safe to call Start only once;
@@ -370,19 +435,84 @@ func (s *Scheduler) pollLoop(ctx context.Context) {
 	}
 }
 
-// claimedRow is the minimal projection returned by the atomic claim query.
+// claimedRow is the minimal projection returned by the atomic claim query. It
+// includes the recurrence columns (rrule, tz, interval_secs) and the current
+// run_at so the success and exhaustion paths can compute the next occurrence.
 type claimedRow struct {
-	id      string
-	kind    string
-	payload string
-	userID  sql.NullString
-	attempt int64
+	id           string
+	kind         string
+	payload      string
+	userID       sql.NullString
+	attempt      int64
+	runAt        string         // RFC3339 UTC — the occurrence that just fired
+	rrule        sql.NullString // RRULE string for wall-clock recurrence
+	tz           sql.NullString // IANA timezone for the RRULE
+	intervalSecs sql.NullInt64  // seconds between occurrences for interval-based recurrence
+}
+
+// isRecurring reports whether the row carries a recurrence specification.
+func (r claimedRow) isRecurring() bool {
+	return r.rrule.Valid || r.intervalSecs.Valid
+}
+
+// nextRunAt computes the next occurrence for a recurring job. The returned bool
+// is false when the RRULE is finite and has no further occurrence (series complete
+// — caller should delete the row). Interval recurrence always returns true.
+//
+// For RRULE recurrence: the rule is re-anchored at the current (just-fired)
+// run_at converted into the stored TZ. This preserves the wall-clock phase (e.g.
+// always 8am local) and avoids drift. The next occurrence is the first instant
+// strictly after now (not after run_at), which makes downtime catch-up correct:
+// missed occurrences are skipped and the series jumps to the next future instant.
+//
+// For interval recurrence: next = now + interval. Phase drift is fine for
+// housekeeping jobs.
+func (r claimedRow) nextRunAt(now time.Time) (time.Time, bool, error) {
+	if r.intervalSecs.Valid {
+		interval := time.Duration(r.intervalSecs.Int64) * time.Second
+		return now.Add(interval), true, nil
+	}
+
+	// RRULE path.
+	loc, err := time.LoadLocation(r.tz.String)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("load tz %q: %w", r.tz.String, err)
+	}
+
+	// Parse the current (on-phase) run_at and convert to the stored TZ so that
+	// the Dtstart anchor preserves the wall-clock time-of-day (e.g. always 8am).
+	current, err := time.Parse(time.RFC3339, r.runAt)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse run_at %q: %w", r.runAt, err)
+	}
+	anchor := current.In(loc)
+
+	// Parse the RRULE string into an ROption, overriding Dtstart with the anchor.
+	// StrToROptionInLocation respects the stored location for any embedded DTSTART.
+	ropt, err := rrule.StrToROptionInLocation(r.rrule.String, loc)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse rrule %q: %w", r.rrule.String, err)
+	}
+	ropt.Dtstart = anchor
+
+	rule, err := rrule.NewRRule(*ropt)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("build rrule %q: %w", r.rrule.String, err)
+	}
+
+	next := rule.After(now, false) // strictly after now — skips missed backlog
+	if next.IsZero() {
+		// Finite RRULE (COUNT/UNTIL) exhausted — series complete.
+		return time.Time{}, false, nil
+	}
+	return next, true, nil
 }
 
 // claimSQL is the atomic UPDATE...WHERE id IN (SELECT...LIMIT)...RETURNING statement.
 // sqlc cannot model this compound shape (UPDATE...WHERE...IN(SELECT...LIMIT)...RETURNING),
 // so it is executed as raw SQL on the single-connection write pool, which serialises all
-// claims automatically.
+// claims automatically. The RETURNING clause now includes recurrence columns and run_at
+// so the success/exhaustion paths can compute the next occurrence without a second query.
 const claimSQL = `
 UPDATE jobs
 SET status = 'running', locked_at = ?, attempt = attempt + 1, updated_at = ?
@@ -392,7 +522,7 @@ WHERE id IN (
     ORDER BY run_at
     LIMIT ?
 )
-RETURNING id, kind, payload, user_id, attempt`
+RETURNING id, kind, payload, user_id, attempt, run_at, rrule, tz, interval_secs`
 
 // tick executes one reclaim-then-claim-and-dispatch cycle.
 func (s *Scheduler) tick(ctx context.Context) {
@@ -426,7 +556,10 @@ func (s *Scheduler) tick(ctx context.Context) {
 	var claimed []claimedRow
 	for rows.Next() {
 		var r claimedRow
-		if err := rows.Scan(&r.id, &r.kind, &r.payload, &r.userID, &r.attempt); err != nil {
+		if err := rows.Scan(
+			&r.id, &r.kind, &r.payload, &r.userID, &r.attempt,
+			&r.runAt, &r.rrule, &r.tz, &r.intervalSecs,
+		); err != nil {
 			s.logger.Error("scheduler: scan claimed row", "err", err)
 			continue
 		}
@@ -479,8 +612,10 @@ func (s *Scheduler) reclaim(ctx context.Context) {
 
 // dispatch runs the handler for one claimed job row. It resolves scope, builds
 // the Job struct, calls the handler under a JobTimeout-bounded context, and on
-// success deletes the row. On failure it either re-arms the row with jittered
-// backoff (transient) or dead-letters it (MaxAttempts reached or Permanent error).
+// success deletes the row (one-shot) or advances/ends the series (recurring job:
+// self-reschedules to the next occurrence, or deletes if the RRULE is exhausted,
+// or dead-letters on a compute error). On failure it either re-arms the row with
+// jittered backoff (transient) or dead-letters it (MaxAttempts reached or Permanent error).
 func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 	// Resolve scope from stored user_id.
 	var scope store.Scope
@@ -505,6 +640,11 @@ func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 	// Normal dead-lettering via handleFailure sets attempt == MaxAttempts at failure;
 	// this guard only fires at MaxAttempts+1 or beyond, so it does not interfere with
 	// normal retries (which never reach MaxAttempts+1).
+	//
+	// Deliberate: this terminates even recurring jobs (no series advance). A job that
+	// crash-loops the process past MaxAttempts+1 is catastrophic; ending it is safer
+	// than advancing it forever. This is intentionally distinct from the normal
+	// exhaustion-advances-series rule in handleFailure.
 	if int(r.attempt) > s.cfg.MaxAttempts {
 		s.deadLetter(r, scope, int(r.attempt),
 			fmt.Errorf("exceeded max attempts after repeated reclaim"))
@@ -556,7 +696,13 @@ func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 		return
 	}
 
-	// One-shot: handler succeeded -- delete the row.
+	// Handler succeeded.
+	if r.isRecurring() {
+		s.advanceRecurring(r)
+		return
+	}
+
+	// One-shot: delete the row.
 	delCtx, delCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer delCancel()
 	if err := db.New(s.st.Writer()).DeleteJob(delCtx, r.id); err != nil {
@@ -565,12 +711,74 @@ func (s *Scheduler) dispatch(ctx context.Context, r claimedRow) {
 	}
 }
 
-// handleFailure implements the retry/dead-letter decision for a failed one-shot job.
+// advanceRecurring computes the next occurrence for a recurring job that just
+// succeeded and updates the row in place (status=pending, run_at=next, attempt=0,
+// locked_at=NULL). Two distinct outcomes are handled:
+//   - Compute error (bad TZ / unparseable RRULE / unparseable run_at): the row is
+//     dead-lettered (status=failed, last_error set, job.failed emitted). Deleting the
+//     row on a compute error would silently destroy it; leaving it running would cause
+//     the stale-lease reclaim sweep to re-run the handler side-effect every LeaseTimeout.
+//     Dead-lettering stops the series terminally while preserving the row for inspection.
+//   - Finite RRULE genuinely exhausted (err == nil && !hasNext): the row is deleted
+//     (series complete) and the completion is logged.
+func (s *Scheduler) advanceRecurring(r claimedRow) {
+	// Resolve scope for the dead-letter path (matches how dispatch builds it).
+	var scope store.Scope
+	if r.userID.Valid && r.userID.String != "" {
+		scope = store.UserScope(store.Principal{UserID: r.userID.String})
+	} else {
+		scope = store.SystemScope()
+	}
+
+	now := s.now()
+	next, hasNext, err := r.nextRunAt(now)
+	if err != nil {
+		// Compute error: unrecoverable misconfiguration (bad TZ / unparseable RRULE).
+		// Dead-letter the row so the series stops cleanly and the error is recorded.
+		s.logger.Error("scheduler: recurring job: compute error advancing series; dead-lettering row",
+			"id", r.id, "kind", r.kind, "err", err)
+		s.deadLetter(r, scope, int(r.attempt), fmt.Errorf("recurring advance compute error: %w", err))
+		return
+	}
+
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer writeCancel()
+
+	if !hasNext {
+		// Finite RRULE exhausted (COUNT/UNTIL) — delete the row (series complete).
+		s.logger.Info("scheduler: recurring job series complete (RRULE COUNT/UNTIL exhausted); deleting row",
+			"id", r.id, "kind", r.kind)
+		if err := db.New(s.st.Writer()).DeleteJob(writeCtx, r.id); err != nil {
+			s.logger.Error("scheduler: delete series-complete recurring job row",
+				"id", r.id, "kind", r.kind, "err", err)
+		}
+		return
+	}
+
+	nowStr := now.UTC().Format(time.RFC3339)
+	nextStr := next.UTC().Format(time.RFC3339)
+
+	if _, err := db.New(s.st.Writer()).AdvanceRecurringJob(writeCtx, db.AdvanceRecurringJobParams{
+		RunAt:     nextStr,
+		UpdatedAt: nowStr,
+		ID:        r.id,
+	}); err != nil {
+		s.logger.Error("scheduler: advance recurring job failed",
+			"id", r.id, "kind", r.kind, "nextRunAt", nextStr, "err", err)
+	}
+}
+
+// handleFailure implements the retry/dead-letter decision for a failed job.
 //
 // Decision logic:
-//   - Permanent error or attempt >= MaxAttempts → dead-letter (status=failed, row kept).
+//   - Permanent error → dead-letter unconditionally (status=failed, row kept for
+//     one-shot; series ends for recurring — no advance).
+//   - attempt >= MaxAttempts AND recurring (non-Permanent) → emit job.failed, then
+//     advance the series to the next occurrence (attempt reset to 0, status=pending).
+//     The series survives exhaustion; only Permanent ends it.
+//   - attempt >= MaxAttempts AND one-shot (non-Permanent) → dead-letter (status=failed).
 //   - context.Canceled or context.DeadlineExceeded (JobTimeout) → transient retry.
-//   - Any other error → transient retry if attempt < MaxAttempts, else dead-letter.
+//   - Any other error below MaxAttempts → transient retry with backoff (same occurrence).
 func (s *Scheduler) handleFailure(r claimedRow, scope store.Scope, handlerErr error) {
 	attempt := int(r.attempt)
 
@@ -578,15 +786,25 @@ func (s *Scheduler) handleFailure(r claimedRow, scope store.Scope, handlerErr er
 	var permErr *permanentError
 	isPermanent := errors.As(handlerErr, &permErr)
 
-	// Determine whether to dead-letter.
-	deadLetter := isPermanent || attempt >= s.cfg.MaxAttempts
-
-	if deadLetter {
+	if isPermanent {
+		// Permanent errors always dead-letter, both one-shot and recurring.
 		s.deadLetter(r, scope, attempt, handlerErr)
 		return
 	}
 
-	// Transient failure: log (unless it's a context cancellation) and re-arm.
+	if attempt >= s.cfg.MaxAttempts {
+		if r.isRecurring() {
+			// Recurring exhaustion: emit job.failed but advance the series instead of
+			// dead-lettering. The series survives; only Permanent ends it terminally.
+			s.exhaustRecurring(r, scope, attempt, handlerErr)
+		} else {
+			// One-shot exhaustion: dead-letter terminally.
+			s.deadLetter(r, scope, attempt, handlerErr)
+		}
+		return
+	}
+
+	// Transient failure below MaxAttempts: log (unless it's a context cancellation) and re-arm.
 	if !errors.Is(handlerErr, context.Canceled) && !errors.Is(handlerErr, context.DeadlineExceeded) {
 		s.logger.Error("scheduler: handler failed; will retry",
 			"id", r.id, "kind", r.kind, "attempt", attempt,
@@ -612,6 +830,33 @@ func (s *Scheduler) handleFailure(r claimedRow, scope store.Scope, handlerErr er
 		s.logger.Error("scheduler: retry job update failed",
 			"id", r.id, "kind", r.kind, "attempt", attempt, "err", err)
 	}
+}
+
+// exhaustRecurring handles the case where a recurring job exhausts MaxAttempts
+// without a Permanent error. It emits job.failed (same as dead-lettering) to
+// surface the failure, then advances the series to the next occurrence so the
+// series survives. This is distinct from Permanent errors, which end the series.
+func (s *Scheduler) exhaustRecurring(r claimedRow, scope store.Scope, attempt int, handlerErr error) {
+	errStr := handlerErr.Error()
+
+	s.logger.Error("scheduler: recurring job exhausted MaxAttempts; emitting job.failed and advancing series",
+		"id", r.id, "kind", r.kind, "attempt", attempt, "err", handlerErr)
+
+	// Publish job.failed on the owning user's bus (same as deadLetter — visibility).
+	if !scope.IsSystem() && scope.UserID() != "" {
+		s.bus.Publish(scope.UserID(), events.Event{
+			Type: jobFailedEventType,
+			Data: JobFailedEvent{
+				JobID:     r.id,
+				Kind:      r.kind,
+				Attempt:   attempt,
+				LastError: errStr,
+			},
+		})
+	}
+
+	// Advance the series (like advanceRecurring on success).
+	s.advanceRecurring(r)
 }
 
 // deadLetter marks the job as permanently failed (status=failed, last_error set, row kept)

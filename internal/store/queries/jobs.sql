@@ -56,6 +56,17 @@ WHERE id = @id AND status = 'running';
 UPDATE jobs SET status = 'failed', last_error = @last_error, locked_at = NULL, updated_at = @updated_at
 WHERE id = @id AND status = 'running';
 
+-- name: AdvanceRecurringJob :execrows
+-- scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler self-reschedules a
+-- recurring job after its handler succeeds: resets status to 'pending', sets run_at
+-- to the next occurrence, clears locked_at, and resets attempt to 0. Only updates
+-- rows with status = 'running' (the job the scheduler just leased) to guard against
+-- a future double-processor. A 0-row result (e.g. the row was deleted by Cancel) is
+-- harmless and silently tolerated by the caller.
+UPDATE jobs
+SET status = 'pending', run_at = @run_at, locked_at = NULL, attempt = 0, updated_at = @updated_at
+WHERE id = @id AND status = 'running';
+
 -- name: ReclaimStaleJobs :execrows
 -- scopeguard:allow-unscoped: SYSTEM ENGINE -- cross-user reclaim sweep. The scheduler reclaims
 -- running rows whose locked_at is older than the lease threshold, returning them to pending so

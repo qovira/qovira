@@ -10,6 +10,32 @@ import (
 	"database/sql"
 )
 
+const advanceRecurringJob = `-- name: AdvanceRecurringJob :execrows
+UPDATE jobs
+SET status = 'pending', run_at = ?1, locked_at = NULL, attempt = 0, updated_at = ?2
+WHERE id = ?3 AND status = 'running'
+`
+
+type AdvanceRecurringJobParams struct {
+	RunAt     string
+	UpdatedAt string
+	ID        string
+}
+
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler self-reschedules a
+// recurring job after its handler succeeds: resets status to 'pending', sets run_at
+// to the next occurrence, clears locked_at, and resets attempt to 0. Only updates
+// rows with status = 'running' (the job the scheduler just leased) to guard against
+// a future double-processor. A 0-row result (e.g. the row was deleted by Cancel) is
+// harmless and silently tolerated by the caller.
+func (q *Queries) AdvanceRecurringJob(ctx context.Context, arg AdvanceRecurringJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, advanceRecurringJob, arg.RunAt, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deadLetterJob = `-- name: DeadLetterJob :execrows
 UPDATE jobs SET status = 'failed', last_error = ?1, locked_at = NULL, updated_at = ?2
 WHERE id = ?3 AND status = 'running'
