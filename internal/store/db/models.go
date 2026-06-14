@@ -31,6 +31,7 @@ type Message struct {
 	ToolCallID     sql.NullString
 	FinishReason   sql.NullString
 	CreatedAt      string
+	Abandoned      int64
 }
 
 type PendingConfirmation struct {

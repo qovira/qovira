@@ -131,6 +131,18 @@ type ToolCompletedPayload struct {
 	Result any    `json:"result"`
 }
 
+// ConfirmationExpiredPayload is the Data for a "confirmation.expired" event,
+// emitted when a pending confirmation lapses past its ExpiresAt deadline. It is
+// emitted on BOTH the lazy-check path (in Resolve) and the sweep path (in
+// SweepExpiredConfirmations) so the UI chip can update immediately. Whether a
+// model round fires depends on the case: fully-stale (all siblings expired) →
+// no round, message abandoned; mixed (some sibling approved/denied) → run re-enters
+// for the continue round so approved actions are narrated.
+type ConfirmationExpiredPayload struct {
+	// CallID is the gateway tool call ID that was waiting for confirmation.
+	CallID string `json:"callId"`
+}
+
 // ToolFailedPayload is the Data for a "tool.failed" event, emitted when a tool
 // call returns a *capability.ToolError (a model-visible, self-correctable error).
 // Error carries only the model-safe ToolError.Message — no internal detail.
@@ -873,9 +885,19 @@ func (h *Harness) processToolCalls(
 					}
 					doneIDs[c.ID] = true
 
+				case "expired":
+					// Persist a synthetic "expired" tool-result so the call is "done"
+					// from the model's perspective (the OpenAI message sequence requires
+					// a tool-result for every tool_call ID). outstandingToolCalls keys off
+					// per-call tool-results; this synthetic result will appear in resultIDs
+					// on the next iteration, keeping pending siblings correctly outstanding.
+					if persistErr := h.persistExpiredResult(ctx, sq, conv, c.ID); persistErr != nil {
+						return false, fmt.Errorf("harness: persist expired result for call %q: %w", c.ID, persistErr)
+					}
+					doneIDs[c.ID] = true
+
 				default:
-					// Unknown/expired status: do not execute. Treat as still-pending
-					// (expiry enforcement is a future slice).
+					// Unknown status: do not execute. Treat as still-pending.
 					allHandled = false
 				}
 			}
@@ -918,15 +940,33 @@ func outstandingToolCalls(ctx context.Context, sq *store.ScopedQueries, conv str
 	}
 
 	// Find the last assistant message that has tool_calls.
+	// Abandoned messages (Abandoned != 0) are only inert when ALL of their
+	// confirm rows have been expired — i.e., when the message was abandoned by
+	// the fully-stale path. In the mixed case (some approved/denied, others
+	// expired), the message is NOT abandoned and siblings may still be pending.
+	// We key off per-call tool-results, not the message-level abandoned flag, so
+	// that an expired call's synthetic result marks it "done" while pending
+	// siblings remain outstanding.
 	for _, m := range slices.Backward(msgs) {
 		if m.Role != "assistant" || !m.ToolCalls.Valid || m.ToolCalls.String == "" {
 			continue
+		}
+		// A message-level abandoned flag means every confirm row for this message
+		// expired (fully-stale case). isTurnComplete treats this as terminal —
+		// do not re-enter run for it. If outstandingToolCalls were to return
+		// outstanding calls here, the caller would try to re-process them, which
+		// is wrong because they will all show status="expired" (and have synthetic
+		// tool-results) or the message would not have been abandoned.
+		if m.Abandoned != 0 {
+			return nil, "", nil
 		}
 		var tcs []gateway.ToolCall
 		if jsonErr := json.Unmarshal([]byte(m.ToolCalls.String), &tcs); jsonErr != nil {
 			return nil, "", fmt.Errorf("unmarshal tool_calls for message %s: %w", m.ID, jsonErr)
 		}
-		// Collect the outstanding (unresolved) calls.
+		// Collect calls that do NOT yet have a persisted tool-result. An expired
+		// call's synthetic tool-result is in resultIDs, so it is treated as "done"
+		// here — its sibling pending calls remain outstanding as expected.
 		var outstanding []*gateway.ToolCall
 		for j := range tcs {
 			if !resultIDs[tcs[j].ID] {
@@ -935,7 +975,7 @@ func outstandingToolCalls(ctx context.Context, sq *store.ScopedQueries, conv str
 			}
 		}
 		if len(outstanding) == 0 {
-			// This assistant message's calls are all done — not a suspended state.
+			// All calls for this assistant message have results — not a suspended state.
 			return nil, "", nil
 		}
 		return outstanding, m.ID, nil
@@ -968,6 +1008,11 @@ func isTurnComplete(ctx context.Context, sq *store.ScopedQueries, conv string) (
 	last := msgs[len(msgs)-1]
 	if last.Role != "assistant" {
 		return false, nil
+	}
+	// An abandoned assistant message is terminal: expiry ended the turn without a
+	// model round. Treat the conversation as complete so run never re-enters.
+	if last.Abandoned != 0 {
+		return true, nil
 	}
 	// An assistant message with tool_calls is not yet complete — tool results are
 	// still outstanding (the resume path above handles this before we reach here,
@@ -1153,6 +1198,77 @@ func (h *Harness) persistDeclinedResult(
 	return h.persistToolError(ctx, sq, conv, userID, callID, toolErr)
 }
 
+// marshalExpiredResultJSON returns the canonical JSON payload for a synthetic
+// expired tool-result. The payload is model-safe: {"error":"…","code":"confirmation_expired"}.
+// It is extracted here so both the lazy (persistExpiredResult) and sweep
+// (persistExpiredResultByUserID) paths share a single source of truth — previously
+// duplicating the const and json.Marshal call in two places let the bug hide.
+func marshalExpiredResultJSON(callID string) (string, error) {
+	const expiredMsg = "This confirmation expired; the action was not performed."
+	b, err := json.Marshal(map[string]string{
+		"error": expiredMsg,
+		"code":  "confirmation_expired",
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal expired result for call %s: %w", callID, err)
+	}
+	return string(b), nil
+}
+
+// persistExpiredResult persists a synthetic model-visible tool-result message for an
+// expired confirmation. The content signals to the model that the action was not
+// performed due to expiry. This keeps the OpenAI message sequence valid: a tool-result
+// is required for every tool_call ID in the assistant message, even when the call
+// expired without executing.
+//
+// On a UNIQUE constraint violation (duplicate from a concurrent path), returns nil
+// so idempotency is preserved — the CAS already guarantees exactly one winner.
+//
+// Note on fatality: processToolCalls treats a persistExpiredResult failure as fatal
+// (returns error so the resume loop aborts). The callers here (expireCallCore and
+// expireCallAndMaybeAbandon*) only log and continue because missing a synthetic
+// tool-result is tolerable housekeeping — the row already transitioned to "expired"
+// via the CAS, so the UI is consistent even if the model message sequence has a gap.
+func (h *Harness) persistExpiredResult(ctx context.Context, sq *store.ScopedQueries, conv, callID string) error {
+	resultJSON, err := marshalExpiredResultJSON(callID)
+	if err != nil {
+		return err
+	}
+	if _, err := sq.InsertMessage(ctx, store.InsertMessageParams{
+		ID:             generateID(),
+		ConversationID: conv,
+		Role:           "tool",
+		Content:        resultJSON,
+		ToolCallID:     callID,
+	}); err != nil {
+		if isToolResultUniqueViolation(err) {
+			return nil // already persisted by a concurrent path
+		}
+		return fmt.Errorf("persist expired result for call %s: %w", callID, err)
+	}
+	return nil
+}
+
+// persistExpiredResultByUserID is the sweep-path analogue of persistExpiredResult.
+// It uses the system-scoped ScopedQueries and the row's own userID to bypass the
+// scope check — same pattern as MarkMessageAbandonedByUserID.
+//
+// Note on fatality: same rationale as persistExpiredResult — the sweep caller logs
+// and continues rather than aborting, because housekeeping tolerates a missing row.
+func (h *Harness) persistExpiredResultByUserID(ctx context.Context, sysSQ *store.ScopedQueries, conv, userID, callID string) error {
+	resultJSON, err := marshalExpiredResultJSON(callID)
+	if err != nil {
+		return err
+	}
+	if err := sysSQ.InsertMessageByUserID(ctx, generateID(), conv, userID, callID, resultJSON); err != nil {
+		if isToolResultUniqueViolation(err) {
+			return nil
+		}
+		return fmt.Errorf("persist expired result (sweep) for call %s: %w", callID, err)
+	}
+	return nil
+}
+
 // findAssistantMessageForCall finds the ID of the most recent assistant message
 // in the conversation that contains a tool_calls array. This is the parent message
 // for the pending_confirmations row.
@@ -1191,6 +1307,14 @@ var ErrConfirmationNotFound = store.ErrConfirmationNotFound
 // status is not "pending". Callers map this to HTTP 409.
 var ErrConfirmationAlreadyResolved = store.ErrConfirmationAlreadyResolved
 
+// ErrConfirmationExpired is returned by Resolve when the pending row's ExpiresAt
+// is in the past. Callers map this to HTTP 409 with code "confirmation_expired".
+// Expiry is asymmetric with deny: in the fully-stale case (all siblings expired)
+// no model round is spawned and the message is abandoned. In the mixed case (at
+// least one sibling was approved/denied by the user), run re-enters so the continue
+// round narrates the approved sibling's result.
+var ErrConfirmationExpired = store.ErrConfirmationExpired
+
 // Resolve updates the status of a pending_confirmations row (approved or denied)
 // and re-enters run asynchronously to resume the suspended turn. The HTTP handler
 // returns 202 immediately; the resumed turn streams events over the bus.
@@ -1205,8 +1329,14 @@ var ErrConfirmationAlreadyResolved = store.ErrConfirmationAlreadyResolved
 // Error classification:
 //   - ErrConfirmationNotFound: callID doesn't exist for this user or belongs to a
 //     different conversation than convID → handler returns 404.
-//   - ErrConfirmationAlreadyResolved: the CAS UPDATE found rowsAffected=0 (another
-//     concurrent Resolve already won the race) → handler returns 409.
+//   - ErrConfirmationAlreadyResolved: the row is already resolved (another concurrent
+//     Resolve won the CAS) → handler returns 409.
+//   - ErrConfirmationExpired: the row is pending but past ExpiresAt → handler returns
+//     409 with code "confirmation_expired". The row is transitioned to "expired" and
+//     confirmation.expired is emitted. Fully-stale case (all siblings expired): the
+//     assistant message is abandoned, no model round fires. Mixed case (at least one
+//     sibling was approved/denied): run re-enters so the continue round narrates the
+//     approved sibling's result.
 //   - Any other error: infrastructure → handler returns 500.
 func (h *Harness) Resolve(ctx context.Context, convID, callID string, approved bool, principal store.Principal) error {
 	scope := store.UserScope(principal)
@@ -1225,19 +1355,39 @@ func (h *Harness) Resolve(ctx context.Context, convID, callID string, approved b
 		return fmt.Errorf("resolve: %w", ErrConfirmationNotFound)
 	}
 
-	// Atomic CAS UPDATE: SET status=@status WHERE ... AND status='pending'.
-	// Returns ErrConfirmationAlreadyResolved when rowsAffected==0 (another concurrent
-	// Resolve already transitioned this row). The pre-write read-then-check from the
-	// previous implementation is dropped — the CAS is the single atomic winner.
+	// Atomic CAS UPDATE: SET status=@status WHERE ... AND status='pending' AND NOT (expires_at < @now).
+	// This is the lazy expiry check — an expired row is NOT approved/denied by this CAS.
+	// If it finds 0 rows, the store distinguishes:
+	//   - not-found → ErrConfirmationNotFound
+	//   - already resolved (non-pending) → ErrConfirmationAlreadyResolved
+	//   - pending but past ExpiresAt → ErrConfirmationExpired (we handle this below)
+	now := h.now().UTC().Format(time.RFC3339)
 	status := "denied"
 	if approved {
 		status = "approved"
 	}
-	if err := sq.UpdatePendingConfirmationStatus(ctx, callID, status); err != nil {
-		return fmt.Errorf("resolve: update status: %w", err)
-	}
-
 	conv := row.ConversationID
+	casErr := sq.UpdatePendingConfirmationStatusIfCurrent(ctx, callID, status, now)
+	if casErr != nil {
+		if errors.Is(casErr, ErrConfirmationExpired) {
+			// The row is pending but lapsed. Run the expiry CAS atomically:
+			// SET status='expired' WHERE id=? AND user_id=? AND status='pending'.
+			// If the sweep won between our read and this CAS, n==0 and we skip to return.
+			expErr := sq.MarkConfirmationExpired(ctx, callID)
+			if expErr == nil {
+				// We won the expiry CAS — persist the synthetic expired tool-result,
+				// emit confirmation.expired, and either abandon the message (fully-stale)
+				// or re-enter run (mixed case) so the continue round fires.
+				if aErr := h.expireCallAndMaybeAbandon(ctx, sq, conv, row.MessageID, principal.UserID, callID, principal); aErr != nil {
+					// Non-fatal: log and return ErrConfirmationExpired anyway.
+					h.logger.Error("harness: expire call after lazy expiry CAS", "callId", callID, "err", aErr)
+				}
+			}
+			// Whether we won or the sweep won, the caller gets ErrConfirmationExpired → 409.
+			return fmt.Errorf("resolve: %w", ErrConfirmationExpired)
+		}
+		return fmt.Errorf("resolve: update status: %w", casErr)
+	}
 	origin := ResolveOrigin()
 
 	// Re-enter run asynchronously (same pattern as StartTurn).
@@ -1275,6 +1425,253 @@ func (h *Harness) Resolve(ctx context.Context, convID, callID string, approved b
 	}()
 
 	return nil
+}
+
+// expireCallCore is the shared implementation for both the lazy (Resolve) and
+// sweep (SweepExpiredConfirmations) expiry paths. It:
+//
+//  1. Persists a synthetic expired tool-result via persistFn (best-effort; logs on fail).
+//  2. Emits confirmation.expired on the user bus.
+//  3. Counts non-expired siblings via countNonExpiredFn:
+//     - If count == 0 (fully stale — all confirms for this message expired):
+//     marks the assistant message abandoned via abandonFn and returns (abandoned=true).
+//     - If count > 0 (mixed case — at least one sibling is still pending or already
+//     approved/denied): returns (abandoned=false) so the caller can re-enter run.
+//
+// The (abandoned, error) return is consumed by the caller to decide whether to
+// spawn a resume goroutine. The fully-stale/abandoned case MUST NOT re-enter run
+// (no user action deserves a model round). The mixed/non-abandoned case MUST re-enter
+// run so the continue round narrates B's approved action — the "no model round on
+// expiry" rule applies only to fully-stale turns.
+func (h *Harness) expireCallCore(
+	conv, messageID, userID, callID string,
+	persistFn func() error,
+	countNonExpiredFn func() (int64, error),
+	abandonFn func() error,
+) (abandoned bool, err error) {
+	// Best-effort persist: if it fails (e.g. duplicate from a concurrent path), log
+	// and continue — the CAS already guarantees exactly one winner for expiry.
+	if persistErr := persistFn(); persistErr != nil {
+		h.logger.Error("harness: persist expired tool-result", "callId", callID, "conv", conv, "err", persistErr)
+	}
+
+	// Emit confirmation.expired so the UI chip updates immediately.
+	h.bus.Publish(userID, events.Event{
+		Type: "confirmation.expired",
+		Data: ConfirmationExpiredPayload{CallID: callID},
+	})
+
+	// Gate message abandonment: count how many of this message's confirm rows are
+	// NOT expired. If none remain (count == 0), all confirms for this message have
+	// expired without user action — abandon the message so isTurnComplete treats it
+	// as terminal (no model round for "nothing to do").
+	nonExpiredCount, countErr := countNonExpiredFn()
+	if countErr != nil {
+		// Non-fatal; log and skip abandon — a stale message is better than an error.
+		// Treat as non-abandoned so any pending sibling re-entry still proceeds.
+		h.logger.Error("harness: count non-expired confirmations", "messageId", messageID, "err", countErr)
+		return false, nil
+	}
+	if nonExpiredCount > 0 {
+		// Mixed case: at least one sibling is still pending or already resolved by the user.
+		// Do NOT abandon — the turn is resumable; caller re-enters run.
+		return false, nil
+	}
+	// Fully stale: all confirms for this message expired. Abandon the message.
+	if aErr := abandonFn(); aErr != nil {
+		return false, fmt.Errorf("mark message abandoned (fully stale): %w", aErr)
+	}
+	return true, nil
+}
+
+// expireCallAndMaybeAbandon handles a single call expiry on the lazy path
+// (called from Resolve after winning the MarkConfirmationExpired CAS). It delegates
+// to expireCallCore with the user-scoped store functions, then:
+//   - Fully-stale case (abandoned=true): does NOT re-enter run (no model round for "nothing to do").
+//   - Mixed case (abandoned=false): re-enters run in a new goroutine so the continue
+//     round narrates the approved sibling(s) — mirrors the approve/deny resume path.
+func (h *Harness) expireCallAndMaybeAbandon(
+	ctx context.Context,
+	sq *store.ScopedQueries,
+	conv, messageID, userID, callID string,
+	principal store.Principal,
+) error {
+	abandoned, err := h.expireCallCore(
+		conv, messageID, userID, callID,
+		func() error { return h.persistExpiredResult(ctx, sq, conv, callID) },
+		func() (int64, error) { return sq.CountNonExpiredConfirmationsByMessageID(ctx, messageID) },
+		func() error { return sq.MarkMessageAbandoned(ctx, messageID) },
+	)
+	if err != nil {
+		return err
+	}
+	if abandoned {
+		// Fully stale — no model round. The "no model round on expiry" rule covers
+		// only this case: all confirms expired without any user action; the turn is dead.
+		return nil
+	}
+	// Mixed case: at least one sibling was approved or denied (legitimate user action).
+	// Re-enter run so the continue round narrates the executed result. Re-entry is
+	// idempotent: if other siblings are still pending, run re-suspends harmlessly.
+	origin := ResolveOrigin()
+	//nolint:gosec // Intentional: the resumed turn must outlive the request context.
+	go func() {
+		entry := h.convLocks.acquire(conv)
+		entry.mu.Lock()
+		defer func() {
+			entry.mu.Unlock()
+			h.convLocks.release(conv)
+		}()
+		defer func() {
+			if r := recover(); r != nil {
+				h.logger.Error("harness: expiry resume panicked", "conversationId", conv, "callId", callID, "panic", r)
+				h.bus.Publish(principal.UserID, events.Event{
+					Type: "turn.failed",
+					Data: TurnFailedPayload{Code: "infrastructure"},
+				})
+			}
+		}()
+		if runErr := h.run(context.Background(), conv, origin, principal); runErr != nil {
+			h.logger.Error("harness: expiry resume failed", "conversationId", conv, "callId", callID, "err", runErr)
+			h.bus.Publish(principal.UserID, events.Event{
+				Type: "turn.failed",
+				Data: TurnFailedPayload{Code: "infrastructure"},
+			})
+		}
+	}()
+	return nil
+}
+
+// expireCallAndMaybeAbandonByUserID is the sweep-path analogue of
+// expireCallAndMaybeAbandon. It uses the row's own user_id (not the bound scope)
+// because the sweep operates as system housekeeping across all users. The logic is
+// identical: persist a synthetic expired tool-result, emit confirmation.expired,
+// and abandon the assistant message only when all siblings are also expired.
+//
+// The re-entry goroutine (non-abandoned case) is spawned by the caller
+// (SweepExpiredConfirmations), not here, to allow deduplication across multiple
+// rows that belong to the same conversation — spawn at most once per conv per sweep.
+func (h *Harness) expireCallAndMaybeAbandonByUserID(
+	ctx context.Context,
+	sysSQ *store.ScopedQueries,
+	conv, messageID, userID, callID string,
+) (abandoned bool, err error) {
+	return h.expireCallCore(
+		conv, messageID, userID, callID,
+		func() error { return h.persistExpiredResultByUserID(ctx, sysSQ, conv, userID, callID) },
+		func() (int64, error) {
+			return sysSQ.CountNonExpiredConfirmationsByMessageIDForUser(ctx, messageID, userID)
+		},
+		func() error {
+			aErr := sysSQ.MarkMessageAbandonedByUserID(ctx, messageID, userID)
+			if aErr != nil {
+				h.logger.Error("harness: abandon assistant message (sweep)", "callId", callID, "messageId", messageID, "err", aErr)
+			}
+			return nil // sweep abandonment errors are non-fatal
+		},
+	)
+}
+
+// SweepExpiredConfirmations marks all lapsed pending_confirmations rows as expired,
+// abandons their assistant messages, and emits confirmation.expired on each row's
+// user bus. Returns the count of rows swept.
+//
+// This method is designed to be registered as a periodic job by the Scheduler
+// (internal/scheduler, project #6 — not yet built). Leave this as a directly-callable
+// method until the scheduler is wired. Shape: (ctx context.Context) (int, error)
+// so the scheduler can wrap it trivially as a func(ctx) error.
+//
+// The lapsed-row query runs across all users (SYSTEM-HOUSEKEEPING, allow-unscoped).
+// Each expired row is processed atomically via a per-row CAS so a concurrent Resolve
+// racing the sweep on the same row has exactly one winner.
+//
+// After processing all rows, the sweep collects the distinct conversation IDs that
+// are NON-abandoned (mixed case: at least one sibling was approved/denied by the user)
+// and spawns a resume goroutine ONCE PER CONVERSATION so the continue round fires for
+// each affected turn. Deduplication avoids goroutine spam when multiple rows from the
+// same conversation appear in a single sweep batch.
+func (h *Harness) SweepExpiredConfirmations(ctx context.Context) (int, error) {
+	// Use a system-scoped ScopedQueries for the cross-user SELECT.
+	// The per-row CAS and message-abandon use the row's own user_id.
+	sysSQ := h.store.ForUser(store.SystemScope())
+
+	now := h.now().UTC().Format(time.RFC3339)
+	lapsed, err := sysSQ.ListLapsedConfirmations(ctx, now)
+	if err != nil {
+		return 0, fmt.Errorf("sweep: list lapsed confirmations: %w", err)
+	}
+
+	// nonAbandonedConvs accumulates (convID → userID) for conversations that need a
+	// resume goroutine after the sweep. Using a map deduplicates multiple rows from
+	// the same conversation so we spawn at most one goroutine per conversation.
+	type convResume struct{ userID string }
+	nonAbandonedConvs := make(map[string]convResume)
+
+	swept := 0
+	for _, row := range lapsed {
+		// Per-row CAS: only the first winner (this sweep vs a concurrent Resolve) transitions the row.
+		n, casErr := sysSQ.MarkConfirmationExpiredByUserID(ctx, row.ID, row.UserID)
+		if casErr != nil {
+			h.logger.Error("sweep: mark confirmation expired", "callId", row.ID, "userID", row.UserID, "err", casErr)
+			continue
+		}
+		if n == 0 {
+			// Another path (concurrent Resolve or sweep iteration) already won the CAS — skip.
+			continue
+		}
+
+		// We won the CAS. Persist the synthetic expired tool-result, emit
+		// confirmation.expired, and (only if all siblings also expired) abandon the
+		// assistant message so isTurnComplete treats it as terminal.
+		abandoned, aErr := h.expireCallAndMaybeAbandonByUserID(ctx, sysSQ, row.ConversationID, row.MessageID, row.UserID, row.ID)
+		if aErr != nil {
+			h.logger.Error("sweep: expire call and maybe abandon", "callId", row.ID, "messageId", row.MessageID, "err", aErr)
+			// Non-fatal: still count the sweep.
+		}
+
+		swept++
+
+		// Track non-abandoned conversations for post-sweep re-entry. The fully-stale
+		// (abandoned) case must NOT re-enter run — no user action deserves a model round.
+		if !abandoned {
+			nonAbandonedConvs[row.ConversationID] = convResume{userID: row.UserID}
+		}
+	}
+
+	// Spawn a resume goroutine for each non-abandoned conversation so the continue
+	// round fires and narrates any approved sibling actions.
+	// Per-conversation lock makes concurrent re-entries safe; dedup above limits goroutines.
+	origin := ResolveOrigin()
+	for conv, cr := range nonAbandonedConvs {
+		principal := store.Principal{UserID: cr.userID}
+		//nolint:gosec // Intentional: the resumed turn must outlive the sweep context.
+		go func() {
+			entry := h.convLocks.acquire(conv)
+			entry.mu.Lock()
+			defer func() {
+				entry.mu.Unlock()
+				h.convLocks.release(conv)
+			}()
+			defer func() {
+				if r := recover(); r != nil {
+					h.logger.Error("harness: sweep expiry resume panicked", "conversationId", conv, "panic", r)
+					h.bus.Publish(principal.UserID, events.Event{
+						Type: "turn.failed",
+						Data: TurnFailedPayload{Code: "infrastructure"},
+					})
+				}
+			}()
+			if runErr := h.run(context.Background(), conv, origin, principal); runErr != nil {
+				h.logger.Error("harness: sweep expiry resume failed", "conversationId", conv, "err", runErr)
+				h.bus.Publish(principal.UserID, events.Event{
+					Type: "turn.failed",
+					Data: TurnFailedPayload{Code: "infrastructure"},
+				})
+			}
+		}()
+	}
+
+	return swept, nil
 }
 
 // persistToolError persists a *capability.ToolError as the tool-result message

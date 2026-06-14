@@ -208,6 +208,17 @@ func (h *Harness) handlePostConfirmation(w http.ResponseWriter, r *http.Request)
 				Detail: "This confirmation has already been approved or denied.",
 				Code:   "confirmation_already_resolved",
 			})
+		case errors.Is(err, ErrConfirmationExpired):
+			// 409 Conflict: same status family as already-resolved (both block execution),
+			// but a distinct code so the client can distinguish "too late — it expired"
+			// from "someone else already answered it". The row is now status='expired'
+			// and the assistant message is abandoned; no model round is spawned.
+			httpx.WriteProblem(w, r, httpx.Problem{
+				Title:  "Confirmation expired",
+				Status: http.StatusConflict,
+				Detail: "This confirmation has expired and can no longer be approved or denied.",
+				Code:   "confirmation_expired",
+			})
 		default:
 			httpx.WriteProblem(w, r, httpx.InternalProblem(h.logger, "resolve_confirmation_failed", err.Error()))
 		}

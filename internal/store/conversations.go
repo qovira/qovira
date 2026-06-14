@@ -79,10 +79,10 @@ func (sq *ScopedQueries) GetConversation(ctx context.Context, id string) (db.Con
 }
 
 // InsertMessage persists a message row into the messages table, scoped to the bound user. It returns the full persisted
-// row (including the server-generated created_at timestamp). Returns an error if the scope is invalid.
-func (sq *ScopedQueries) InsertMessage(ctx context.Context, p InsertMessageParams) (db.Message, error) {
+// row (including the server-generated created_at timestamp and abandoned flag). Returns an error if the scope is invalid.
+func (sq *ScopedQueries) InsertMessage(ctx context.Context, p InsertMessageParams) (db.InsertMessageRow, error) {
 	if err := sq.checkUserScope(); err != nil {
-		return db.Message{}, fmt.Errorf("InsertMessage: %w", err)
+		return db.InsertMessageRow{}, fmt.Errorf("InsertMessage: %w", err)
 	}
 	return sq.writeQ.InsertMessage(ctx, db.InsertMessageParams{
 		ID:             p.ID,
@@ -109,8 +109,9 @@ type InsertMessageParams struct {
 }
 
 // ListMessages returns all messages for a conversation, ordered by created_at, scoped to the bound user. Returns an
-// error if the scope is invalid.
-func (sq *ScopedQueries) ListMessages(ctx context.Context, conversationID string) ([]db.Message, error) {
+// error if the scope is invalid. Each row includes the abandoned flag (non-zero means the assistant message was
+// abandoned due to confirmation expiry — such messages are inert and must not be treated as outstanding work).
+func (sq *ScopedQueries) ListMessages(ctx context.Context, conversationID string) ([]db.ListMessagesRow, error) {
 	if err := sq.checkUserScope(); err != nil {
 		return nil, fmt.Errorf("ListMessages: %w", err)
 	}
@@ -118,4 +119,40 @@ func (sq *ScopedQueries) ListMessages(ctx context.Context, conversationID string
 		ConversationID: conversationID,
 		UserID:         sq.scope.UserID(),
 	})
+}
+
+// InsertMessageByUserID inserts a tool-result message keyed by (conversation_id, user_id, tool_call_id)
+// using the supplied userID directly rather than the bound scope. The msgID must be supplied by the
+// caller (use id.New()). Used by the sweep path where the user_id comes from the lapsed row, not the
+// bound scope. This method bypasses the scope check intentionally — system housekeeping only.
+func (sq *ScopedQueries) InsertMessageByUserID(ctx context.Context, msgID, conv, userID, callID, content string) error {
+	_, err := sq.writeQ.InsertMessage(ctx, db.InsertMessageParams{
+		ID:             msgID,
+		ConversationID: conv,
+		UserID:         userID,
+		Role:           "tool",
+		Content:        content,
+		ToolCallID:     sql.NullString{String: callID, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("InsertMessageByUserID: %w", err)
+	}
+	return nil
+}
+
+// MarkMessageAbandoned sets the abandoned flag on a message row to 1, scoped to the bound user. Used when a
+// confirmation expires: the assistant message holding the dangling tool_calls is marked abandoned so the
+// conversation is never treated as resumable for those calls.
+func (sq *ScopedQueries) MarkMessageAbandoned(ctx context.Context, messageID string) error {
+	if err := sq.checkUserScope(); err != nil {
+		return fmt.Errorf("MarkMessageAbandoned: %w", err)
+	}
+	_, err := sq.writeQ.MarkMessageAbandoned(ctx, db.MarkMessageAbandonedParams{
+		ID:     messageID,
+		UserID: sq.scope.UserID(),
+	})
+	if err != nil {
+		return fmt.Errorf("MarkMessageAbandoned: %w", err)
+	}
+	return nil
 }

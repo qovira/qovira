@@ -9,6 +9,31 @@ import (
 	"context"
 )
 
+const countNonExpiredConfirmationsByMessageID = `-- name: CountNonExpiredConfirmationsByMessageID :one
+SELECT count(*)
+FROM pending_confirmations
+WHERE message_id = ?1
+  AND user_id = ?2
+  AND status != 'expired'
+`
+
+type CountNonExpiredConfirmationsByMessageIDParams struct {
+	MessageID string
+	UserID    string
+}
+
+// Returns the count of pending_confirmations rows for a given assistant message
+// that are NOT in 'expired' status (i.e. 'pending', 'approved', or 'denied').
+// Used to gate MarkMessageAbandoned: the assistant message is only abandoned when
+// this count is zero (no siblings remain pending or were resolved by the user).
+// User-scoped: requires user_id to prevent cross-user information leakage.
+func (q *Queries) CountNonExpiredConfirmationsByMessageID(ctx context.Context, arg CountNonExpiredConfirmationsByMessageIDParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countNonExpiredConfirmationsByMessageID, arg.MessageID, arg.UserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getPendingConfirmation = `-- name: GetPendingConfirmation :one
 SELECT id, conversation_id, message_id, user_id, tool_name, args, risk, status, created_at, expires_at
 FROM pending_confirmations
@@ -89,6 +114,52 @@ func (q *Queries) InsertPendingConfirmation(ctx context.Context, arg InsertPendi
 	return i, err
 }
 
+const listLapsedConfirmations = `-- name: ListLapsedConfirmations :many
+SELECT id, conversation_id, message_id, user_id, tool_name, args, risk, status, created_at, expires_at
+FROM pending_confirmations
+WHERE status = 'pending'
+  AND expires_at < ?1
+ORDER BY expires_at, id
+`
+
+// scopeguard:allow-unscoped: SYSTEM-HOUSEKEEPING cross-user sweep. The scheduler
+// calls SweepExpiredConfirmations across all users by TTL cutoff, so no single
+// user_id predicate is applicable. Each returned row carries its own user_id so
+// the caller can scope per-row operations (abandon message, emit per-user event).
+func (q *Queries) ListLapsedConfirmations(ctx context.Context, now string) ([]PendingConfirmation, error) {
+	rows, err := q.db.QueryContext(ctx, listLapsedConfirmations, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PendingConfirmation
+	for rows.Next() {
+		var i PendingConfirmation
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConversationID,
+			&i.MessageID,
+			&i.UserID,
+			&i.ToolName,
+			&i.Args,
+			&i.Risk,
+			&i.Status,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingConfirmationsByConversation = `-- name: ListPendingConfirmationsByConversation :many
 SELECT id, conversation_id, message_id, user_id, tool_name, args, risk, status, created_at, expires_at
 FROM pending_confirmations
@@ -136,6 +207,30 @@ func (q *Queries) ListPendingConfirmationsByConversation(ctx context.Context, ar
 	return items, nil
 }
 
+const markConfirmationExpired = `-- name: MarkConfirmationExpired :execrows
+UPDATE pending_confirmations
+SET status = 'expired'
+WHERE id = ?1
+  AND user_id = ?2
+  AND status = 'pending'
+`
+
+type MarkConfirmationExpiredParams struct {
+	ID     string
+	UserID string
+}
+
+// Atomic CAS: transitions a pending row to expired only when still pending.
+// Used by both the lazy check (user-scoped, includes user_id) and the sweep
+// (system-scope, but calls this per-row with the row's user_id from ListLapsedConfirmations).
+func (q *Queries) MarkConfirmationExpired(ctx context.Context, arg MarkConfirmationExpiredParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markConfirmationExpired, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updatePendingConfirmationStatus = `-- name: UpdatePendingConfirmationStatus :execrows
 UPDATE pending_confirmations
 SET status = ?1
@@ -152,6 +247,35 @@ type UpdatePendingConfirmationStatusParams struct {
 
 func (q *Queries) UpdatePendingConfirmationStatus(ctx context.Context, arg UpdatePendingConfirmationStatusParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updatePendingConfirmationStatus, arg.Status, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updatePendingConfirmationStatusIfCurrent = `-- name: UpdatePendingConfirmationStatusIfCurrent :execrows
+UPDATE pending_confirmations
+SET status = ?1
+WHERE id = ?2
+  AND user_id = ?3
+  AND status = 'pending'
+  AND NOT (expires_at < ?4)
+`
+
+type UpdatePendingConfirmationStatusIfCurrentParams struct {
+	Status string
+	ID     string
+	UserID string
+	Now    string
+}
+
+func (q *Queries) UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updatePendingConfirmationStatusIfCurrent,
+		arg.Status,
+		arg.ID,
+		arg.UserID,
+		arg.Now,
+	)
 	if err != nil {
 		return 0, err
 	}

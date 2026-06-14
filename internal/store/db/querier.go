@@ -11,6 +11,12 @@ import (
 
 type Querier interface {
 	BumpSessionLastUsedByID(ctx context.Context, arg BumpSessionLastUsedByIDParams) (int64, error)
+	// Returns the count of pending_confirmations rows for a given assistant message
+	// that are NOT in 'expired' status (i.e. 'pending', 'approved', or 'denied').
+	// Used to gate MarkMessageAbandoned: the assistant message is only abandoned when
+	// this count is zero (no siblings remain pending or were resolved by the user).
+	// User-scoped: requires user_id to prevent cross-user information leakage.
+	CountNonExpiredConfirmationsByMessageID(ctx context.Context, arg CountNonExpiredConfirmationsByMessageIDParams) (int64, error)
 	// Queries for the sessions table.
 	// sessions is per-user data (it has a user_id column and belongs to individual users), but
 	// some queries operate on a token_hash key (the bearer capability itself) rather than a
@@ -56,7 +62,7 @@ type Querier interface {
 	// Queries for the messages table.
 	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
 	// belongs to the bound Scope. Parameters use sqlc named params (@name).
-	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
+	InsertMessage(ctx context.Context, arg InsertMessageParams) (InsertMessageRow, error)
 	// Queries for the pending_confirmations table.
 	// Every SELECT/UPDATE includes a user_id predicate so the row always
 	// belongs to the bound Scope. Parameters use sqlc named params (@name).
@@ -70,7 +76,12 @@ type Querier interface {
 	// Parameters use sqlc named params (@name) per the house convention; the
 	// generated Params structs carry typed fields (ID, UserID, Value).
 	InsertUserData(ctx context.Context, arg InsertUserDataParams) error
-	ListMessages(ctx context.Context, arg ListMessagesParams) ([]Message, error)
+	// scopeguard:allow-unscoped: SYSTEM-HOUSEKEEPING cross-user sweep. The scheduler
+	// calls SweepExpiredConfirmations across all users by TTL cutoff, so no single
+	// user_id predicate is applicable. Each returned row carries its own user_id so
+	// the caller can scope per-row operations (abandon message, emit per-user event).
+	ListLapsedConfirmations(ctx context.Context, now string) ([]PendingConfirmation, error)
+	ListMessages(ctx context.Context, arg ListMessagesParams) ([]ListMessagesRow, error)
 	ListPendingConfirmationsByConversation(ctx context.Context, arg ListPendingConfirmationsByConversationParams) ([]PendingConfirmation, error)
 	// List all settings whose key starts with @prefix, ordered by key. The caller
 	// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
@@ -78,12 +89,18 @@ type Querier interface {
 	// rather than as a wildcard.
 	ListSettingsByPrefix(ctx context.Context, prefix sql.NullString) ([]Setting, error)
 	ListUserData(ctx context.Context, userID string) ([]UserDatum, error)
+	// Atomic CAS: transitions a pending row to expired only when still pending.
+	// Used by both the lazy check (user-scoped, includes user_id) and the sweep
+	// (system-scope, but calls this per-row with the row's user_id from ListLapsedConfirmations).
+	MarkConfirmationExpired(ctx context.Context, arg MarkConfirmationExpiredParams) (int64, error)
+	MarkMessageAbandoned(ctx context.Context, arg MarkMessageAbandonedParams) (int64, error)
 	// scopeguard:allow-unscoped: system housekeeping; the scheduler purges across all users by
 	// TTL cutoffs (idle and absolute), so there is no meaningful user context available and a
 	// user_id predicate would prevent cross-user expiry from working.
 	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePendingConfirmationStatus(ctx context.Context, arg UpdatePendingConfirmationStatusParams) (int64, error)
+	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)
 	// Queries for the conversations table.

@@ -14,7 +14,7 @@ const insertMessage = `-- name: InsertMessage :one
 
 INSERT INTO messages (id, conversation_id, user_id, role, content, tool_calls, tool_call_id, finish_reason)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-RETURNING id, conversation_id, user_id, role, content, tool_calls, tool_call_id, finish_reason, created_at
+RETURNING id, conversation_id, user_id, role, content, tool_calls, tool_call_id, finish_reason, abandoned, created_at
 `
 
 type InsertMessageParams struct {
@@ -28,10 +28,23 @@ type InsertMessageParams struct {
 	FinishReason   sql.NullString
 }
 
+type InsertMessageRow struct {
+	ID             string
+	ConversationID string
+	UserID         string
+	Role           string
+	Content        string
+	ToolCalls      sql.NullString
+	ToolCallID     sql.NullString
+	FinishReason   sql.NullString
+	Abandoned      int64
+	CreatedAt      string
+}
+
 // Queries for the messages table.
 // Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
 // belongs to the bound Scope. Parameters use sqlc named params (@name).
-func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error) {
+func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (InsertMessageRow, error) {
 	row := q.db.QueryRowContext(ctx, insertMessage,
 		arg.ID,
 		arg.ConversationID,
@@ -42,7 +55,7 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (M
 		arg.ToolCallID,
 		arg.FinishReason,
 	)
-	var i Message
+	var i InsertMessageRow
 	err := row.Scan(
 		&i.ID,
 		&i.ConversationID,
@@ -52,13 +65,14 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (M
 		&i.ToolCalls,
 		&i.ToolCallID,
 		&i.FinishReason,
+		&i.Abandoned,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const listMessages = `-- name: ListMessages :many
-SELECT id, conversation_id, user_id, role, content, tool_calls, tool_call_id, finish_reason, created_at
+SELECT id, conversation_id, user_id, role, content, tool_calls, tool_call_id, finish_reason, abandoned, created_at
 FROM messages
 WHERE conversation_id = ?1
   AND user_id = ?2
@@ -70,15 +84,28 @@ type ListMessagesParams struct {
 	UserID         string
 }
 
-func (q *Queries) ListMessages(ctx context.Context, arg ListMessagesParams) ([]Message, error) {
+type ListMessagesRow struct {
+	ID             string
+	ConversationID string
+	UserID         string
+	Role           string
+	Content        string
+	ToolCalls      sql.NullString
+	ToolCallID     sql.NullString
+	FinishReason   sql.NullString
+	Abandoned      int64
+	CreatedAt      string
+}
+
+func (q *Queries) ListMessages(ctx context.Context, arg ListMessagesParams) ([]ListMessagesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listMessages, arg.ConversationID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Message
+	var items []ListMessagesRow
 	for rows.Next() {
-		var i Message
+		var i ListMessagesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ConversationID,
@@ -88,6 +115,7 @@ func (q *Queries) ListMessages(ctx context.Context, arg ListMessagesParams) ([]M
 			&i.ToolCalls,
 			&i.ToolCallID,
 			&i.FinishReason,
+			&i.Abandoned,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -101,4 +129,24 @@ func (q *Queries) ListMessages(ctx context.Context, arg ListMessagesParams) ([]M
 		return nil, err
 	}
 	return items, nil
+}
+
+const markMessageAbandoned = `-- name: MarkMessageAbandoned :execrows
+UPDATE messages
+SET abandoned = 1
+WHERE id = ?1
+  AND user_id = ?2
+`
+
+type MarkMessageAbandonedParams struct {
+	ID     string
+	UserID string
+}
+
+func (q *Queries) MarkMessageAbandoned(ctx context.Context, arg MarkMessageAbandonedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markMessageAbandoned, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
