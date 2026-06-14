@@ -121,6 +121,94 @@ func (q *Queries) InsertReminder(ctx context.Context, arg InsertReminderParams) 
 	return err
 }
 
+const listReminders = `-- name: ListReminders :many
+SELECT id, user_id, title, notes, due_at, rrule, tz,
+       auto_complete, status, completed_at, last_fired_at,
+       fire_job_id, created_at, updated_at
+FROM reminders
+WHERE user_id = ?1
+  AND (?2     IS NULL OR status = ?2)
+  AND (?3  IS NULL OR due_at > ?3)
+  AND (?4 IS NULL OR due_at < ?4)
+  AND (?5 IS NULL
+       OR due_at > ?5
+       OR (due_at = ?5 AND id > ?6))
+ORDER BY due_at, id
+LIMIT ?7
+`
+
+type ListRemindersParams struct {
+	UserID    string
+	Status    interface{}
+	DueAfter  interface{}
+	DueBefore interface{}
+	CursorDue interface{}
+	CursorID  sql.NullString
+	Limit     int64
+}
+
+// List reminders for a user with optional status and due-window filters,
+// keyset-paginated on (due_at, id).  Fetches limit+1 rows so the caller can
+// detect whether a next page exists.
+//
+// Optional filters use sqlc.narg so absent values are NULL and the predicate
+// becomes a no-op.  The keyset predicate uses the expanded form of the tuple
+// comparison (due_at, id) > (cursor_due, cursor_id), which is logically
+// identical: skip rows that sort before the cursor.  Both forms produce the
+// same result set; the expanded form is required because sqlc's SQLite parser
+// does not recognise the row-value syntax (col, col) > (?, ?).
+//
+// The query is served by the reminders_user_due index on (user_id, due_at, id).
+// That index satisfies ORDER BY due_at, id directly from the index-ordered stream
+// for both the no-status path and the status-filtered path (status is a residual
+// predicate).  No USE TEMP B-TREE FOR ORDER BY occurs in either case, verified
+// by EXPLAIN QUERY PLAN in TestListReminders_IndexPlan.
+func (q *Queries) ListReminders(ctx context.Context, arg ListRemindersParams) ([]Reminder, error) {
+	rows, err := q.db.QueryContext(ctx, listReminders,
+		arg.UserID,
+		arg.Status,
+		arg.DueAfter,
+		arg.DueBefore,
+		arg.CursorDue,
+		arg.CursorID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Reminder
+	for rows.Next() {
+		var i Reminder
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Title,
+			&i.Notes,
+			&i.DueAt,
+			&i.Rrule,
+			&i.Tz,
+			&i.AutoComplete,
+			&i.Status,
+			&i.CompletedAt,
+			&i.LastFiredAt,
+			&i.FireJobID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setReminderFireJobID = `-- name: SetReminderFireJobID :execrows
 UPDATE reminders
 SET fire_job_id = ?1,

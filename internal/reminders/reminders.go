@@ -9,11 +9,13 @@ package reminders
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -82,11 +84,85 @@ type firePayload struct {
 	ReminderID string `json:"reminderId"`
 }
 
+// ListQuery carries the caller-facing parameters for listing reminders.
+// It corresponds to the query parameters on GET /api/v1/reminders.
+type ListQuery struct {
+	// Cursor is the opaque pagination cursor returned by a prior page.  Empty
+	// means "start from the beginning".  A non-empty value that cannot be
+	// decoded is a caller error (400).
+	Cursor string
+	// Limit is the maximum number of items to return.  0 uses the default (25).
+	// Values above the maximum (100) are silently clamped to 100.
+	Limit int
+	// Status is an optional filter.  Accepted values: "active", "completed".
+	// Empty means no filter (all statuses).
+	Status string
+	// DueAfter, when non-zero, filters reminders whose due_at is strictly after
+	// the given instant.
+	DueAfter time.Time
+	// DueBefore, when non-zero, filters reminders whose due_at is strictly
+	// before the given instant.
+	DueBefore time.Time
+}
+
+// Page is the service-layer result of a list query.  The HTTP layer maps it to
+// the httpx.Page[Reminder] envelope.
+type Page struct {
+	// Items is the current page of reminders, ordered by (due_at, id).
+	Items []Reminder
+	// NextCursor is the opaque cursor for the next page, or empty string when
+	// this is the last page.  The HTTP layer maps an empty string to JSON null.
+	NextCursor string
+	// HasMore is true when there is at least one more page.
+	HasMore bool
+}
+
+// listCursor is the internal structure encoded into the opaque pagination cursor.
+// Both DueAt and ID are required for a stable, gap-free total order.
+type listCursor struct {
+	DueAt string `json:"d"` // RFC 3339 UTC
+	ID    string `json:"i"`
+}
+
+// encodeCursor base64-encodes a JSON listCursor into an opaque string suitable
+// for inclusion in an HTTP response.
+func encodeCursor(dueAt, id string) string {
+	raw, _ := json.Marshal(listCursor{DueAt: dueAt, ID: id})
+	return base64.RawStdEncoding.EncodeToString(raw)
+}
+
+// decodeCursor reverses encodeCursor.  Returns an error when the cursor string
+// is not valid base64 or its JSON content is malformed.
+func decodeCursor(cursor string) (dueAt, reminderID string, err error) {
+	raw, err := base64.RawStdEncoding.DecodeString(cursor)
+	if err != nil {
+		return "", "", fmt.Errorf("reminders: decode cursor: %w", err)
+	}
+	var c listCursor
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return "", "", fmt.Errorf("reminders: decode cursor: invalid json: %w", err)
+	}
+	if c.DueAt == "" || c.ID == "" {
+		return "", "", fmt.Errorf("reminders: decode cursor: missing required fields")
+	}
+	return c.DueAt, c.ID, nil
+}
+
+const (
+	listDefaultLimit = 25
+	listMaxLimit     = 100
+)
+
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 // ErrNotFound is returned by Service.Get when the reminder does not exist or
 // does not belong to the requesting user.
 var ErrNotFound = errors.New("reminders: not found")
+
+// ErrInvalidCursor is returned by Service.List when the caller supplies a
+// cursor value that cannot be decoded.  The HTTP adapter maps this to a 400
+// Bad Request response.
+var ErrInvalidCursor = errors.New("reminders: invalid cursor")
 
 // ValidationError carries one or more field-level validation failures.
 // The HTTP adapter maps it to a 422 problem+json response.
@@ -323,6 +399,89 @@ func (s *Service) Get(ctx context.Context, scope store.Scope, reminderID string)
 	return reminderFromRow(row), nil
 }
 
+// List returns a cursor-paginated slice of reminders for the requesting user,
+// filtered and ordered per q.  It returns exactly q.Limit items (default 25,
+// max 100) plus a next-cursor when more pages exist.
+//
+// A non-empty q.Cursor that cannot be decoded causes an error wrapping
+// ErrInvalidCursor; the HTTP adapter maps this to a 400 response.
+func (s *Service) List(ctx context.Context, scope store.Scope, q ListQuery) (Page, error) {
+	// Resolve limit.
+	limit := q.Limit
+	if limit <= 0 {
+		limit = listDefaultLimit
+	}
+	if limit > listMaxLimit {
+		limit = listMaxLimit
+	}
+
+	// Decode cursor (if provided).
+	var cursorDue, cursorID string
+	if q.Cursor != "" {
+		var err error
+		cursorDue, cursorID, err = decodeCursor(q.Cursor)
+		if err != nil {
+			return Page{}, fmt.Errorf("%w: %w", ErrInvalidCursor, err)
+		}
+	}
+
+	// Build query params.  sqlc generated Status/DueAfter/DueBefore as
+	// any (narg) and CursorDue/CursorID as any/sql.NullString.
+	// We pass nil for absent optional params so the predicate is a no-op.
+	var statusArg any
+	if q.Status != "" {
+		statusArg = q.Status
+	}
+	var dueAfterArg any
+	if !q.DueAfter.IsZero() {
+		dueAfterArg = q.DueAfter.UTC().Format(time.RFC3339)
+	}
+	var dueBeforeArg any
+	if !q.DueBefore.IsZero() {
+		dueBeforeArg = q.DueBefore.UTC().Format(time.RFC3339)
+	}
+	var cursorDueArg any
+	var cursorIDArg sql.NullString
+	if cursorDue != "" {
+		cursorDueArg = cursorDue
+		cursorIDArg = sql.NullString{String: cursorID, Valid: true}
+	}
+
+	// Fetch one extra row to detect whether a next page exists.
+	rows, err := db.New(s.st.Reader()).ListReminders(ctx, db.ListRemindersParams{
+		UserID:    scope.UserID(),
+		Status:    statusArg,
+		DueAfter:  dueAfterArg,
+		DueBefore: dueBeforeArg,
+		CursorDue: cursorDueArg,
+		CursorID:  cursorIDArg,
+		Limit:     int64(limit + 1),
+	})
+	if err != nil {
+		return Page{}, fmt.Errorf("reminders: list: %w", err)
+	}
+
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+
+	items := make([]Reminder, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, reminderFromRow(row))
+	}
+
+	var nextCursor string
+	if hasMore {
+		// items is non-empty when hasMore is true: we fetched limit+1 rows and
+		// trimmed to limit, so at least one item is present.
+		last := items[len(items)-1]
+		nextCursor = encodeCursor(last.DueAt, last.ID)
+	}
+
+	return Page{Items: items, NextCursor: nextCursor, HasMore: hasMore}, nil
+}
+
 // ── fire handler ──────────────────────────────────────────────────────────────
 
 // handleFire is the "reminder.fire" scheduler handler.  It loads the reminder
@@ -476,9 +635,11 @@ func (m *Module) Tools() []capability.Tool { return nil }
 // Routes registers the reminders REST endpoints on r.
 //
 //	POST /api/v1/reminders      → createHandler (201)
+//	GET  /api/v1/reminders      → listHandler   (200)
 //	GET  /api/v1/reminders/{id} → getHandler    (200)
 func (m *Module) Routes(r *httpx.Router) {
 	r.HandleFunc("POST /api/v1/reminders", m.createHandler)
+	r.HandleFunc("GET /api/v1/reminders", m.listHandler)
 	r.HandleFunc("GET /api/v1/reminders/{id}", m.getHandler)
 }
 
@@ -582,6 +743,152 @@ func (m *Module) getHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(reminder); err != nil {
 		m.logger.Error("reminders: encode get response", "err", err)
+	}
+}
+
+// listKnownParams is the set of query parameter names accepted by listHandler.
+// Any name outside this set triggers a 400 Bad Request — per the HTTP house guide,
+// unknown filter params must be rejected rather than silently ignored, because a
+// typo'd param (e.g. ?staus=completed) would otherwise return the wrong data.
+var listKnownParams = map[string]struct{}{
+	"cursor":    {},
+	"limit":     {},
+	"status":    {},
+	"dueBefore": {},
+	"dueAfter":  {},
+}
+
+// listHandler handles GET /api/v1/reminders.
+//
+// Query parameters (all optional):
+//   - cursor     opaque pagination cursor from a prior response's nextCursor
+//   - limit      page size (default 25, max 100; over-max clamped to 100)
+//   - status     "active" | "completed"
+//   - dueBefore  RFC 3339 upper bound on due_at (exclusive)
+//   - dueAfter   RFC 3339 lower bound on due_at (exclusive)
+//
+// Unknown query parameters are rejected with 400 Bad Request.
+func (m *Module) listHandler(w http.ResponseWriter, r *http.Request) {
+	principal, ok := httpx.PrincipalFromContext(r.Context())
+	if !ok {
+		httpx.WriteProblem(w, r, Problem401())
+		return
+	}
+	scope := store.UserScope(principal)
+
+	q := r.URL.Query()
+
+	// ── reject unknown params ────────────────────────────────────────────────
+	for name := range q {
+		if _, known := listKnownParams[name]; !known {
+			httpx.WriteProblem(w, r, httpx.Problem{
+				Title:  "Unknown query parameter",
+				Status: http.StatusBadRequest,
+				Detail: fmt.Sprintf("Query parameter %q is not recognised. Accepted parameters: cursor, limit, status, dueBefore, dueAfter.", name),
+				Code:   "unknown_query_param",
+			})
+			return
+		}
+	}
+
+	// ── limit ────────────────────────────────────────────────────────────────
+	limit := listDefaultLimit
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			httpx.WriteProblem(w, r, httpx.ValidationProblem(
+				"validation_error",
+				"Request validation failed.",
+				httpx.FieldError{Pointer: "/limit", Detail: "limit must be a positive integer"},
+			))
+			return
+		}
+		limit = n
+	}
+
+	// ── status ───────────────────────────────────────────────────────────────
+	status := q.Get("status")
+	if status != "" && status != "active" && status != "completed" {
+		httpx.WriteProblem(w, r, httpx.ValidationProblem(
+			"validation_error",
+			"Request validation failed.",
+			httpx.FieldError{Pointer: "/status", Detail: `status must be "active" or "completed"`},
+		))
+		return
+	}
+
+	// ── dueBefore / dueAfter ─────────────────────────────────────────────────
+	var dueBefore, dueAfter time.Time
+	if raw := q.Get("dueBefore"); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			httpx.WriteProblem(w, r, httpx.ValidationProblem(
+				"validation_error",
+				"Request validation failed.",
+				httpx.FieldError{Pointer: "/dueBefore", Detail: "dueBefore must be an RFC 3339 timestamp"},
+			))
+			return
+		}
+		dueBefore = parsed.UTC()
+	}
+	if raw := q.Get("dueAfter"); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			httpx.WriteProblem(w, r, httpx.ValidationProblem(
+				"validation_error",
+				"Request validation failed.",
+				httpx.FieldError{Pointer: "/dueAfter", Detail: "dueAfter must be an RFC 3339 timestamp"},
+			))
+			return
+		}
+		dueAfter = parsed.UTC()
+	}
+
+	// ── cursor ───────────────────────────────────────────────────────────────
+	cursor := q.Get("cursor")
+
+	lq := ListQuery{
+		Cursor:    cursor,
+		Limit:     limit,
+		Status:    status,
+		DueBefore: dueBefore,
+		DueAfter:  dueAfter,
+	}
+
+	page, err := m.svc.List(r.Context(), scope, lq)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCursor) {
+			httpx.WriteProblem(w, r, httpx.Problem{
+				Title:  "Invalid cursor",
+				Status: http.StatusBadRequest,
+				Detail: "The cursor value is malformed or has been corrupted.",
+				Code:   "invalid_cursor",
+			})
+			return
+		}
+		httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "list_reminders_failed", err.Error()))
+		return
+	}
+
+	// Map service Page to the shared httpx.Page[Reminder] envelope.
+	// NextCursor is *string: nil on the last page (JSON null), non-nil with the
+	// cursor token when HasMore is true.  Per the HTTP house guide, last-page
+	// responses must emit null, not an empty string.
+	var nextCursor *string
+	if page.HasMore && page.NextCursor != "" {
+		nextCursor = &page.NextCursor
+	}
+	envelope := httpx.Page[Reminder]{
+		Data: page.Items,
+		Pagination: httpx.PagePagination{
+			NextCursor: nextCursor,
+			HasMore:    page.HasMore,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(envelope); err != nil {
+		m.logger.Error("reminders: encode list response", "err", err)
 	}
 }
 

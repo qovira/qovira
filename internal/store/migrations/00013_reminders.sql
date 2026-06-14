@@ -40,14 +40,20 @@ CREATE TABLE reminders (
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Composite index on (user_id, status, due_at): the primary read pattern is
--- listing a user's active reminders ordered by due date.
-CREATE INDEX reminders_user_status_due ON reminders (user_id, status, due_at);
+-- Index on (user_id, due_at, id): serves the primary list query ordered by
+-- (due_at, id) for both the no-status default path and the status-filtered path.
+-- Placing status after due_at (as a residual filter) avoids a USE TEMP B-TREE FOR
+-- ORDER BY that the former (user_id, status, due_at) index caused: status between
+-- user_id and due_at prevented SQLite from satisfying the ORDER BY due_at, id
+-- directly from the index.  With (user_id, due_at, id) the ordering is
+-- index-native and status becomes a cheap residual predicate over the ordered
+-- stream.  Verified by EXPLAIN QUERY PLAN in TestListReminders_IndexPlan.
+CREATE INDEX reminders_user_due ON reminders (user_id, due_at, id);
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
-DROP INDEX IF EXISTS reminders_user_status_due;
+DROP INDEX IF EXISTS reminders_user_due;
 -- +goose StatementEnd
 
 -- +goose StatementBegin

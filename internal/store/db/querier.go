@@ -127,6 +127,23 @@ type Querier interface {
 	// the caller can scope per-row operations (abandon message, emit per-user event).
 	ListLapsedConfirmations(ctx context.Context, now string) ([]PendingConfirmation, error)
 	ListMessages(ctx context.Context, arg ListMessagesParams) ([]ListMessagesRow, error)
+	// List reminders for a user with optional status and due-window filters,
+	// keyset-paginated on (due_at, id).  Fetches limit+1 rows so the caller can
+	// detect whether a next page exists.
+	//
+	// Optional filters use sqlc.narg so absent values are NULL and the predicate
+	// becomes a no-op.  The keyset predicate uses the expanded form of the tuple
+	// comparison (due_at, id) > (cursor_due, cursor_id), which is logically
+	// identical: skip rows that sort before the cursor.  Both forms produce the
+	// same result set; the expanded form is required because sqlc's SQLite parser
+	// does not recognise the row-value syntax (col, col) > (?, ?).
+	//
+	// The query is served by the reminders_user_due index on (user_id, due_at, id).
+	// That index satisfies ORDER BY due_at, id directly from the index-ordered stream
+	// for both the no-status path and the status-filtered path (status is a residual
+	// predicate).  No USE TEMP B-TREE FOR ORDER BY occurs in either case, verified
+	// by EXPLAIN QUERY PLAN in TestListReminders_IndexPlan.
+	ListReminders(ctx context.Context, arg ListRemindersParams) ([]Reminder, error)
 	// List all settings whose key starts with @prefix, ordered by key. The caller
 	// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
 	// those escapes literal, so a prefix containing '_' or '%' matches literally
