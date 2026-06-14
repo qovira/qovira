@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -3115,5 +3117,914 @@ func TestService_Update_Active_AlreadyActive_NoNewJob(t *testing.T) {
 	if enqueuesAfter != enqueuesBefore {
 		t.Errorf("expected no new Enqueue call for no-op status=active on active reminder; got %d new call(s)",
 			enqueuesAfter-enqueuesBefore)
+	}
+}
+
+// ── Recurring reminders slice (slice 4) ───────────────────────────────────────
+//
+// AC1: Create/Update with valid rrule arms a RECURRING fire-job.
+// AC2: Malformed rrule → ValidationError → 422.
+// AC3: Handler recurring branch advances due_at, keeps status=active, ignores auto_complete.
+// AC4: Reclaim re-run does NOT skip an occurrence (idempotency).
+// AC5: rrule change via Update cancels old job + enqueues fresh recurring one.
+// AC6: DST-spanning rule keeps wall-clock time.
+
+// TestCreate_RecurringFireJob_Arms_RecurringJob verifies AC1: creating a reminder
+// with a valid rrule enqueues a RECURRING fire-job (Recurrence field set with
+// RRULE and TZ), while a one-shot reminder gets nil Recurrence.
+func TestCreate_RecurringFireJob_Arms_RecurringJob(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-rec-create-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-rec-create-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	dueAt := time.Date(2027, 1, 1, 8, 0, 0, 0, time.UTC)
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Daily stand-up",
+		DueAt: dueAt,
+		Tz:    "America/New_York",
+		Rrule: "FREQ=DAILY",
+	})
+	if err != nil {
+		t.Fatalf("Create with rrule: %v", err)
+	}
+	if r.Rrule != "FREQ=DAILY" {
+		t.Errorf("got Rrule %q, want %q", r.Rrule, "FREQ=DAILY")
+	}
+
+	enqueued := prod.allEnqueued()
+	if len(enqueued) == 0 {
+		t.Fatal("expected Enqueue call")
+	}
+	req := enqueued[len(enqueued)-1]
+	if req.Recurrence == nil {
+		t.Fatal("expected non-nil Recurrence for a recurring reminder")
+	}
+	if req.Recurrence.RRULE != "FREQ=DAILY" {
+		t.Errorf("Recurrence.RRULE=%q, want %q", req.Recurrence.RRULE, "FREQ=DAILY")
+	}
+	if req.Recurrence.TZ != "America/New_York" {
+		t.Errorf("Recurrence.TZ=%q, want %q", req.Recurrence.TZ, "America/New_York")
+	}
+	if req.Recurrence.Every != 0 {
+		t.Errorf("Recurrence.Every should be zero, got %v", req.Recurrence.Every)
+	}
+}
+
+// TestCreate_OneShotReminder_NilRecurrence verifies that a reminder without an
+// rrule still enqueues with nil Recurrence (regression guard for AC1).
+func TestCreate_OneShotReminder_NilRecurrence(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-oneshot-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-oneshot-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	_, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "One-shot",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	enqueued := prod.allEnqueued()
+	if len(enqueued) == 0 {
+		t.Fatal("expected Enqueue call")
+	}
+	req := enqueued[len(enqueued)-1]
+	if req.Recurrence != nil {
+		t.Errorf("expected nil Recurrence for one-shot, got %+v", req.Recurrence)
+	}
+}
+
+// TestCreate_MalformedRrule_ValidationError verifies AC2: a malformed rrule on
+// Create returns a ValidationError (→ 422 at the REST layer).
+func TestCreate_MalformedRrule_ValidationError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-rec-val-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	_, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Bad rrule",
+		DueAt: time.Now().UTC().Add(time.Hour),
+		Tz:    "UTC",
+		Rrule: "FREQ=BOGUS;BYDAY=XY", // invalid
+	})
+	if err == nil {
+		t.Fatal("expected ValidationError for malformed rrule, got nil")
+	}
+	var valErr *reminders.ValidationError
+	if !errors.As(err, &valErr) {
+		t.Fatalf("expected *reminders.ValidationError, got: %T %v", err, err)
+	}
+	found := false
+	for _, fe := range valErr.Fields {
+		if fe.Pointer == "/rrule" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected field error at /rrule; got: %+v", valErr.Fields)
+	}
+	// No enqueue must have been attempted.
+	if len(prod.allEnqueued()) != 0 {
+		t.Error("Enqueue must not be called when rrule validation fails")
+	}
+}
+
+// TestHTTP_Create_MalformedRrule_422 verifies AC2 at the REST layer.
+func TestHTTP_Create_MalformedRrule_422(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+
+	const userID = "user-rec-http-422-01"
+	seedUser(t, st, userID, "UTC")
+
+	router := httpx.NewRouter()
+	m.Routes(router)
+
+	dueAt := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	body, _ := json.Marshal(map[string]any{
+		"title": "Bad rrule",
+		"dueAt": dueAt,
+		"tz":    "UTC",
+		"rrule": "FREQ=BOGUS;BYDAY=XY",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/reminders", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(httpx.ContextWithPrincipal(ctx, store.Principal{UserID: userID, Role: "member"}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("got %d, want 422 for malformed rrule; body: %s", w.Code, w.Body.String())
+	}
+	var prob struct {
+		Errors []struct {
+			Pointer string `json:"pointer"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&prob); err != nil {
+		t.Fatalf("decode problem: %v", err)
+	}
+	found := false
+	for _, fe := range prob.Errors {
+		if fe.Pointer == "/rrule" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected field error at /rrule; got: %+v", prob.Errors)
+	}
+}
+
+// TestUpdate_MalformedRrule_ValidationError verifies AC2: a malformed rrule on
+// Update also returns a ValidationError.
+func TestUpdate_MalformedRrule_ValidationError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-upd-rrule-val-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-upd-rrule-val-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Will be updated",
+		DueAt: time.Now().UTC().Add(time.Hour),
+		Tz:    "UTC",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err = svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Rrule: reminders.SetString("FREQ=BOGUS;BYDAY=XY"),
+	})
+	if err == nil {
+		t.Fatal("expected ValidationError for malformed rrule on Update, got nil")
+	}
+	var valErr *reminders.ValidationError
+	if !errors.As(err, &valErr) {
+		t.Fatalf("expected *reminders.ValidationError, got: %T %v", err, err)
+	}
+	found := false
+	for _, fe := range valErr.Fields {
+		if fe.Pointer == "/rrule" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected field error at /rrule; got: %+v", valErr.Fields)
+	}
+}
+
+// TestFireHandler_Recurring_AdvancesDueAt verifies AC3: the fire handler's
+// recurring branch advances due_at to the next occurrence, keeps status=active,
+// and stamps last_fired_at. Also verifies auto_complete is ignored for recurring
+// reminders (tested with both true and false).
+//
+// The anchor must be in the past relative to time.Now() so that the fire handler
+// (which uses time.Now() internally) can advance to the next occurrence strictly
+// after now. We use a Monday in 2020; FREQ=WEEKLY advances to the next Monday
+// after the real "now" at test run time.
+func TestFireHandler_Recurring_AdvancesDueAt(t *testing.T) {
+	t.Parallel()
+	for _, autoComplete := range []bool{true, false} {
+		t.Run(fmt.Sprintf("autoComplete=%v", autoComplete), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			st := openMigratedStore(t)
+			prod := &fakeProducer{returnID: "job-rec-fire-001"}
+			bus := &fakePublisher{}
+			m, reg := newTestModule(t, st, prod, bus)
+			svc := m.Service()
+
+			const userID = "user-rec-fire-01"
+			seedUser(t, st, userID, "UTC")
+			scope := newScopeFor(userID)
+
+			// Anchor: 2020-01-06 08:00:00 UTC (a Monday, well in the past).
+			// FREQ=WEEKLY anchored here; "next occurrence after time.Now()" will be
+			// the first Monday >= now+1s, which is strictly after the anchor.
+			anchor := time.Date(2020, 1, 6, 8, 0, 0, 0, time.UTC)
+
+			ac := autoComplete
+			r, err := svc.Create(ctx, scope, reminders.CreateInput{
+				Title:        "Weekly meeting",
+				DueAt:        anchor,
+				Tz:           "UTC",
+				Rrule:        "FREQ=WEEKLY",
+				AutoComplete: &ac,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Record now before dispatching so we can assert due_at is in the future.
+			now := time.Now().UTC()
+
+			// Dispatch the fire handler.
+			payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+			job := scheduler.Job{
+				ID:      "job-rec-fire-001",
+				Kind:    "reminder.fire",
+				Payload: payload,
+				Attempt: 1,
+				Scope:   scope,
+			}
+			if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+				t.Fatalf("fire handler: %v", err)
+			}
+
+			// Row must still be active (recurring ignores auto_complete).
+			row, err := db.New(st.Reader()).GetReminder(ctx, db.GetReminderParams{
+				ID:     r.ID,
+				UserID: userID,
+			})
+			if err != nil {
+				t.Fatalf("GetReminder: %v", err)
+			}
+			if row.Status != "active" {
+				t.Errorf("status=%q, want %q (recurring must stay active)", row.Status, "active")
+			}
+			if !row.LastFiredAt.Valid || row.LastFiredAt.String == "" {
+				t.Error("expected last_fired_at to be stamped")
+			}
+			if row.CompletedAt.Valid {
+				t.Error("completed_at must be NULL for a recurring reminder")
+			}
+
+			// due_at must have advanced beyond the anchor.
+			gotDue, parseErr := time.Parse(time.RFC3339, row.DueAt)
+			if parseErr != nil {
+				t.Fatalf("parse due_at: %v", parseErr)
+			}
+			if !gotDue.After(anchor) {
+				t.Errorf("due_at=%v must be strictly after anchor=%v (must have advanced)", gotDue, anchor)
+			}
+			// due_at must be strictly after now (the fire point was in the past, next occ is future).
+			if !gotDue.After(now) {
+				t.Errorf("due_at=%v must be strictly after now=%v", gotDue, now)
+			}
+			// FREQ=WEEKLY with 08:00 anchor: next must be a Monday at 08:00 UTC.
+			if gotDue.Weekday() != time.Monday {
+				t.Errorf("FREQ=WEEKLY from Monday anchor: got weekday=%v, want Monday", gotDue.Weekday())
+			}
+			if gotDue.Hour() != 8 || gotDue.Minute() != 0 || gotDue.Second() != 0 {
+				t.Errorf("due_at time-of-day=%02d:%02d:%02d, want 08:00:00 UTC",
+					gotDue.Hour(), gotDue.Minute(), gotDue.Second())
+			}
+
+			// reminder.fired event must have been published.
+			evts := bus.allEvents()
+			var foundFired bool
+			for _, e := range evts {
+				if e.event.Type == "reminder.fired" && e.userID == userID {
+					foundFired = true
+					break
+				}
+			}
+			if !foundFired {
+				t.Error("expected reminder.fired event")
+			}
+		})
+	}
+}
+
+// TestFireHandler_Recurring_Idempotency verifies AC4: running the recurring fire
+// handler twice in rapid succession does NOT double-advance due_at. Because the
+// advance is "next occurrence strictly after now" and both runs share approximately
+// the same "now", both compute the same next occurrence. The test asserts that
+// due_at is identical after the first and second run.
+//
+// The anchor is in the distant past (2020) so time.Now() > anchor at test run time.
+func TestFireHandler_Recurring_Idempotency(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-rec-idem-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-rec-idem-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// Anchor: 2020-01-01 08:00:00 UTC (well in the past). FREQ=DAILY.
+	// Both handler runs execute with time.Now() (2026-era), so both compute
+	// the same "next occurrence after now" — typically tomorrow at 08:00 UTC.
+	anchor := time.Date(2020, 1, 1, 8, 0, 0, 0, time.UTC)
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Daily task",
+		DueAt:        anchor,
+		Tz:           "UTC",
+		Rrule:        "FREQ=DAILY",
+		AutoComplete: ptrFalse,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      "job-rec-idem-001",
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+
+	// First run.
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler (first run): %v", err)
+	}
+
+	// Read due_at after first run.
+	row1, err := db.New(st.Reader()).GetReminder(ctx, db.GetReminderParams{ID: r.ID, UserID: userID})
+	if err != nil {
+		t.Fatalf("GetReminder after first run: %v", err)
+	}
+	dueAfterFirst := row1.DueAt
+	if dueAfterFirst == anchor.UTC().Format(time.RFC3339) {
+		t.Errorf("due_at did not advance after first run; still %q", dueAfterFirst)
+	}
+
+	// Second run in rapid succession (simulating a reclaim within the lease window).
+	// "now" has not passed the newly-advanced due_at, so both runs must compute
+	// the same next occurrence.
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler (second run): %v", err)
+	}
+
+	// due_at must be identical — the same next occurrence, not advanced twice.
+	row2, err := db.New(st.Reader()).GetReminder(ctx, db.GetReminderParams{ID: r.ID, UserID: userID})
+	if err != nil {
+		t.Fatalf("GetReminder after second run: %v", err)
+	}
+	if row2.DueAt != dueAfterFirst {
+		t.Errorf("due_at advanced on second run (double-advance): after first=%q, after second=%q (must be identical)",
+			dueAfterFirst, row2.DueAt)
+	}
+
+	// due_at must be in the future (past now at test run time).
+	gotDue, parseErr := time.Parse(time.RFC3339, row2.DueAt)
+	if parseErr != nil {
+		t.Fatalf("parse due_at: %v", parseErr)
+	}
+	if !gotDue.After(time.Now().UTC()) {
+		t.Errorf("due_at=%v must be in the future after advance", gotDue)
+	}
+
+	// reminder.fired must have been emitted at least once (at most twice — re-emit is acceptable).
+	evts := bus.allEvents()
+	var firedCount int
+	for _, e := range evts {
+		if e.event.Type == "reminder.fired" && e.userID == userID {
+			firedCount++
+		}
+	}
+	if firedCount < 1 {
+		t.Error("expected reminder.fired to be emitted at least once")
+	}
+	if firedCount > 2 {
+		t.Errorf("reminder.fired emitted %d times, want ≤2", firedCount)
+	}
+}
+
+// TestUpdate_RruleChange_CancelsAndReenqueues verifies AC5: changing the rrule
+// via Update cancels the old fire-job and enqueues a fresh recurring one with
+// Recurrence set.
+func TestUpdate_RruleChange_CancelsAndReenqueues(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-rrule-chg-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-rrule-chg-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// Create a one-shot reminder first.
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "One-shot to become recurring",
+		DueAt: time.Now().UTC().Add(time.Hour),
+		Tz:    "UTC",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	origJobID := r.FireJobID
+
+	// Change returnID so the new Enqueue gets a distinct job ID.
+	prod.mu.Lock()
+	prod.returnID = "job-rrule-chg-002"
+	prod.mu.Unlock()
+
+	// Update with a new rrule — transitions one-shot → recurring.
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Rrule: reminders.SetString("FREQ=WEEKLY"),
+	})
+	if err != nil {
+		t.Fatalf("Update (add rrule): %v", err)
+	}
+
+	// Old job must have been cancelled.
+	cancelled := prod.allCancelled()
+	if !slices.Contains(cancelled, origJobID) {
+		t.Errorf("old job %q not cancelled; cancelled: %v", origJobID, cancelled)
+	}
+
+	// A new recurring job must have been enqueued.
+	enqueued := prod.allEnqueued()
+	// Find the enqueue that happened after Create (second Enqueue call at minimum).
+	var newReq *scheduler.EnqueueRequest
+	for i := range enqueued {
+		if enqueued[i].Recurrence != nil && enqueued[i].Recurrence.RRULE == "FREQ=WEEKLY" {
+			req := enqueued[i]
+			newReq = &req
+			break
+		}
+	}
+	if newReq == nil {
+		t.Fatalf("no recurring Enqueue found with RRULE=FREQ=WEEKLY; all enqueued: %+v", enqueued)
+	}
+	if newReq.Recurrence.TZ != "UTC" {
+		t.Errorf("new Enqueue Recurrence.TZ=%q, want %q", newReq.Recurrence.TZ, "UTC")
+	}
+
+	// New fire_job_id must differ from the original.
+	if updated.FireJobID == origJobID {
+		t.Errorf("fire_job_id unchanged after rrule change; still %q", origJobID)
+	}
+	if updated.FireJobID == "" {
+		t.Error("fire_job_id must be non-empty after rrule change")
+	}
+}
+
+// TestUpdate_RruleCleared_CancelsAndReenqueuesOneShot verifies AC5 for the
+// recurring→one-shot path: clearing rrule (null) on an active recurring reminder
+// cancels the old job and enqueues a one-shot (nil Recurrence).
+func TestUpdate_RruleCleared_CancelsAndReenqueuesOneShot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-rrule-clear-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-rrule-clear-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// Create a recurring reminder.
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Recurring to one-shot",
+		DueAt: time.Now().UTC().Add(time.Hour),
+		Tz:    "UTC",
+		Rrule: "FREQ=DAILY",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	origJobID := r.FireJobID
+
+	prod.mu.Lock()
+	prod.returnID = "job-rrule-clear-002"
+	prod.mu.Unlock()
+
+	// Clear the rrule — transitions recurring → one-shot.
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Rrule: reminders.ClearString(),
+	})
+	if err != nil {
+		t.Fatalf("Update (clear rrule): %v", err)
+	}
+
+	// Old job cancelled.
+	cancelled := prod.allCancelled()
+	if !slices.Contains(cancelled, origJobID) {
+		t.Errorf("old job %q not cancelled; cancelled: %v", origJobID, cancelled)
+	}
+
+	// New enqueue must have nil Recurrence (one-shot).
+	enqueued := prod.allEnqueued()
+	// The last Enqueue is the one-shot re-enqueue; find one after Create's enqueue.
+	var foundOneShot bool
+	for _, req := range enqueued {
+		if req.Key == "reminder:"+r.ID && req.Recurrence == nil {
+			// There may be two: one from Create (rrule=FREQ=DAILY, recurring) and one
+			// from the clear (nil Recurrence). We want the latter.
+			// The first from Create would have Recurrence set; this one has nil.
+			foundOneShot = true
+		}
+	}
+	if !foundOneShot {
+		t.Errorf("expected a one-shot Enqueue (nil Recurrence) after clearing rrule; all enqueued: %+v", enqueued)
+	}
+
+	// fire_job_id changed.
+	if updated.FireJobID == origJobID {
+		t.Errorf("fire_job_id unchanged after clearing rrule; still %q", origJobID)
+	}
+	if updated.FireJobID == "" {
+		t.Error("fire_job_id must be non-empty after clearing rrule")
+	}
+	if updated.Rrule != "" {
+		t.Errorf("Rrule must be empty after clearing, got %q", updated.Rrule)
+	}
+}
+
+// TestFireHandler_Recurring_DST verifies AC6: a daily 8am rule across a US
+// spring-forward DST boundary keeps wall-clock time (8am local, not 7am/9am UTC).
+//
+// The anchor is 2020-01-01 08:00 ET (EST, UTC-5) = 13:00 UTC — far in the past
+// so time.Now() (2026-era) is always after it. The RRULE engine computes the
+// next daily 08:00 ET occurrence after now; because we're currently in EDT (UTC-4)
+// in June, that occurrence will be 08:00 ET = 12:00 UTC, not 13:00 UTC.
+//
+// The core property: whatever the next occurrence is, its wall-clock hour in
+// America/New_York must be 8am. If the implementation were naively computing
+// "now + 24h" it would drift by an hour across DST boundaries.
+func TestFireHandler_Recurring_DST(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-dst-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-dst-01"
+	const tz = "America/New_York"
+	seedUser(t, st, userID, tz)
+	scope := newScopeFor(userID)
+
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		t.Fatalf("LoadLocation: %v", err)
+	}
+
+	// Anchor: 2020-01-01 08:00 ET (EST, UTC-5) = 13:00 UTC.
+	// The handler will be dispatched "now" (2026-era), computing the next daily
+	// 08:00 ET occurrence after now. The result must have Hour()==8 in ET.
+	anchor := time.Date(2020, 1, 1, 8, 0, 0, 0, loc).UTC()
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Daily 8am ET",
+		DueAt: anchor,
+		Tz:    tz,
+		Rrule: "FREQ=DAILY",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Dispatch the fire handler.
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      "job-dst-001",
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler: %v", err)
+	}
+
+	row, err := db.New(st.Reader()).GetReminder(ctx, db.GetReminderParams{ID: r.ID, UserID: userID})
+	if err != nil {
+		t.Fatalf("GetReminder: %v", err)
+	}
+
+	nextDue, parseErr := time.Parse(time.RFC3339, row.DueAt)
+	if parseErr != nil {
+		t.Fatalf("parse due_at %q: %v", row.DueAt, parseErr)
+	}
+
+	// Core property: wall-clock hour must be 8am in the reminder's timezone.
+	// This holds regardless of DST offset (EST UTC-5 or EDT UTC-4).
+	nextDueLocal := nextDue.In(loc)
+	if nextDueLocal.Hour() != 8 {
+		t.Errorf("DST test: next due_at=%v (local=%v), want 8am %s; got hour=%d",
+			nextDue, nextDueLocal, tz, nextDueLocal.Hour())
+	}
+	if nextDueLocal.Minute() != 0 || nextDueLocal.Second() != 0 {
+		t.Errorf("DST test: next due_at time-of-day=%02d:%02d:%02d, want 08:00:00",
+			nextDueLocal.Hour(), nextDueLocal.Minute(), nextDueLocal.Second())
+	}
+	// due_at must be after the anchor.
+	if !nextDue.After(anchor) {
+		t.Errorf("DST test: next due_at=%v must be after anchor=%v", nextDue, anchor)
+	}
+}
+
+// ── Item 1: status guard + finite-series exhaustion ──────────────────────────
+
+// TestFireHandler_ExhaustedSeries verifies the finite-series branch:
+//   - Create a recurring reminder with FREQ=DAILY;COUNT=1 anchored in the past.
+//   - First dispatch: nextOccurrence returns zero (series exhausted) →
+//     reminder.fired emitted, last_fired_at stamped, status=completed.
+//   - Second dispatch (reclaim simulation): status != "active" → returns nil,
+//     no second reminder.fired emitted.
+func TestFireHandler_ExhaustedSeries(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-exhausted-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-exhausted-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// FREQ=DAILY;COUNT=1 — exactly one occurrence at the anchor (in the past).
+	// When the handler fires "now" (2026-era), nextOccurrence computes After(now,false)
+	// which returns zero because COUNT=1 was consumed at the anchor.
+	anchor := time.Date(2020, 1, 1, 8, 0, 0, 0, time.UTC)
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Finite series",
+		DueAt:        anchor,
+		Tz:           "UTC",
+		Rrule:        "FREQ=DAILY;COUNT=1",
+		AutoComplete: ptrFalse, // auto_complete=false to prove exhaustion completes regardless
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      "job-exhausted-001",
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+
+	// ── First dispatch: series is exhausted → completed ──────────────────────
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler (first run): %v", err)
+	}
+
+	// reminder.fired must have been published once.
+	evts := bus.allEvents()
+	var firedCount int
+	for _, e := range evts {
+		if e.event.Type == "reminder.fired" && e.userID == userID {
+			firedCount++
+		}
+	}
+	if firedCount != 1 {
+		t.Errorf("expected exactly 1 reminder.fired after exhausted series; got %d", firedCount)
+	}
+
+	// Row: status=completed, last_fired_at stamped.
+	row, err := db.New(st.Reader()).GetReminder(ctx, db.GetReminderParams{
+		ID:     r.ID,
+		UserID: userID,
+	})
+	if err != nil {
+		t.Fatalf("GetReminder after first dispatch: %v", err)
+	}
+	if row.Status != "completed" {
+		t.Errorf("status=%q, want %q (series exhausted → completed)", row.Status, "completed")
+	}
+	if !row.LastFiredAt.Valid || row.LastFiredAt.String == "" {
+		t.Error("expected last_fired_at to be stamped after exhausted series")
+	}
+	if !row.CompletedAt.Valid || row.CompletedAt.String == "" {
+		t.Error("expected completed_at to be set (exhausted series → terminal)")
+	}
+
+	// ── Second dispatch (reclaim): status != "active" → no-op ───────────────
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler (second run / reclaim): %v", err)
+	}
+
+	// No second reminder.fired must have been emitted.
+	evts2 := bus.allEvents()
+	var firedCount2 int
+	for _, e := range evts2 {
+		if e.event.Type == "reminder.fired" && e.userID == userID {
+			firedCount2++
+		}
+	}
+	if firedCount2 != 1 {
+		t.Errorf("expected still exactly 1 reminder.fired after reclaim dispatch of completed reminder; got %d", firedCount2)
+	}
+}
+
+// TestFireHandler_CompletedGuard verifies that a completed reminder whose
+// fire-job is somehow dispatched (e.g., scheduler reclaim after auto-complete)
+// returns nil without re-firing.
+func TestFireHandler_CompletedGuard(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-cmpguard-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-cmpguard-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// Create a one-shot reminder with auto_complete=true; fire it once (legitimate).
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Complete-guard reminder",
+		DueAt:        time.Date(2020, 6, 1, 9, 0, 0, 0, time.UTC), // past
+		AutoComplete: ptrTrue,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      "job-cmpguard-001",
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+
+	// First dispatch: legitimate fire → status becomes completed.
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler (first run): %v", err)
+	}
+
+	// Confirm the reminder is now completed.
+	row, err := db.New(st.Reader()).GetReminder(ctx, db.GetReminderParams{
+		ID:     r.ID,
+		UserID: userID,
+	})
+	if err != nil {
+		t.Fatalf("GetReminder: %v", err)
+	}
+	if row.Status != "completed" {
+		t.Fatalf("expected status=completed after first fire; got %q", row.Status)
+	}
+
+	// Clear events so we can count cleanly.
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	// Second dispatch: simulates at-least-once scheduler reclaim of the job.
+	// Because status != "active", handler must return nil and NOT emit reminder.fired.
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler (reclaim of completed): %v", err)
+	}
+
+	evts := bus.allEvents()
+	for _, e := range evts {
+		if e.event.Type == "reminder.fired" && e.userID == userID {
+			t.Errorf("reminder.fired must NOT be emitted when dispatching a completed reminder; got event: %+v", e)
+		}
+	}
+}
+
+// TestUpdate_Rrule_ValidatesInEffectiveTz verifies that Service.Update validates
+// the rrule against the effective timezone (the reminder's stored tz), not always
+// UTC. A rule that is syntactically valid in UTC but would need tz-aware parsing
+// must still pass — the goal here is that the timezone used for validation matches
+// what will be stored and enqueued, keeping Create/Update consistent.
+func TestUpdate_Rrule_ValidatesInEffectiveTz(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-tz-valid-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-tz-valid-01"
+	seedUser(t, st, userID, "America/New_York")
+	scope := newScopeFor(userID)
+
+	// Create a reminder in America/New_York (the effective tz stored on the row).
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "TZ-aware rrule update test",
+		DueAt: time.Now().UTC().Add(time.Hour),
+		Tz:    "America/New_York",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Setting a valid rrule via Update must succeed (not reject due to wrong tz
+	// being used in the validator).
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Rrule: reminders.SetString("FREQ=DAILY"),
+	})
+	if err != nil {
+		t.Fatalf("Update with valid rrule should succeed; got: %v", err)
+	}
+	if updated.Rrule != "FREQ=DAILY" {
+		t.Errorf("got Rrule %q, want %q", updated.Rrule, "FREQ=DAILY")
+	}
+
+	// A genuinely malformed rrule must still be rejected regardless of tz.
+	_, err = svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Rrule: reminders.SetString("FREQ=BOGUS"),
+	})
+	if err == nil {
+		t.Fatal("expected ValidationError for malformed rrule, got nil")
+	}
+	var valErr *reminders.ValidationError
+	if !errors.As(err, &valErr) {
+		t.Fatalf("expected *reminders.ValidationError, got %T: %v", err, err)
+	}
+	var foundPointer bool
+	for _, fe := range valErr.Fields {
+		if fe.Pointer == "/rrule" {
+			foundPointer = true
+		}
+	}
+	if !foundPointer {
+		t.Errorf("expected field error at /rrule; got: %+v", valErr.Fields)
 	}
 }

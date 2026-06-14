@@ -297,6 +297,40 @@ func (q *Queries) StampFiredKeepActive(ctx context.Context, arg StampFiredKeepAc
 	return result.RowsAffected()
 }
 
+const stampFiredRecurring = `-- name: StampFiredRecurring :execrows
+UPDATE reminders
+SET last_fired_at = ?1,
+    due_at        = ?2,
+    updated_at    = ?3
+WHERE id = ?4
+  AND user_id = ?5
+`
+
+type StampFiredRecurringParams struct {
+	LastFiredAt sql.NullString
+	DueAt       string
+	UpdatedAt   string
+	ID          string
+	UserID      string
+}
+
+// Advances a recurring reminder after each fire: stamps last_fired_at, advances
+// due_at to the next occurrence, and keeps status=active. Only the fire handler
+// calls this; UpdateReminder intentionally excludes last_fired_at.
+func (q *Queries) StampFiredRecurring(ctx context.Context, arg StampFiredRecurringParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, stampFiredRecurring,
+		arg.LastFiredAt,
+		arg.DueAt,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.UserID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateReminder = `-- name: UpdateReminder :execrows
 UPDATE reminders
 SET title = ?1,

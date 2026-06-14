@@ -183,6 +183,10 @@ type Querier interface {
 	SetReminderFireJobID(ctx context.Context, arg SetReminderFireJobIDParams) (int64, error)
 	StampFiredAutoComplete(ctx context.Context, arg StampFiredAutoCompleteParams) (int64, error)
 	StampFiredKeepActive(ctx context.Context, arg StampFiredKeepActiveParams) (int64, error)
+	// Advances a recurring reminder after each fire: stamps last_fired_at, advances
+	// due_at to the next occurrence, and keeps status=active. Only the fire handler
+	// calls this; UpdateReminder intentionally excludes last_fired_at.
+	StampFiredRecurring(ctx context.Context, arg StampFiredRecurringParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
 	// Writes all mutable columns for a single reminder row.

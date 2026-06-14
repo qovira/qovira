@@ -40,6 +40,17 @@ SET last_fired_at = @last_fired_at,
 WHERE id = @id
   AND user_id = @user_id;
 
+-- name: StampFiredRecurring :execrows
+-- Advances a recurring reminder after each fire: stamps last_fired_at, advances
+-- due_at to the next occurrence, and keeps status=active. Only the fire handler
+-- calls this; UpdateReminder intentionally excludes last_fired_at.
+UPDATE reminders
+SET last_fired_at = @last_fired_at,
+    due_at        = @due_at,
+    updated_at    = @updated_at
+WHERE id = @id
+  AND user_id = @user_id;
+
 -- name: SetReminderFireJobID :execrows
 UPDATE reminders
 SET fire_job_id = @fire_job_id,

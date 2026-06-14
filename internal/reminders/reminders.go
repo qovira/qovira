@@ -1,9 +1,7 @@
-// Package reminders implements the reminders capability module: create a one-shot
-// reminder, persist it, enqueue a fire-job, and fire it live at due_at via the
-// "reminder.fire" scheduler handler.
-//
-// This slice establishes the Service + REST adapter + fire path.
-// AI tools, list/update/complete/delete, and rrule recurrence are later slices.
+// Package reminders implements the reminders capability module: create a reminder,
+// persist it, enqueue a fire-job, and fire it live at due_at via the
+// "reminder.fire" scheduler handler. Supports one-shot and recurring (RRULE)
+// reminders. Recurring reminders advance due_at on each fire and never auto-complete.
 package reminders
 
 import (
@@ -18,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	rrulego "github.com/teambition/rrule-go"
 
 	"github.com/qovira/qovira/internal/capability"
 	"github.com/qovira/qovira/internal/events"
@@ -295,12 +295,26 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 	}
 
 	// tz: validate the explicit value now; default is resolved below.
+	tzForRruleValidation := in.Tz
 	if in.Tz != "" {
 		if _, err := time.LoadLocation(in.Tz); err != nil {
 			fields = append(fields, httpx.FieldError{
 				Pointer: "/tz",
 				Detail:  fmt.Sprintf("%q is not a valid IANA timezone", in.Tz),
 			})
+			tzForRruleValidation = "" // tz invalid; skip rrule parse (tz will be the error)
+		}
+	}
+
+	// rrule: validate when present. Use explicit tz for parsing (or UTC as fallback
+	// when tz is absent/defaulted — UTC is always valid and lets us catch bad rrule syntax).
+	if in.Rrule != "" {
+		effectiveTz := tzForRruleValidation
+		if effectiveTz == "" {
+			effectiveTz = "UTC"
+		}
+		if fe := validateRrule(in.Rrule, effectiveTz); fe != nil {
+			fields = append(fields, *fe)
 		}
 	}
 
@@ -379,11 +393,12 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 	}
 
 	jobID, err := s.prod.Enqueue(ctx, scheduler.EnqueueRequest{
-		Kind:    "reminder.fire",
-		Scope:   scope,
-		RunAt:   dueAtCanon, // canonical truncated instant matches persisted due_at
-		Key:     "reminder:" + reminderID,
-		Payload: payload,
+		Kind:       "reminder.fire",
+		Scope:      scope,
+		RunAt:      dueAtCanon, // canonical truncated instant matches persisted due_at
+		Key:        "reminder:" + reminderID,
+		Payload:    payload,
+		Recurrence: recurrenceFor(in.Rrule, tz),
 	})
 	if err != nil {
 		// Best-effort: delete the orphan row so it doesn't persist with no fire-job.
@@ -602,6 +617,9 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 		}
 	}
 
+	// Return structural-field errors (title, dueAt, status) early to avoid a
+	// wasted DB round-trip. Rrule validation is deferred until after the row
+	// load so we can use the reminder's effective timezone (see below).
 	if len(fields) > 0 {
 		return Reminder{}, &ValidationError{Fields: fields}
 	}
@@ -616,6 +634,18 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 			return Reminder{}, fmt.Errorf("reminders: update %q: %w", id, ErrNotFound)
 		}
 		return Reminder{}, fmt.Errorf("reminders: update %q: load: %w", id, err)
+	}
+
+	// rrule: validate when a new value is being set (not cleared, not absent).
+	// Use the reminder's stored tz (row.Tz) — the same timezone that will be
+	// stored and passed to the scheduler on Enqueue — keeping Update consistent
+	// with Create (which validates in the effective tz). validateRrule parses the
+	// rrule using rrulego.StrToROptionInLocation, mirroring the scheduler's call
+	// exactly, so an rrule accepted here is always accepted at dispatch.
+	if in.Rrule.Present && in.Rrule.Value != "" {
+		if fe := validateRrule(in.Rrule.Value, row.Tz); fe != nil {
+			return Reminder{}, &ValidationError{Fields: []httpx.FieldError{*fe}}
+		}
 	}
 
 	wasCompleted := row.Status == "completed"
@@ -774,18 +804,26 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 			}
 		}
 
-	case !newDueAt.IsZero() && prevFireJobID != "" && status == "active":
-		// Pure dueAt time-shift on an active reminder: Reschedule the existing job.
+	case !newDueAt.IsZero() && prevFireJobID != "" && status == "active" && !rrule.Valid:
+		// Pure dueAt time-shift on an active ONE-SHOT reminder: Reschedule the existing job.
+		// For RECURRING reminders, a dueAt shift also changes the anchor for the RRULE
+		// engine — cancel and re-enqueue so the scheduler's recurrence columns stay
+		// consistent with the new anchor. That path is handled by the rruleChanged case
+		// below (or the combined-change fallthrough when both change at once).
 		if reschedErr := s.prod.Reschedule(ctx, prevFireJobID, newDueAt); reschedErr != nil {
 			s.logger.Error("reminders: update: reschedule fire-job",
 				"reminder_id", id, "job_id", prevFireJobID, "err", reschedErr)
 		}
 
-	case rruleChanged && prevFireJobID != "":
-		// Rrule change seam: slice 4 (recurring-reminders) fills this in.
-		// It will Cancel the old one-shot job and Enqueue a recurring one.
-		// For now this is a no-op — rrule is stored as a plain column only.
-		s.syncFireJobForRecurrenceChange(ctx, scope, id, prevFireJobID, rrule)
+	case status == "active" &&
+		((!newDueAt.IsZero() && rrule.Valid && prevFireJobID != "") ||
+			(rruleChanged && prevFireJobID != "")):
+		// Recurrence-affecting change on an ACTIVE reminder: either rrule changed,
+		// or dueAt shifted on a recurring reminder (which changes the RRULE anchor).
+		// Cancel the old job and enqueue a fresh one with the correct Recurrence field.
+		// Non-active reminders must not have a live fire-job re-enqueued here; the
+		// reopen path (above) handles the active transition separately.
+		s.syncFireJobForRecurrenceChange(ctx, scope, id, prevFireJobID, dueAtStr, rrule, row.Tz)
 	}
 
 	// ── Load final state and publish ─────────────────────────────────────────
@@ -811,22 +849,81 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 	return final, nil
 }
 
-// syncFireJobForRecurrenceChange is the seam for the recurring-reminders slice
-// (slice 4). When an Update changes the rrule of a reminder that has an active
-// fire-job, slice 4 will fill this in to Cancel the old one-shot job and
-// Enqueue a new recurring one.
+// syncFireJobForRecurrenceChange is called when an Update changes the recurrence
+// of an active reminder (rrule set/changed/cleared, or dueAt shifted on a
+// recurring reminder). It cancels the old fire-job and enqueues a fresh one with
+// the correct Recurrence field (recurring when newRrule is set, one-shot when nil).
+// The new fire_job_id is stamped on the row; errors are logged and best-efforted.
 //
-// For now this is deliberately a no-op: rrule is stored as a plain column
-// only, and no recurring fire-job management is performed in this slice.
+// Callers pass the canonical values already held in memory (dueAtStr from the
+// merged state, newRrule, and tz) to avoid a read-after-write round-trip through
+// the store. The Service remains the single writer of fire_job_id.
 func (s *Service) syncFireJobForRecurrenceChange(
-	_ context.Context,
-	_ store.Scope,
-	_ string, // reminderID
-	_ string, // prevFireJobID
-	_ sql.NullString, // newRrule
+	ctx context.Context,
+	scope store.Scope,
+	reminderID string,
+	prevFireJobID string,
+	dueAtStr string,
+	newRrule sql.NullString,
+	tz string,
 ) {
-	// Filled in by the recurring-reminders slice (slice 4).
-	// Cancel old job + Enqueue recurring job goes here.
+	// Cancel the old fire-job (best-effort: log and continue if this fails).
+	if err := s.prod.Cancel(ctx, prevFireJobID); err != nil {
+		s.logger.Error("reminders: syncFireJobForRecurrenceChange: cancel old job",
+			"reminder_id", reminderID, "job_id", prevFireJobID, "err", err)
+	}
+
+	// Parse the canonical due_at from the caller's merged state (avoids re-reading
+	// the row from the store — the value was just written by UpdateReminder above).
+	dueAtCanon, err := time.Parse(time.RFC3339, dueAtStr)
+	if err != nil {
+		s.logger.Error("reminders: syncFireJobForRecurrenceChange: parse due_at",
+			"reminder_id", reminderID, "due_at", dueAtStr, "err", err)
+		return
+	}
+
+	payload, err := json.Marshal(firePayload{ReminderID: reminderID})
+	if err != nil {
+		s.logger.Error("reminders: syncFireJobForRecurrenceChange: marshal payload",
+			"reminder_id", reminderID, "err", err)
+		return
+	}
+
+	var recurrence *scheduler.Recurrence
+	if newRrule.Valid && newRrule.String != "" {
+		recurrence = recurrenceFor(newRrule.String, tz)
+	}
+
+	newJobID, err := s.prod.Enqueue(ctx, scheduler.EnqueueRequest{
+		Kind:       "reminder.fire",
+		Scope:      scope,
+		RunAt:      dueAtCanon,
+		Key:        "reminder:" + reminderID,
+		Payload:    payload,
+		Recurrence: recurrence,
+	})
+	if err != nil {
+		s.logger.Error("reminders: syncFireJobForRecurrenceChange: enqueue new job",
+			"reminder_id", reminderID, "err", err)
+		return
+	}
+
+	// Stamp the new fire_job_id. The Service is the sole writer of this column.
+	_, err = db.New(s.st.Writer()).SetReminderFireJobID(ctx, db.SetReminderFireJobIDParams{
+		FireJobID: sql.NullString{String: newJobID, Valid: true},
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		ID:        reminderID,
+		UserID:    scope.UserID(),
+	})
+	if err != nil {
+		s.logger.Error("reminders: syncFireJobForRecurrenceChange: stamp fire_job_id",
+			"reminder_id", reminderID, "job_id", newJobID, "err", err)
+		// Best-effort cancel the orphaned job.
+		if cancelErr := s.prod.Cancel(ctx, newJobID); cancelErr != nil {
+			s.logger.Error("reminders: syncFireJobForRecurrenceChange: cancel orphaned job",
+				"reminder_id", reminderID, "job_id", newJobID, "err", cancelErr)
+		}
+	}
 }
 
 // Complete marks the reminder as completed, cancels the active fire-job (if
@@ -964,6 +1061,17 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 		return fmt.Errorf("reminders: fire: load reminder %q: %w", p.ReminderID, err)
 	}
 
+	// Gate on status: only an active reminder proceeds. A non-active reminder
+	// (completed or cancelled) here means the job was re-dispatched after the
+	// reminder reached a terminal state (at-least-once reclaim, or a finite
+	// series that just exhausted on the previous run). Return nil — do NOT
+	// dead-letter, so the scheduler can clean up the job normally.
+	if row.Status != "active" {
+		s.logger.Info("reminders: fire: reminder no longer active — skipping",
+			"reminder_id", p.ReminderID, "status", row.Status)
+		return nil
+	}
+
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 
@@ -978,7 +1086,72 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 		},
 	})
 
-	// Stamp last_fired_at and optionally complete.
+	// ── Recurring branch ─────────────────────────────────────────────────────
+	// When the reminder has an rrule, advance due_at to the next occurrence
+	// (strictly after now), keep status=active, and ignore auto_complete.
+	// The anchor for the RRULE engine is the current due_at in the reminder's
+	// TZ — this mirrors the scheduler's nextRunAt anchor exactly (see
+	// claimedRow.nextRunAt: anchor = current.In(loc)).
+	//
+	// Idempotency: "next occurrence strictly after now" is stable within the
+	// scheduler's lease window. A reclaim re-run before now crosses the next
+	// occurrence recomputes the same next instant, so due_at does not double-advance.
+	if row.Rrule.Valid && row.Rrule.String != "" {
+		// Parse the current due_at as the anchor for the RRULE engine.
+		anchor, parseErr := time.Parse(time.RFC3339, row.DueAt)
+		if parseErr != nil {
+			return scheduler.Permanent(fmt.Errorf("reminders: fire: parse due_at %q: %w", row.DueAt, parseErr))
+		}
+
+		// Two-clock note: this handler anchors the advance on due_at (the reminder's
+		// stored instant) and advances to "next occurrence strictly after now", which
+		// mirrors the scheduler's own nextRunAt computation (claimedRow.nextRunAt anchors
+		// on the job's current run_at in the reminder's TZ). For rules coarser than the
+		// scheduler's lease window (the minimum supported granularity — reminders are not
+		// sub-minute), both clocks land on the same occurrence, so due_at and the
+		// scheduler's next run_at stay in sync. Sub-lease-window (sub-minute) recurrence
+		// is explicitly out of scope; at supported granularities the two-clock advance
+		// cannot drift.
+		next, nextErr := nextOccurrence(row.Rrule.String, row.Tz, anchor, now)
+		if nextErr != nil {
+			return scheduler.Permanent(fmt.Errorf("reminders: fire: next occurrence: %w", nextErr))
+		}
+		if next.IsZero() {
+			// Finite RRULE exhausted (COUNT/UNTIL reached) — transition to completed so
+			// the reminder does not linger as active with no future due_at. This is
+			// distinct from a user-initiated completion: the series simply ran out.
+			s.logger.Info("reminders: fire: recurrence series exhausted — completing reminder",
+				"reminder_id", row.ID, "rrule", row.Rrule.String, "last_fired_at", nowStr)
+			_, err = db.New(s.st.Writer()).StampFiredAutoComplete(ctx, db.StampFiredAutoCompleteParams{
+				LastFiredAt: sql.NullString{String: nowStr, Valid: true},
+				CompletedAt: sql.NullString{String: nowStr, Valid: true},
+				UpdatedAt:   nowStr,
+				ID:          row.ID,
+				UserID:      job.Scope.UserID(),
+			})
+			if err != nil {
+				return fmt.Errorf("reminders: fire: stamp exhausted recurring: %w", err)
+			}
+			return nil
+		}
+
+		nextStr := next.UTC().Format(time.RFC3339)
+		_, err = db.New(s.st.Writer()).StampFiredRecurring(ctx, db.StampFiredRecurringParams{
+			LastFiredAt: sql.NullString{String: nowStr, Valid: true},
+			DueAt:       nextStr,
+			UpdatedAt:   nowStr,
+			ID:          row.ID,
+			UserID:      job.Scope.UserID(),
+		})
+		if err != nil {
+			return fmt.Errorf("reminders: fire: stamp recurring: %w", err)
+		}
+		// Return nil so the scheduler advances the recurring job to the next occurrence.
+		return nil
+	}
+
+	// ── One-shot branch ──────────────────────────────────────────────────────
+	// Stamp last_fired_at and optionally auto-complete.
 	if row.AutoComplete == 1 {
 		_, err = db.New(s.st.Writer()).StampFiredAutoComplete(ctx, db.StampFiredAutoCompleteParams{
 			LastFiredAt: sql.NullString{String: nowStr, Valid: true},
@@ -1003,6 +1176,79 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// recurrenceFor builds a *scheduler.Recurrence for a reminder's rrule and tz when
+// the rrule is set, or nil for a one-shot reminder. This is the single place that
+// maps reminder fields onto the scheduler's Recurrence type.
+func recurrenceFor(rruleStr, tz string) *scheduler.Recurrence {
+	if rruleStr == "" {
+		return nil
+	}
+	return &scheduler.Recurrence{RRULE: rruleStr, TZ: tz}
+}
+
+// validateRrule parses rruleStr under the given IANA timezone and returns a
+// field error when parsing fails. The tz must already be valid (caller ensures
+// this before calling). Returns nil when rruleStr is empty (no validation needed).
+//
+// Callers must pass the same timezone that will be stored and enqueued so that
+// the invariant "accepted here ⟹ accepted by the scheduler at dispatch" holds:
+//   - Create: passes the effective tz resolved from the input / profile / "UTC".
+//   - Update: passes row.Tz — the reminder's stored timezone — after loading the row.
+//
+// The parsing mirrors the scheduler's StrToROptionInLocation call exactly.
+func validateRrule(rruleStr, tz string) *httpx.FieldError {
+	if rruleStr == "" {
+		return nil
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		// tz validation is a separate field; rrule is not at fault here.
+		return nil
+	}
+	_, err = rrulego.StrToROptionInLocation(rruleStr, loc)
+	if err != nil {
+		return &httpx.FieldError{
+			Pointer: "/rrule",
+			Detail:  fmt.Sprintf("rrule is not a valid RFC 5545 RRULE string: %v", err),
+		}
+	}
+	return nil
+}
+
+// nextOccurrence computes the next occurrence of rruleStr in the given IANA tz,
+// strictly after now, anchored at anchor (the current due_at converted to the
+// reminder's tz). This mirrors the scheduler's nextRunAt (claimedRow) semantics
+// exactly:
+//   - anchor = current due_at in the reminder's TZ (preserves wall-clock phase).
+//   - Dtstart = anchor (on-phase seed for the RRULE engine).
+//   - rule.After(now, false) = strictly-after-now next occurrence.
+//
+// A zero time.Time is returned (with a nil error) when the RRULE series is
+// exhausted (finite COUNT/UNTIL with no future occurrence).
+func nextOccurrence(rruleStr, tz string, anchor, now time.Time) (time.Time, error) {
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("reminders: load tz %q: %w", tz, err)
+	}
+
+	// Anchor in the reminder's TZ — preserves the wall-clock time-of-day (e.g. always 8am).
+	anchorLocal := anchor.In(loc)
+
+	ropt, err := rrulego.StrToROptionInLocation(rruleStr, loc)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("reminders: parse rrule %q: %w", rruleStr, err)
+	}
+	ropt.Dtstart = anchorLocal
+
+	rule, err := rrulego.NewRRule(*ropt)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("reminders: build rrule %q: %w", rruleStr, err)
+	}
+
+	next := rule.After(now, false) // strictly after now — skips missed backlog
+	return next, nil
+}
 
 // deleteReminder is the scope-bound best-effort delete used by Create's
 // compensation paths. It silently tolerates a 0-row result (already gone).
