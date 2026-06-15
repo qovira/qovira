@@ -13,7 +13,18 @@
   import { Api, onUnauthorized } from "$lib/api/index.js";
   import { isExemptRoute, shouldRedirectToLogin } from "$lib/auth/guard.js";
   import { getRailPinned, initPrefs, setRailPinned } from "$lib/stores/ui-preferences.svelte.js";
-  import { isAuthenticated, notifyTearDown, resetSession, seedSession } from "$lib/stores/session.svelte.js";
+  import {
+    isAuthenticated,
+    notifySessionReady,
+    notifyTearDown,
+    onSessionReady,
+    onTearDown,
+    resetSession,
+    seedSession,
+  } from "$lib/stores/session.svelte.js";
+  import { resetReminders } from "$lib/stores/reminders.svelte.js";
+  import { resetConversation } from "$lib/stores/conversation.svelte.js";
+  import { openSseConnection, closeSseConnection } from "$lib/sse/client.js";
   import RailEntry from "$lib/components/RailEntry.svelte";
   import {
     nav_aria_label,
@@ -111,6 +122,16 @@
     // Preferences are browser-only side effects.
     initPrefs();
 
+    // Wire the SSE lifecycle hooks before the boot probe so the connection opens
+    // immediately when the session is confirmed (either via /me boot probe or login).
+    onSessionReady(openSseConnection);
+    onTearDown(() => {
+      closeSseConnection();
+      // Reset per-user live stores so the next session starts clean.
+      resetReminders();
+      resetConversation();
+    });
+
     // Register the centralised 401 handler. This is the single authority for
     // "expired or revoked session": clear state, tear down SSE, bounce to /login.
     onUnauthorized(() => {
@@ -132,6 +153,8 @@
           // expiresAt on /me, so we seed it null — the soft pre-expiry seam stays
           // disarmed until a login (which carries the real expiry) re-seeds it.
           seedSession({ user: data.user, expiresAt: null });
+          // Open the SSE connection — the boot-probe path is a valid session start.
+          notifySessionReady();
         }
         // 401 is handled by the onUnauthorized hook above (clears session, redirects).
 
