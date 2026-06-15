@@ -35,6 +35,16 @@ export default tseslint.config(
         parser: tseslint.parser,
       },
     },
+    rules: {
+      // {@render snippet()} calls are void-returning by design — the Svelte
+      // compiler treats them as statements, not expression values. The
+      // no-confusing-void-expression rule fires because the ESLint/Svelte
+      // AST transformer represents {@render …} as a JS call expression, which
+      // makes it look like a void value used inside another expression. This
+      // is a false positive: {@render} is always a statement in Svelte markup,
+      // never a sub-expression. Disable the rule for Svelte files only.
+      "@typescript-eslint/no-confusing-void-expression": "off",
+    },
   },
   {
     // tseslint.config() is deprecated in favour of ESLint's own defineConfig(),

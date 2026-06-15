@@ -52,5 +52,15 @@
   "notification_prompt_title": "Stay on top of your reminders",
   "notification_prompt_body": "Get notified when a reminder fires, even when the app is in the background.",
   "notification_prompt_enable": "Turn on notifications",
-  "notification_prompt_dismiss": "Maybe later"
+  "notification_prompt_dismiss": "Maybe later",
+  "reminders_bucket_overdue": "Overdue",
+  "reminders_bucket_today": "Today",
+  "reminders_bucket_this_week": "This week",
+  "reminders_bucket_later": "Later",
+  "reminders_bucket_done": "Done",
+  "reminders_done_toggle_label": "Show completed reminders",
+  "reminders_recurring_chip_label": "Recurring",
+  "reminders_done_loading": "Loading…",
+  "reminders_done_empty": "No completed reminders yet.",
+  "reminders_done_load_error": "Couldn't load completed reminders."
 }
