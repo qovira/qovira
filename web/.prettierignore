@@ -8,3 +8,5 @@ src/lib/api/schema.d.ts
 src/lib/paraglide/
 # Inlang project directory — managed by the inlang SDK, not Prettier
 project.inlang/
+# Storybook static build output
+storybook-static/

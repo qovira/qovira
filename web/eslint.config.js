@@ -21,7 +21,7 @@ export default tseslint.config(
           // vite.config.ts is already included via .svelte-kit/tsconfig.json.
           // service-worker.ts is excluded by .svelte-kit/tsconfig.json (it uses
           // the webworker lib instead of DOM); add it here so ESLint can parse it.
-          allowDefaultProject: ["*.config.js", "vitest.config.ts", "src/service-worker.ts"],
+          allowDefaultProject: ["*.config.js", "vitest.config.ts", "src/service-worker.ts", ".storybook/*.ts"],
         },
         tsconfigRootDir: import.meta.dirname,
         extraFileExtensions: [".svelte"],
@@ -67,6 +67,8 @@ export default tseslint.config(
       "src/lib/api/schema.d.ts",
       // Paraglide-JS generated i18n runtime — compiled by pnpm compile:i18n
       "src/lib/paraglide/",
+      // Storybook static build output
+      "storybook-static/",
     ],
   },
 );

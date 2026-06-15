@@ -2,5 +2,7 @@ node_modules/
 build/
 .svelte-kit/
 dist/
+# Storybook production build output
+storybook-static/
 # Paraglide-JS generated output — compiled by pnpm compile:i18n before each gate
 src/lib/paraglide/
