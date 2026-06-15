@@ -4129,3 +4129,506 @@ func TestUpdate_Rrule_ValidatesInEffectiveTz(t *testing.T) {
 		t.Errorf("expected field error at /rrule; got: %+v", valErr.Fields)
 	}
 }
+
+// ── Fat event emission after fire (issue: "Emit reminder.updated/reminder.completed on fire") ──
+
+// TestFireHandler_FatEvent_RecurringAdvances verifies AC1:
+// Firing a recurring reminder emits reminder.fired (thin, first) followed by
+// reminder.updated (fat, full Reminder payload) carrying the advanced due_at.
+// The fat event must NOT precede reminder.fired.
+func TestFireHandler_FatEvent_RecurringAdvances(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-fat-rec-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-fat-rec-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// Anchor in the past so next occurrence is in the future.
+	anchor := time.Date(2020, 1, 1, 8, 0, 0, 0, time.UTC)
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Recurring task",
+		DueAt:        anchor,
+		Tz:           "UTC",
+		Rrule:        "FREQ=DAILY",
+		AutoComplete: ptrFalse,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Clear creation events, then dispatch fire.
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      "job-fat-rec-001",
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler: %v", err)
+	}
+
+	evts := bus.allEvents()
+
+	// Must have at least 2 events: reminder.fired then reminder.updated.
+	if len(evts) < 2 {
+		t.Fatalf("expected at least 2 events (reminder.fired + reminder.updated), got %d", len(evts))
+	}
+
+	// First event must be reminder.fired (thin).
+	if evts[0].event.Type != "reminder.fired" {
+		t.Errorf("event[0] type=%q, want %q", evts[0].event.Type, "reminder.fired")
+	}
+
+	// Find the reminder.updated fat event.
+	var updatedEvt *publishedEvent
+	for i := range evts {
+		if evts[i].event.Type == "reminder.updated" {
+			updatedEvt = &evts[i]
+			break
+		}
+	}
+	if updatedEvt == nil {
+		t.Fatal("expected reminder.updated event after recurring fire, got none")
+	}
+	if updatedEvt.userID != userID {
+		t.Errorf("reminder.updated userID=%q, want %q", updatedEvt.userID, userID)
+	}
+
+	// The fat payload must be a full Reminder with advanced due_at.
+	data, _ := json.Marshal(updatedEvt.event.Data)
+	var fatPayload reminders.Reminder
+	if err := json.Unmarshal(data, &fatPayload); err != nil {
+		t.Fatalf("unmarshal reminder.updated payload as Reminder: %v", err)
+	}
+	if fatPayload.ID != r.ID {
+		t.Errorf("fat payload id=%q, want %q", fatPayload.ID, r.ID)
+	}
+	if fatPayload.UserID != userID {
+		t.Errorf("fat payload userId=%q, want %q", fatPayload.UserID, userID)
+	}
+	if fatPayload.DueAt == "" {
+		t.Fatal("fat payload dueAt is empty")
+	}
+	advancedDueAt, parseErr := time.Parse(time.RFC3339, fatPayload.DueAt)
+	if parseErr != nil {
+		t.Fatalf("parse fat payload dueAt %q: %v", fatPayload.DueAt, parseErr)
+	}
+	if !advancedDueAt.After(anchor) {
+		t.Errorf("fat payload dueAt=%q must be after anchor %q", fatPayload.DueAt, anchor.Format(time.RFC3339))
+	}
+	if fatPayload.LastFiredAt == "" {
+		t.Error("fat payload lastFiredAt must be non-empty after recurring fire")
+	}
+	if fatPayload.Status != "active" {
+		t.Errorf("fat payload status=%q, want %q", fatPayload.Status, "active")
+	}
+}
+
+// TestFireHandler_FatEvent_ExhaustedSeriesCompleted verifies AC2 (exhausted recurring):
+// Firing a recurring reminder whose series is exhausted emits reminder.fired (thin)
+// followed by reminder.completed (fat, full Reminder payload).
+func TestFireHandler_FatEvent_ExhaustedSeriesCompleted(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-fat-exh-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-fat-exh-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// COUNT=1: exhausted after the anchor (in the past).
+	anchor := time.Date(2020, 1, 1, 8, 0, 0, 0, time.UTC)
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Finite series",
+		DueAt:        anchor,
+		Tz:           "UTC",
+		Rrule:        "FREQ=DAILY;COUNT=1",
+		AutoComplete: ptrFalse,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Clear creation events.
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      "job-fat-exh-001",
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler: %v", err)
+	}
+
+	evts := bus.allEvents()
+
+	// Must have at least 2 events: reminder.fired then reminder.completed.
+	if len(evts) < 2 {
+		t.Fatalf("expected at least 2 events (reminder.fired + reminder.completed), got %d", len(evts))
+	}
+
+	// First event must be reminder.fired (thin).
+	if evts[0].event.Type != "reminder.fired" {
+		t.Errorf("event[0] type=%q, want %q", evts[0].event.Type, "reminder.fired")
+	}
+
+	// Find the reminder.completed fat event.
+	var completedEvt *publishedEvent
+	for i := range evts {
+		if evts[i].event.Type == "reminder.completed" {
+			completedEvt = &evts[i]
+			break
+		}
+	}
+	if completedEvt == nil {
+		t.Fatal("expected reminder.completed event after exhausted series, got none")
+	}
+	if completedEvt.userID != userID {
+		t.Errorf("reminder.completed userID=%q, want %q", completedEvt.userID, userID)
+	}
+
+	// The fat payload must be a full Reminder.
+	data, _ := json.Marshal(completedEvt.event.Data)
+	var fatPayload reminders.Reminder
+	if err := json.Unmarshal(data, &fatPayload); err != nil {
+		t.Fatalf("unmarshal reminder.completed payload as Reminder: %v", err)
+	}
+	if fatPayload.ID != r.ID {
+		t.Errorf("fat payload id=%q, want %q", fatPayload.ID, r.ID)
+	}
+	if fatPayload.Status != "completed" {
+		t.Errorf("fat payload status=%q, want %q", fatPayload.Status, "completed")
+	}
+	if fatPayload.CompletedAt == "" {
+		t.Error("fat payload completedAt must be set for exhausted series")
+	}
+	if fatPayload.LastFiredAt == "" {
+		t.Error("fat payload lastFiredAt must be set")
+	}
+}
+
+// TestFireHandler_FatEvent_AutoCompleteOneShotCompleted verifies AC2 (one-shot auto-complete):
+// Firing a one-shot auto_complete=true reminder emits reminder.fired (thin) followed by
+// reminder.completed (fat, full Reminder payload).
+func TestFireHandler_FatEvent_AutoCompleteOneShotCompleted(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-fat-ac-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-fat-ac-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Auto-complete one-shot",
+		DueAt:        time.Now().UTC().Add(-time.Minute),
+		AutoComplete: ptrTrue,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Clear creation events.
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      "job-fat-ac-001",
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler: %v", err)
+	}
+
+	evts := bus.allEvents()
+
+	// Must have at least 2 events.
+	if len(evts) < 2 {
+		t.Fatalf("expected at least 2 events (reminder.fired + reminder.completed), got %d", len(evts))
+	}
+
+	// First event must be reminder.fired (thin).
+	if evts[0].event.Type != "reminder.fired" {
+		t.Errorf("event[0] type=%q, want %q", evts[0].event.Type, "reminder.fired")
+	}
+
+	// Find reminder.completed.
+	var completedEvt *publishedEvent
+	for i := range evts {
+		if evts[i].event.Type == "reminder.completed" {
+			completedEvt = &evts[i]
+			break
+		}
+	}
+	if completedEvt == nil {
+		t.Fatal("expected reminder.completed event for auto_complete=true, got none")
+	}
+
+	// Verify fat payload shape.
+	data, _ := json.Marshal(completedEvt.event.Data)
+	var fatPayload reminders.Reminder
+	if err := json.Unmarshal(data, &fatPayload); err != nil {
+		t.Fatalf("unmarshal reminder.completed payload as Reminder: %v", err)
+	}
+	if fatPayload.ID != r.ID {
+		t.Errorf("fat payload id=%q, want %q", fatPayload.ID, r.ID)
+	}
+	if fatPayload.Status != "completed" {
+		t.Errorf("fat payload status=%q, want %q", fatPayload.Status, "completed")
+	}
+	if fatPayload.CompletedAt == "" {
+		t.Error("fat payload completedAt must be set (auto_complete=true)")
+	}
+	if fatPayload.LastFiredAt == "" {
+		t.Error("fat payload lastFiredAt must be set")
+	}
+}
+
+// TestFireHandler_FatEvent_KeepActiveUpdated verifies AC3:
+// Firing a one-shot auto_complete=false reminder emits reminder.fired (thin) followed by
+// reminder.updated (fat, full Reminder payload) reflecting the new last_fired_at.
+func TestFireHandler_FatEvent_KeepActiveUpdated(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-fat-ka-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-fat-ka-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Keep-active one-shot",
+		DueAt:        time.Now().UTC().Add(-time.Minute),
+		AutoComplete: ptrFalse,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Clear creation events.
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      "job-fat-ka-001",
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler: %v", err)
+	}
+
+	evts := bus.allEvents()
+
+	// Must have at least 2 events.
+	if len(evts) < 2 {
+		t.Fatalf("expected at least 2 events (reminder.fired + reminder.updated), got %d", len(evts))
+	}
+
+	// First event must be reminder.fired (thin).
+	if evts[0].event.Type != "reminder.fired" {
+		t.Errorf("event[0] type=%q, want %q", evts[0].event.Type, "reminder.fired")
+	}
+
+	// Find reminder.updated.
+	var updatedEvt *publishedEvent
+	for i := range evts {
+		if evts[i].event.Type == "reminder.updated" {
+			updatedEvt = &evts[i]
+			break
+		}
+	}
+	if updatedEvt == nil {
+		t.Fatal("expected reminder.updated event for auto_complete=false, got none")
+	}
+
+	// Verify fat payload shape.
+	data, _ := json.Marshal(updatedEvt.event.Data)
+	var fatPayload reminders.Reminder
+	if err := json.Unmarshal(data, &fatPayload); err != nil {
+		t.Fatalf("unmarshal reminder.updated payload as Reminder: %v", err)
+	}
+	if fatPayload.ID != r.ID {
+		t.Errorf("fat payload id=%q, want %q", fatPayload.ID, r.ID)
+	}
+	if fatPayload.Status != "active" {
+		t.Errorf("fat payload status=%q, want %q (auto_complete=false keeps active)", fatPayload.Status, "active")
+	}
+	if fatPayload.LastFiredAt == "" {
+		t.Error("fat payload lastFiredAt must be set (new last_fired_at)")
+	}
+	if fatPayload.CompletedAt != "" {
+		t.Errorf("fat payload completedAt must be empty for keep-active; got %q", fatPayload.CompletedAt)
+	}
+}
+
+// TestFireHandler_FatEvent_PayloadMatchesReminderType verifies AC4:
+// The fat payload emitted by the fire handler is the same Reminder type as
+// emitted by Service.Update and Service.Complete — all core JSON fields present.
+func TestFireHandler_FatEvent_PayloadMatchesReminderType(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-fat-shape-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-fat-shape-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Shape test reminder",
+		DueAt:        time.Now().UTC().Add(-time.Minute),
+		AutoComplete: ptrTrue,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Clear creation events and dispatch fire (auto_complete=true → reminder.completed).
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      "job-fat-shape-001",
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler: %v", err)
+	}
+
+	// Find reminder.completed from fire handler.
+	var fireCompletedEvt *publishedEvent
+	for _, e := range bus.allEvents() {
+		if e.event.Type == "reminder.completed" {
+			ev := e
+			fireCompletedEvt = &ev
+			break
+		}
+	}
+	if fireCompletedEvt == nil {
+		t.Fatal("expected reminder.completed from fire handler, got none")
+	}
+
+	// Decode the fat payload and verify all core Reminder fields are present.
+	data, _ := json.Marshal(fireCompletedEvt.event.Data)
+	var firePayload reminders.Reminder
+	if err := json.Unmarshal(data, &firePayload); err != nil {
+		t.Fatalf("unmarshal fire fat payload: %v", err)
+	}
+
+	coreFields := map[string]string{
+		"id":        firePayload.ID,
+		"userId":    firePayload.UserID,
+		"title":     firePayload.Title,
+		"dueAt":     firePayload.DueAt,
+		"tz":        firePayload.Tz,
+		"status":    firePayload.Status,
+		"createdAt": firePayload.CreatedAt,
+		"updatedAt": firePayload.UpdatedAt,
+	}
+	for field, val := range coreFields {
+		if val == "" {
+			t.Errorf("fire fat payload missing core field %q", field)
+		}
+	}
+
+	// Compare with Service.Complete output: create a second reminder.
+	r2, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Shape compare",
+		DueAt:        time.Now().UTC().Add(-time.Minute),
+		AutoComplete: ptrTrue,
+	})
+	if err != nil {
+		t.Fatalf("Create r2: %v", err)
+	}
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	completed, err := svc.Complete(ctx, scope, r2.ID)
+	if err != nil {
+		t.Fatalf("Complete r2: %v", err)
+	}
+
+	// Find reminder.completed from Service.Complete.
+	var svcCompletedEvt *publishedEvent
+	for _, e := range bus.allEvents() {
+		if e.event.Type == "reminder.completed" {
+			ev := e
+			svcCompletedEvt = &ev
+			break
+		}
+	}
+	if svcCompletedEvt == nil {
+		t.Fatalf("expected reminder.completed from Service.Complete, got none (completed=%+v)", completed)
+	}
+
+	svcData, _ := json.Marshal(svcCompletedEvt.event.Data)
+	var svcPayload reminders.Reminder
+	if err := json.Unmarshal(svcData, &svcPayload); err != nil {
+		t.Fatalf("unmarshal svc complete payload: %v", err)
+	}
+
+	// Both must be decodable into Reminder with the same non-zero core fields.
+	for field, val := range map[string]string{
+		"id":        svcPayload.ID,
+		"userId":    svcPayload.UserID,
+		"title":     svcPayload.Title,
+		"dueAt":     svcPayload.DueAt,
+		"tz":        svcPayload.Tz,
+		"status":    svcPayload.Status,
+		"createdAt": svcPayload.CreatedAt,
+		"updatedAt": svcPayload.UpdatedAt,
+	} {
+		if val == "" {
+			t.Errorf("Service.Complete payload missing core field %q", field)
+		}
+	}
+}

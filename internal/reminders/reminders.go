@@ -1162,6 +1162,8 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 			if err != nil {
 				return fmt.Errorf("reminders: fire: stamp exhausted recurring: %w", err)
 			}
+			// Emit fat reminder.completed so every surface reflects the terminal state.
+			s.publishFiredState(ctx, job.Scope, row.ID, "reminder.completed")
 			return nil
 		}
 
@@ -1176,12 +1178,15 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 		if err != nil {
 			return fmt.Errorf("reminders: fire: stamp recurring: %w", err)
 		}
+		// Emit fat reminder.updated with the advanced due_at so clients reflect the new state.
+		s.publishFiredState(ctx, job.Scope, row.ID, "reminder.updated")
 		// Return nil so the scheduler advances the recurring job to the next occurrence.
 		return nil
 	}
 
 	// ── One-shot branch ──────────────────────────────────────────────────────
-	// Stamp last_fired_at and optionally auto-complete.
+	// Stamp last_fired_at and optionally auto-complete, then emit the matching
+	// fat domain event so clients reflect the new state without a refetch.
 	if row.AutoComplete == 1 {
 		_, err = db.New(s.st.Writer()).StampFiredAutoComplete(ctx, db.StampFiredAutoCompleteParams{
 			LastFiredAt: sql.NullString{String: nowStr, Valid: true},
@@ -1202,7 +1207,33 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 		return fmt.Errorf("reminders: fire: stamp fired: %w", err)
 	}
 
+	// Emit the fat post-stamp event, mirroring the event type emitted by Update/Complete.
+	// auto_complete=true → "reminder.completed"; auto_complete=false → "reminder.updated".
+	firedEventType := "reminder.updated"
+	if row.AutoComplete == 1 {
+		firedEventType = "reminder.completed"
+	}
+	s.publishFiredState(ctx, job.Scope, row.ID, firedEventType)
+
 	return nil
+}
+
+// publishFiredState reloads the reminder row from the store and publishes it as
+// a fat event of the given type on the bus. Errors are logged and best-efforted:
+// the stamp that changed the row already succeeded, so a reload failure must not
+// roll back the persisted state — it only means the SSE push is skipped for this
+// fire cycle (the client can refetch on reconnect).
+func (s *Service) publishFiredState(ctx context.Context, scope store.Scope, reminderID, eventType string) {
+	final, err := s.Get(ctx, scope, reminderID)
+	if err != nil {
+		s.logger.Error("reminders: fire: reload for fat event",
+			"reminder_id", reminderID, "event_type", eventType, "err", err)
+		return
+	}
+	s.bus.Publish(scope.UserID(), events.Event{
+		Type: eventType,
+		Data: final,
+	})
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
