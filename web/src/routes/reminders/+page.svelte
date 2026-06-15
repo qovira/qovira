@@ -16,11 +16,29 @@
   // Security: reminder.title flows through {reminder.title} — Svelte escapes it
   // automatically. Never use {@html} for user-supplied content.
 
+  import { ulid } from "ulid";
+  import { toast } from "@qovira/ui";
+  import { Button, Field, Input } from "@qovira/ui";
   import { Api } from "$lib/api/index.js";
   import { getReminders, upsertReminder } from "$lib/stores/reminders.svelte.js";
   import type { ReminderItem } from "$lib/stores/reminders.svelte.js";
   import { bucketReminders, shouldShowPlaceholder } from "$lib/reminders/bucket.js";
   import { formatDueAt } from "$lib/format/datetime.js";
+  import {
+    applyOptimisticCreate,
+    confirmCreate,
+    revertCreate,
+    applyOptimisticComplete,
+    confirmComplete,
+    revertComplete,
+    buildNextDueAt,
+    defaultDueAtLocal,
+    dueAtToLocal,
+    rruleToPreset,
+    makeReminderPatchBody,
+    type RrulePreset,
+  } from "$lib/reminders/actions.svelte.js";
+  import SlideOver from "$lib/components/SlideOver.svelte";
   import {
     reminders_placeholder,
     reminders_bucket_overdue,
@@ -33,14 +51,30 @@
     reminders_done_loading,
     reminders_done_empty,
     reminders_done_load_error,
+    reminders_quick_add_title_placeholder,
+    reminders_quick_add_due_label,
+    reminders_quick_add_submit,
+    reminders_quick_add_error,
+    reminders_complete_label,
+    reminders_complete_error,
+    reminders_edit_title,
+    reminders_edit_field_title,
+    reminders_edit_field_due,
+    reminders_edit_field_recurrence,
+    reminders_edit_field_notes,
+    reminders_edit_recurrence_none,
+    reminders_edit_recurrence_daily,
+    reminders_edit_recurrence_weekly,
+    reminders_edit_recurrence_monthly,
+    reminders_edit_recurrence_keep,
+    reminders_edit_save,
+    reminders_edit_saving,
+    reminders_edit_error,
+    reminders_row_open_edit,
   } from "$lib/paraglide/messages.js";
 
   // ---------------------------------------------------------------------------
   // "now" — seeded at component init. Correct for the initial render.
-  // A $derived recomputes automatically when used inside $derived.
-  // For a periodic refresh (optional polish), a setInterval could update now,
-  // but the issue marks that out of scope. A single seed is sufficient for AC2/3
-  // (live SSE updates retrigger $derived recomputation automatically).
   // ---------------------------------------------------------------------------
   let now = $state(new Date());
 
@@ -49,47 +83,29 @@
   // ---------------------------------------------------------------------------
   const buckets = $derived(bucketReminders(getReminders(), now));
 
-  // Aliases for template readability.
   const overdue = $derived(buckets.overdue);
   const today = $derived(buckets.today);
   const thisWeek = $derived(buckets.thisWeek);
   const later = $derived(buckets.later);
   const done = $derived(buckets.done);
 
-  // True when there are no active reminders at all (any bucket).
   const hasNoActive = $derived(
     overdue.length === 0 && today.length === 0 && thisWeek.length === 0 && later.length === 0,
   );
 
-  // Fix 2: Show placeholder only when there are NO reminders at all — no active
-  // ones and no done ones. When done.length > 0 with no active reminders, the
-  // Done section still has content; suppress the placeholder.
   const showPlaceholder = $derived(shouldShowPlaceholder(hasNoActive, done.length));
 
   // ---------------------------------------------------------------------------
   // Done section — loaded on demand (disclosure pattern).
   // ---------------------------------------------------------------------------
 
-  /** True once the Done section has been opened at least once. */
   let doneOpen = $state(false);
-  /** True while the initial Done fetch is in flight. */
   let doneLoading = $state(false);
-  /** Error message if the Done fetch failed. */
   let doneError = $state<string | null>(null);
-  // Fix 3: dedicated flag decoupled from done.length — set once in the finally
-  // block so we never re-fetch even if done.length is still 0 after the server
-  // confirms there are no completed reminders.
   let doneFetched = $state(false);
 
-  /**
-   * Open the Done section and lazily fetch all completed reminders exactly once.
-   * Subsequent opens skip the fetch — the store is up-to-date and future
-   * reminder.completed events keep it current via upsertReminder.
-   */
   async function openDone(): Promise<void> {
     doneOpen = true;
-
-    // Fix 3: gate on the dedicated fetched flag, not done.length.
     if (doneFetched || doneLoading) return;
 
     doneLoading = true;
@@ -99,7 +115,6 @@
       let cursor: string | null = null;
 
       for (;;) {
-        // exactOptionalPropertyTypes: spread cursor so absent key is omitted.
         const query: { status: "completed"; cursor?: string } =
           cursor !== null ? { status: "completed", cursor } : { status: "completed" };
         const result = await Api.GET("/reminders", { params: { query } });
@@ -119,11 +134,9 @@
         }
       }
     } catch {
-      // Fix 1: use the Paraglide key instead of a hardcoded English string.
       doneError = reminders_done_load_error();
     } finally {
       doneLoading = false;
-      // Fix 3: mark as fetched regardless of success/failure so re-opens skip.
       doneFetched = true;
     }
   }
@@ -135,54 +148,300 @@
       doneOpen = false;
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // 1. Quick-add (optimistic)
+  // ---------------------------------------------------------------------------
+
+  let quickAddTitle = $state("");
+  let quickAddDueAt = $state(defaultDueAtLocal());
+  let quickAddSubmitting = $state(false);
+
+  async function handleQuickAdd(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    const title = quickAddTitle.trim();
+    const dueAtRfc = buildNextDueAt(quickAddDueAt);
+    if (!title || !dueAtRfc) return;
+    if (quickAddSubmitting) return;
+
+    quickAddSubmitting = true;
+
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const nowIso = new Date().toISOString();
+    const tempId = ulid();
+    const temp: ReminderItem = {
+      id: tempId,
+      userId: "",
+      title,
+      dueAt: dueAtRfc,
+      tz,
+      autoComplete: true,
+      status: "active",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    applyOptimisticCreate(temp);
+    // Reset the title immediately so the user can start typing the next one.
+    quickAddTitle = "";
+
+    try {
+      const result = await Api.POST("/reminders", {
+        body: { title, dueAt: dueAtRfc, tz, autoComplete: true },
+      });
+
+      if (result.error !== undefined) {
+        // Server rejected — revert the optimistic item (AC5).
+        revertCreate(tempId);
+        toast.error(reminders_quick_add_error());
+      } else {
+        // Success — swap temp for the real reminder.
+        confirmCreate(tempId, result.data);
+        // Reset due-at to next-hour default for the next quick-add.
+        quickAddDueAt = defaultDueAtLocal();
+      }
+    } catch {
+      revertCreate(tempId);
+      toast.error(reminders_quick_add_error());
+    } finally {
+      quickAddSubmitting = false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2. Complete (optimistic)
+  // ---------------------------------------------------------------------------
+
+  async function handleComplete(id: string): Promise<void> {
+    const snapshot = applyOptimisticComplete(id);
+    if (snapshot === null) return; // reminder not in store — no-op
+
+    try {
+      const result = await Api.PATCH("/reminders/{id}", {
+        params: { path: { id } },
+        body: { status: "completed" },
+      });
+
+      if (result.error !== undefined) {
+        // Server rejected — revert to the prior state (AC5).
+        revertComplete(snapshot);
+        toast.error(reminders_complete_error());
+      } else {
+        confirmComplete(result.data);
+      }
+    } catch {
+      revertComplete(snapshot);
+      toast.error(reminders_complete_error());
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3. Edit sheet (non-optimistic)
+  // ---------------------------------------------------------------------------
+
+  let editOpen = $state(false);
+  let editReminder = $state<ReminderItem | null>(null);
+
+  // Edit form fields (local state, not committed to the store until save succeeds).
+  let editTitle = $state("");
+  let editDueAt = $state(""); // datetime-local string
+  let editNotes = $state("");
+  let editRrulePreset = $state<RrulePreset>("none");
+  let editSaving = $state(false);
+  let editError = $state<string | null>(null);
+
+  function openEdit(reminder: ReminderItem): void {
+    editReminder = reminder;
+    editTitle = reminder.title;
+    editDueAt = dueAtToLocal(reminder.dueAt);
+    editNotes = reminder.notes ?? "";
+    editRrulePreset = rruleToPreset(reminder.rrule);
+    editError = null;
+    editSaving = false;
+    editOpen = true;
+  }
+
+  function closeEdit(): void {
+    editOpen = false;
+    editReminder = null;
+    editError = null;
+  }
+
+  async function handleEditSave(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    const r = editReminder;
+    if (r === null || editSaving) return;
+
+    const dueAtRfc = buildNextDueAt(editDueAt);
+    if (!editTitle.trim() || !dueAtRfc) return;
+
+    editSaving = true;
+    editError = null;
+
+    const patchBody = makeReminderPatchBody(r, {
+      title: editTitle.trim(),
+      dueAt: dueAtRfc,
+      notes: editNotes,
+      rrulePreset: editRrulePreset,
+    });
+
+    try {
+      const result = await Api.PATCH("/reminders/{id}", {
+        params: { path: { id: r.id } },
+        body: patchBody,
+      });
+
+      if (result.error !== undefined) {
+        // Non-optimistic: do NOT mutate store. Keep sheet open, show inline error.
+        editError = reminders_edit_error();
+      } else {
+        // Success: update the store, close the sheet (AC3, AC4).
+        upsertReminder(result.data);
+        closeEdit();
+      }
+    } catch {
+      editError = reminders_edit_error();
+    } finally {
+      editSaving = false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helper: clear a stale inline error when the user edits any edit-sheet field.
+  // Called from each field's input/change handler so the error banner disappears
+  // the moment they start correcting — not just on the next submit.
+  // ---------------------------------------------------------------------------
+  function clearEditError(): void {
+    editError = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helper: is the rrule preset a known match-able preset (not "keep")?
+  // Used to guard the select value for the "keep" option visibility.
+  // ---------------------------------------------------------------------------
+  const PRESET_OPTIONS: RrulePreset[] = ["none", "daily", "weekly", "monthly"];
 </script>
 
 <!--
   Single-column reminders view.
-  Only renders bucket headings that have rows (empty buckets are skipped).
-  Fix 2: the empty state renders only when there are NO reminders at all
-  (no active ones and no done ones).
+  Quick-add form is pinned at the top, above the buckets.
 -->
 
+<!-- =========================================================================
+  1. Quick-add form — pinned above buckets, compact one-row layout.
+  Uses native form submission (Enter-to-submit) + the ui Button.
+  The due date/time uses a themed native datetime-local input.
+  ========================================================================= -->
+<form class="reminder-quick-add" onsubmit={(e) => void handleQuickAdd(e)}>
+  <input
+    type="text"
+    class="reminder-quick-add__title"
+    placeholder={reminders_quick_add_title_placeholder()}
+    bind:value={quickAddTitle}
+    disabled={quickAddSubmitting}
+    required
+    aria-label={reminders_quick_add_title_placeholder()}
+  />
+  <label class="reminder-quick-add__due-label" for="quick-add-due">
+    {reminders_quick_add_due_label()}
+  </label>
+  <input
+    id="quick-add-due"
+    type="datetime-local"
+    class="reminder-quick-add__due"
+    bind:value={quickAddDueAt}
+    disabled={quickAddSubmitting}
+    required
+    aria-label={reminders_quick_add_due_label()}
+  />
+  <Button type="submit" variant="primary" disabled={quickAddSubmitting} loading={quickAddSubmitting}>
+    {reminders_quick_add_submit()}
+  </Button>
+</form>
+
+<!-- =========================================================================
+  Bucketed reminder sections.
+  A11y: each row is restructured as SIBLING buttons (check-circle + row body)
+  inside the <li>, NOT nested buttons. This satisfies the interactive-child
+  constraint and is valid HTML / a11y.
+  ========================================================================= -->
+
 <!--
-  Fix 4: single row snippet used across all five lists.
-  The `done` parameter (default false) adds the --done modifier for completed rows.
-  {#snippet} + {@render} is idiomatic Svelte 5; it does not trigger
-  @typescript-eslint/no-confusing-void-expression — that rule fires only on
-  void-returning calls in expression position (e.g. arrow functions), not on
-  {@render} markup tags.
+  Row snippet: used across all five bucket lists.
+  `isDone` parameter (default false) adds the --done modifier for completed rows
+  (visual de-emphasis only; done rows do not have interactive check-circles).
+
+  A11y note: the two sibling <button>s inside the <li> give keyboard users a
+  predictable tab order: check-circle → row body (or, for done rows, only the
+  row body). The <li> itself is not interactive.
 -->
-{#snippet row(reminder: ReminderItem, done: boolean = false)}
-  <li class="reminder-row {done ? 'reminder-row--done' : ''}">
-    <!-- Soft check-circle icon — decorative, non-interactive -->
-    <svg
-      class="reminder-row__check"
-      xmlns="http://www.w3.org/2000/svg"
-      width="16"
-      height="16"
-      viewBox="0 0 256 256"
-      aria-hidden="true"
-    >
-      <path
-        fill="currentColor"
-        d="M173.66 98.34a8 8 0 0 1 0 11.32l-56 56a8 8 0 0 1-11.32 0l-24-24a8 8 0 0 1 11.32-11.32L112 148.69l50.34-50.35a8 8 0 0 1 11.32 0ZM232 128A104 104 0 1 1 128 24a104.11 104.11 0 0 1 104 104Zm-16 0a88 88 0 1 0-88 88a88.1 88.1 0 0 0 88-88Z"
-      />
-    </svg>
-    <span class="reminder-row__title">{reminder.title}</span>
-    <span class="reminder-row__spacer" aria-hidden="true"></span>
-    {#if reminder.rrule !== undefined}
-      <span class="reminder-row__recurring-chip" aria-label={reminders_recurring_chip_label()}>↻</span>
+{#snippet row(reminder: ReminderItem, isDone: boolean = false)}
+  <li class="reminder-row {isDone ? 'reminder-row--done' : ''}">
+    {#if !isDone}
+      <!--
+        Check-circle: interactive button for active reminders.
+        A11y: sibling button (NOT nested inside the row-body button).
+      -->
+      <button
+        type="button"
+        class="reminder-row__check-btn"
+        aria-label={reminders_complete_label()}
+        onclick={() => void handleComplete(reminder.id)}
+      >
+        <!-- Soft check-circle icon -->
+        <svg
+          class="reminder-row__check"
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 256 256"
+          aria-hidden="true"
+        >
+          <path
+            fill="currentColor"
+            d="M173.66 98.34a8 8 0 0 1 0 11.32l-56 56a8 8 0 0 1-11.32 0l-24-24a8 8 0 0 1 11.32-11.32L112 148.69l50.34-50.35a8 8 0 0 1 11.32 0ZM232 128A104 104 0 1 1 128 24a104.11 104.11 0 0 1 104 104Zm-16 0a88 88 0 1 0-88 88a88.1 88.1 0 0 0 88-88Z"
+          />
+        </svg>
+      </button>
+    {:else}
+      <!-- Done rows: decorative non-interactive check icon -->
+      <svg
+        class="reminder-row__check"
+        xmlns="http://www.w3.org/2000/svg"
+        width="16"
+        height="16"
+        viewBox="0 0 256 256"
+        aria-hidden="true"
+      >
+        <path
+          fill="currentColor"
+          d="M173.66 98.34a8 8 0 0 1 0 11.32l-56 56a8 8 0 0 1-11.32 0l-24-24a8 8 0 0 1 11.32-11.32L112 148.69l50.34-50.35a8 8 0 0 1 11.32 0ZM232 128A104 104 0 1 1 128 24a104.11 104.11 0 0 1 104 104Zm-16 0a88 88 0 1 0-88 88a88.1 88.1 0 0 0 88-88Z"
+        />
+      </svg>
     {/if}
-    <span class="reminder-row__due">{formatDueAt(reminder.dueAt)}</span>
+
+    <!-- Row body: tapping opens the edit sheet. Sibling to the check button. -->
+    <button
+      type="button"
+      class="reminder-row__body"
+      onclick={() => openEdit(reminder)}
+      aria-label={reminders_row_open_edit()}
+    >
+      <span class="reminder-row__title">{reminder.title}</span>
+      <span class="reminder-row__spacer" aria-hidden="true"></span>
+      {#if reminder.rrule !== undefined}
+        <span class="reminder-row__recurring-chip" aria-label={reminders_recurring_chip_label()}>↻</span>
+      {/if}
+      <span class="reminder-row__due">{formatDueAt(reminder.dueAt)}</span>
+    </button>
   </li>
 {/snippet}
 
 <div class="reminders-page">
   {#if showPlaceholder}
-    <!-- Empty state: brand-voice copy from the reminders_placeholder message key. -->
     <p class="text-text-subtle text-sm">{reminders_placeholder()}</p>
   {:else if hasNoActive}
-    <!-- Zero active but some done — render no active buckets; Done section below shows them. -->
+    <!-- Zero active but some done — no active buckets; Done section below shows them. -->
   {:else}
     <!-- Overdue -->
     {#if overdue.length > 0}
@@ -274,12 +533,10 @@
 
     {#if doneOpen}
       {#if doneLoading}
-        <!-- Fix 1: i18n key instead of hardcoded "Loading…" -->
         <p class="text-text-subtle text-sm" role="status" aria-live="polite">{reminders_done_loading()}</p>
       {:else if doneError !== null}
         <p class="text-text-error text-sm" role="alert">{doneError}</p>
       {:else if done.length === 0}
-        <!-- Fix 1: i18n key instead of hardcoded "No completed reminders yet." -->
         <p class="text-text-subtle text-sm">{reminders_done_empty()}</p>
       {:else}
         <ul class="reminders-list" role="list">
@@ -292,8 +549,168 @@
   </section>
 </div>
 
+<!-- =========================================================================
+  3. Edit slide-over sheet (transient, non-optimistic).
+  Uses the existing SlideOver component (native <dialog>, accessible).
+  ========================================================================= -->
+<SlideOver bind:open={editOpen} title={reminders_edit_title()} onclose={closeEdit}>
+  {#if editReminder !== null}
+    <form class="edit-sheet-form" onsubmit={(e) => void handleEditSave(e)}>
+      <!-- Title — Input reads Field's accessibility contract from context automatically. -->
+      <Field label={reminders_edit_field_title()}>
+        {#snippet children()}
+          <Input
+            type="text"
+            value={editTitle}
+            oninput={(e: Event & { currentTarget: HTMLInputElement }) => {
+              editTitle = e.currentTarget.value;
+              clearEditError();
+            }}
+            disabled={editSaving}
+            required
+          />
+        {/snippet}
+      </Field>
+
+      <!-- Due date/time — native input; reads id/describedby from FieldContext arg. -->
+      <Field label={reminders_edit_field_due()}>
+        {#snippet children({ id, describedby })}
+          <input
+            {id}
+            aria-describedby={describedby}
+            type="datetime-local"
+            class="edit-sheet-datetime"
+            bind:value={editDueAt}
+            oninput={clearEditError}
+            disabled={editSaving}
+            required
+          />
+        {/snippet}
+      </Field>
+
+      <!-- Recurrence preset select — native select; reads id from FieldContext. -->
+      <Field label={reminders_edit_field_recurrence()}>
+        {#snippet children({ id, describedby })}
+          <select
+            {id}
+            aria-describedby={describedby}
+            class="edit-sheet-select"
+            bind:value={editRrulePreset}
+            onchange={clearEditError}
+            disabled={editSaving}
+          >
+            {#each PRESET_OPTIONS as preset (preset)}
+              <option value={preset}>
+                {#if preset === "none"}
+                  {reminders_edit_recurrence_none()}
+                {:else if preset === "daily"}
+                  {reminders_edit_recurrence_daily()}
+                {:else if preset === "weekly"}
+                  {reminders_edit_recurrence_weekly()}
+                {:else}
+                  {reminders_edit_recurrence_monthly()}
+                {/if}
+              </option>
+            {/each}
+            <!--
+              "Keep current schedule" option only shown when the existing rrule
+              does not match a known preset (e.g. FREQ=WEEKLY;COUNT=3).
+              This preserves unknown rrules rather than silently dropping them.
+            -->
+            {#if editRrulePreset === "keep"}
+              <option value="keep">{reminders_edit_recurrence_keep()}</option>
+            {/if}
+          </select>
+        {/snippet}
+      </Field>
+
+      <!-- Notes — Input reads Field context automatically. -->
+      <Field label={reminders_edit_field_notes()}>
+        {#snippet children()}
+          <Input
+            type="text"
+            value={editNotes}
+            oninput={(e: Event & { currentTarget: HTMLInputElement }) => {
+              editNotes = e.currentTarget.value;
+              clearEditError();
+            }}
+            disabled={editSaving}
+          />
+        {/snippet}
+      </Field>
+
+      <!-- Inline error -->
+      {#if editError !== null}
+        <p class="edit-sheet-error" role="alert">{editError}</p>
+      {/if}
+
+      <div class="edit-sheet-footer">
+        <Button type="submit" variant="primary" disabled={editSaving} loading={editSaving}>
+          {editSaving ? reminders_edit_saving() : reminders_edit_save()}
+        </Button>
+      </div>
+    </form>
+  {/if}
+</SlideOver>
+
 <style>
-  /* Page wrapper — single calm column, no second permanent pane. */
+  /* =========================================================================
+     Quick-add form — compact one-row layout above the buckets.
+     ========================================================================= */
+  .reminder-quick-add {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border: 1px solid var(--color-border, oklch(0.9 0 0));
+    border-radius: 0.5rem;
+    background: var(--color-surface, #fff);
+  }
+
+  .reminder-quick-add__title {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 0.875rem;
+    color: var(--color-text, oklch(0.2 0 0));
+    padding: 0.25rem 0;
+  }
+
+  .reminder-quick-add__title::placeholder {
+    color: var(--color-text-subtle, oklch(0.55 0 0));
+  }
+
+  .reminder-quick-add__title:focus {
+    outline: none;
+  }
+
+  .reminder-quick-add__due-label {
+    font-size: 0.75rem;
+    color: var(--color-text-subtle, oklch(0.55 0 0));
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .reminder-quick-add__due {
+    border: 1px solid var(--color-border, oklch(0.9 0 0));
+    border-radius: 0.375rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--color-text, oklch(0.2 0 0));
+    background: var(--color-surface, #fff);
+    flex-shrink: 0;
+  }
+
+  .reminder-quick-add__due:focus {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+
+  /* =========================================================================
+     Page wrapper — single calm column, no second permanent pane.
+     ========================================================================= */
   .reminders-page {
     display: flex;
     flex-direction: column;
@@ -320,21 +737,19 @@
     padding-bottom: 0.25rem;
     border-bottom: 1px solid var(--color-border, oklch(0.9 0 0));
     margin-bottom: 0.125rem;
-    pointer-events: none; /* Heading is inside the toggle button; no redundant click area */
+    pointer-events: none;
   }
 
-  /* Overdue heading gets a slightly warmer tone for urgency without alarm. */
   .reminders-bucket__heading--overdue {
     color: var(--color-text-error, oklch(0.45 0.18 25));
   }
 
-  /* Done count badge — muted parenthetical. */
   .reminders-done-count {
     color: var(--color-text-subtle, oklch(0.55 0 0));
     font-weight: 400;
   }
 
-  /* Done toggle — looks like the heading, acts as a button. */
+  /* Done toggle */
   .reminders-done-toggle {
     display: flex;
     align-items: center;
@@ -360,7 +775,6 @@
     border-radius: 0.25rem;
   }
 
-  /* Chevron rotates 0° when closed, 180° when open. */
   .reminders-done-chevron {
     color: var(--color-text-subtle, oklch(0.55 0 0));
     flex-shrink: 0;
@@ -380,12 +794,15 @@
     margin: 0;
   }
 
-  /* Reminder row — one row per item: icon · title · spacer · chip · due */
+  /* =========================================================================
+     Reminder row — restructured for sibling-button a11y pattern.
+     Layout: [check-btn | row-body-btn (title · spacer · chip · due)]
+     The check-btn and row-body-btn are SIBLINGS, never nested.
+     ========================================================================= */
   .reminder-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.25rem;
+    gap: 0.25rem;
     border-radius: 0.375rem;
     min-height: 2.25rem;
     transition: background-color 80ms ease;
@@ -395,18 +812,67 @@
     background-color: var(--color-surface-raised, oklch(0.95 0 0));
   }
 
-  /* Done rows are visually de-emphasised. */
   .reminder-row--done {
     opacity: 0.6;
   }
 
-  /* Check-circle icon — soft, decorative. */
+  /* Check-circle button (active rows) */
+  .reminder-row__check-btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.375rem;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 50%;
+    color: var(--color-text-subtle, oklch(0.55 0 0));
+    transition: color 80ms ease;
+  }
+
+  .reminder-row__check-btn:hover {
+    color: var(--color-primary, oklch(0.5 0.2 250));
+  }
+
+  .reminder-row__check-btn:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 1px;
+  }
+
+  /* Check icon — shared by active (inside button) and done (standalone decorative) */
   .reminder-row__check {
     flex-shrink: 0;
+    color: inherit;
+  }
+
+  /* Done rows: the check icon is a bare SVG (not a button), needs the same padding */
+  .reminder-row--done > .reminder-row__check {
+    padding: 0.375rem;
     color: var(--color-text-subtle, oklch(0.55 0 0));
   }
 
-  /* Title — primary text, grows to fill available space. */
+  /* Row body button — fills the rest of the row, opens the edit sheet */
+  .reminder-row__body {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.25rem;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    min-width: 0;
+    border-radius: 0.25rem;
+  }
+
+  .reminder-row__body:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 1px;
+  }
+
+  /* Title */
   .reminder-row__title {
     font-size: 0.875rem;
     color: var(--color-text, oklch(0.2 0 0));
@@ -415,12 +881,12 @@
     white-space: nowrap;
   }
 
-  /* Spacer — pushes due-time and chip to the trailing edge. */
+  /* Spacer */
   .reminder-row__spacer {
     flex: 1;
   }
 
-  /* Honey ↻ chip — recurring indicator. */
+  /* Recurring chip */
   .reminder-row__recurring-chip {
     flex-shrink: 0;
     font-size: 0.6875rem;
@@ -430,14 +896,64 @@
     border-radius: 0.25rem;
     background-color: var(--color-honey-100, #f8e6c8);
     color: var(--color-honey-800, #7e4f1c);
-    /* Honey-800 on honey-100 is 5.8:1 — AA compliant. */
   }
 
-  /* Due time — right-aligned, muted, smaller. */
+  /* Due time */
   .reminder-row__due {
     flex-shrink: 0;
     font-size: 0.75rem;
     color: var(--color-text-subtle, oklch(0.55 0 0));
     white-space: nowrap;
+  }
+
+  /* =========================================================================
+     Edit sheet form — stacked fields inside the SlideOver body.
+     ========================================================================= */
+  .edit-sheet-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding: 1.25rem 1rem;
+  }
+
+  .edit-sheet-datetime {
+    width: 100%;
+    border: 1px solid var(--color-border, oklch(0.9 0 0));
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--color-text, oklch(0.2 0 0));
+    background: var(--color-surface, #fff);
+  }
+
+  .edit-sheet-datetime:focus {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+
+  .edit-sheet-select {
+    width: 100%;
+    border: 1px solid var(--color-border, oklch(0.9 0 0));
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--color-text, oklch(0.2 0 0));
+    background: var(--color-surface, #fff);
+  }
+
+  .edit-sheet-select:focus {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+
+  .edit-sheet-error {
+    font-size: 0.875rem;
+    color: var(--color-text-error, oklch(0.45 0.18 25));
+  }
+
+  .edit-sheet-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 0.5rem;
   }
 </style>
