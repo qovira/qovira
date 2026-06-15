@@ -137,7 +137,7 @@
       <h2 id="slide-over-title" class="text-text text-base font-semibold">{title}</h2>
       <button
         type="button"
-        class="text-text-subtle hover:text-text rounded p-1
+        class="text-text-muted hover:text-text rounded p-1
                focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
         onclick={handleClose}
         aria-label="Close"
