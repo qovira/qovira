@@ -47,6 +47,8 @@ The binary is written to `./qovira`.
 
 The server reads its configuration from environment variables (and an optional `--config` file). At minimum it needs `QOVIRA_MASTER_KEY` to open the encrypted database; it listens on `:8080` and stores data under `./data` by default.
 
+To create the first admin user on a fresh installation, set `QOVIRA_ADMIN_EMAIL` and `QOVIRA_ADMIN_PASSWORD` before the first `qovira serve`. When no users exist and both variables are set, the server creates the admin account at startup and logs the email. The seeding is a no-op on every subsequent start (any existing user suppresses it). Both variables support `_FILE` indirection; see config reference below.
+
 ## Development
 
 ```sh

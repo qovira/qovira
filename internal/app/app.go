@@ -207,6 +207,18 @@ func New(
 		}
 	}
 
+	// Step 4b: first-run admin seeding. Runs after migrations so the users
+	// table is guaranteed to exist. A dedicated auth.Service is built here
+	// using the production defaults; it is not shared with the auth module to
+	// avoid coupling this boot-time seam to the module wiring above.
+	//
+	// *store.Store satisfies bootstrap.UserExister (HasAnyUser), and the
+	// dedicated *auth.Service satisfies bootstrap.AccountCreator (CreateAdmin).
+	// Both seams are defined at the consumer (bootstrap) per the house rule.
+	if err = seedAdminIfFirstRun(ctx, cfg, s, logger); err != nil {
+		return nil, fmt.Errorf("app: first-run seed: %w", err)
+	}
+
 	// Step 5: in-memory event bus.
 	bus := events.NewBus()
 
