@@ -1,6 +1,6 @@
 package gateway
 
-// Tests for [Gateway.Probe] (QOV-64).
+// Tests for [Gateway.Probe].
 //
 // All tests use httptest.Server with a handler that routes on path:
 //   - GET  /v1/models              → JSON model list

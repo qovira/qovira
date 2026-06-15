@@ -97,7 +97,6 @@ We use [Conventional Commits](https://www.conventionalcommits.org/) on `main`, b
 
 - Give the **PR** a clear, descriptive title and a useful description — that's what we work from.
 - Your individual commits can be whatever helps you; they won't survive the squash.
-- You may notice internal tracker identifiers in our commit history. Those are **maintainer-only** — please don't add them, and never put them in source, comments, or docs.
 
 ### Review
 

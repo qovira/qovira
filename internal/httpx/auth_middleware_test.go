@@ -1,7 +1,7 @@
 package httpx_test
 
 // Tests for the cookie-first extraction and CSRF double-submit check added to
-// AuthMiddleware in QOV-55.  These tests complement the existing
+// AuthMiddleware. These tests complement the existing
 // middleware_test.go which covers the Bearer-only path.
 
 import (

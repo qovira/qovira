@@ -93,5 +93,5 @@ Multi-stage `Dockerfile`: `golang:1.26-bookworm` builds the CGO binary; the runt
 - **Go house style** is enforced by `make lint` (golangci-lint, config in `.golangci.yaml`); run it before pushing, and keep tests green under `-race`.
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `ci:`, `chore:`, `test:`).
 - **Branches:** feature branches off `main`; PRs target `main`, squash-merged.
-- **No tracker identifiers in shipped content.** Internal Linear references go in commit messages only — never in source, comments, or docs.
+- **No tracker identifiers in shipped content** — keep them out of source, comments, and docs; the code stands on its own.
 - **Secrets never touch the repo or the image.** The master key and admin password are runtime-only; don't log, embed, or commit them.

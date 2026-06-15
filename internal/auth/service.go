@@ -257,7 +257,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID, displayName, timezo
 // row with that ID exists.
 //
 // This method accepts a pre-computed PHC string rather than a plaintext password
-// because the login/reset slice (QOV-54) owns the policy validation and
+// because the login/reset slice owns the policy validation and
 // re-hashing decision; this slice is responsible only for the storage update.
 func (s *Service) UpdatePasswordHash(ctx context.Context, userID, phc string) error {
 	n, err := s.writeQ.UpdateUserPasswordHash(ctx, db.UpdateUserPasswordHashParams{

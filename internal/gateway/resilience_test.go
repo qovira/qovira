@@ -1,6 +1,6 @@
 package gateway
 
-// Resilience tests for QOV-63.
+// Resilience tests for [Gateway].
 //
 // All tests use httptest.Server for endpoints.  Timing is deterministic:
 //   - sleepFn is injected as a no-op (or a recording variant) — no real sleep.

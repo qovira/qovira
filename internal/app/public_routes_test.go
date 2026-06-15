@@ -1,6 +1,6 @@
 package app_test
 
-// Tests for the isPublicRoute predicate changes introduced in QOV-55:
+// Tests for the isPublicRoute predicate changes:
 //   - POST /api/v1/auth/login is now public.
 //   - GET /api/v1/auth/login is still protected.
 //   - /healthz, SPA paths remain public.
