@@ -46,5 +46,16 @@ mem.out
 .golangci-lint/
 
 # NOTE: internal/httpx/webdist/ is intentionally NOT excluded.
-# The Go embed directive (//go:embed all:webdist) in internal/httpx/spa.go
-# requires the webdist directory to be present in the build context.
+# The Go build stage receives the directory empty (it is gitignored and therefore
+# absent after `COPY . .`); the Dockerfile's `COPY --from=web /web/build/ ./internal/httpx/webdist/`
+# step populates it from the web stage before `go build -tags embed_spa` runs.
+
+# Exclude local web/ artefacts that must not pollute the Docker build context.
+# node_modules/ is installed fresh inside the node builder stage — copying local
+# ones would corrupt the installed tree (pnpm detects the mismatch and aborts).
+# build/ and .svelte-kit/ are generated inside the node stage; they are not
+# needed from the host and would shadow the real build outputs.
+web/node_modules/
+web/build/
+web/.svelte-kit/
+web/storybook-static/

@@ -18,10 +18,35 @@ LDFLAGS := -X '$(PKG).version=$(VERSION)' \
 
 GOFLAGS := -trimpath
 
-.PHONY: build generate test race lint clean docker-build docker-run
+# WEBDIST is the target directory the embed directive reads.
+WEBDIST := internal/httpx/webdist
 
-build:
+.PHONY: build build-go web sync-web generate test race lint clean docker-build docker-run
+
+# build: full pipeline — build the SvelteKit SPA, sync its output into webdist/,
+# then compile the Go binary with -tags embed_spa so the real SPA is embedded.
+# Requires Node 24 + pnpm.
+build: web sync-web
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GOFLAGS) -tags embed_spa -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/qovira
+
+# build-go: Go-only build — skips the SPA entirely and uses the in-code stub
+# (spa_noembed.go). The binary's web UI shows a "not embedded" page. Safe on a
+# fresh checkout with no Node/pnpm installed and no webdist/ directory.
+build-go:
 	CGO_ENABLED=$(CGO_ENABLED) go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/qovira
+
+# web: build the SvelteKit SPA from web/.
+web:
+	cd web && pnpm install --frozen-lockfile && pnpm build
+
+# sync-web: wipe and repopulate webdist/ from the SvelteKit build output.
+# webdist/ is fully gitignored — nothing there is ever committed — so a clean
+# wipe-and-copy is the simplest way to avoid orphaned stale chunks from a
+# prior build without needing git clean.
+sync-web:
+	rm -rf $(WEBDIST)
+	mkdir -p $(WEBDIST)
+	cp -R web/build/. $(WEBDIST)/
 
 generate:
 	go tool sqlc generate

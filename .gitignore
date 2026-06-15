@@ -41,3 +41,10 @@ mem.out
 *.db-journal
 *.sqlite
 *.sqlite3
+
+# SvelteKit build output synced into webdist/ by `make sync-web` / Docker.
+# The directory is a pure build artifact — nothing in it is ever committed.
+# The SPA is embedded in the binary only when -tags embed_spa is passed
+# (i.e. `make build` and the Docker image). A bare `go build ./...` or
+# `make build-go` uses the in-code stub from spa_noembed.go instead.
+internal/httpx/webdist/

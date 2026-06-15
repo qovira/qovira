@@ -1,6 +1,40 @@
 # syntax=docker/dockerfile:1
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Web stage — builds the SvelteKit SPA from web/.
+#
+# Runs on the build platform (x64 in CI) independent of the Go target arch —
+# the JS build is platform-agnostic and produces the same output on any host.
+# Node 24 matches the version constraint in web/package.json. pnpm is enabled
+# via corepack (pinned to the packageManager field in package.json). The build
+# fetches @qovira/theme and @qovira/ui from npm (network is available during
+# Docker build stages) and runs the Paraglide and Tailwind Vite plugins.
+#
+# The output (web/build/) is copied into the gitignored internal/httpx/webdist/
+# in the Go build stage (after `COPY . .`), which then compiles with
+# -tags embed_spa so spa_embed.go's //go:embed all:webdist embeds the real SPA.
+# ──────────────────────────────────────────────────────────────────────────────
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203 AS web
+
+# Enable pnpm via corepack (matches the packageManager field in package.json).
+RUN corepack enable pnpm
+
+WORKDIR /web
+
+# Install dependencies first (layer-cached when only source files change).
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+
+# Copy the rest of the web sources. The openapi spec is only needed for
+# `pnpm generate:api` (TypeScript type generation); pnpm build (Vite) does not
+# read it, so it is not copied into the build context.
+COPY web/ ./
+
+# Build the SvelteKit SPA. Output lands in /web/build/.
+RUN pnpm build
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Build stage — pinned to the BUILD platform (--platform=$BUILDPLATFORM) so a
 # multi-arch `docker buildx` build cross-compiles instead of emulating: the
 # build stage always runs on the native runner arch, and the arm64 target is
@@ -54,6 +88,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY . .
 
+# Populate the gitignored webdist/ directory with the real SvelteKit build from
+# the web stage. webdist/ is not committed, so it is absent after `COPY . .`;
+# this step creates and fills it so that `go build -tags embed_spa` (below) can
+# embed the real SPA via spa_embed.go's //go:embed all:webdist directive.
+COPY --from=web /web/build/ ./internal/httpx/webdist/
+
 # Build the binary with CGO enabled. go-sqlcipher compiles the SQLCipher
 # amalgamation directly into the binary — no system libsqlcipher is needed or
 # installed. OpenSSL libcrypto is linked dynamically (OpenSSL headers come from
@@ -74,6 +114,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     fi && \
     CGO_ENABLED=1 go build \
       -trimpath \
+      -tags embed_spa \
       -ldflags "-X 'github.com/qovira/qovira/internal/cli.version=${VERSION}' \
                 -X 'github.com/qovira/qovira/internal/cli.commit=${COMMIT}' \
                 -X 'github.com/qovira/qovira/internal/cli.date=${DATE}'" \

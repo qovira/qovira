@@ -186,27 +186,11 @@ func TestSPAFallback_NoCacheHeader(t *testing.T) {
 	}
 }
 
-// TestImmutableAssets_LongLivedCache verifies Acceptance Criterion 4 (assets):
-// files under /_app/immutable/ get the immutable long-lived cache header.
-func TestImmutableAssets_LongLivedCache(t *testing.T) {
-	t.Parallel()
-
-	h := newServerHandler(t, "dev")
-
-	r := httptest.NewRequest(http.MethodGet, "/_app/immutable/placeholder.abc123def456.js", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, r)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
-
-	cc := rr.Header().Get("Cache-Control")
-	const want = "public, max-age=31536000, immutable"
-	if cc != want {
-		t.Errorf("Cache-Control = %q, want %q", cc, want)
-	}
-}
+// NOTE: the immutable long-lived cache header on real files under
+// /_app/immutable/ is asserted in spa_stub_test.go (tagged !embed_spa), since
+// the concrete asset filename varies by build (stub asset vs. real SvelteKit
+// chunk). The build-agnostic fallback (directory request → index.html, no
+// immutable header) is covered by the tests above.
 
 // TestNoCORSHeaders verifies Acceptance Criterion 5: no CORS headers are
 // emitted by default on any response, since the SPA is same-origin.
@@ -228,7 +212,6 @@ func TestNoCORSHeaders(t *testing.T) {
 		"/healthz",
 		"/api/v1/does-not-exist",
 		"/",
-		"/_app/immutable/placeholder.abc123def456.js",
 		"/events",
 	}
 
@@ -263,7 +246,7 @@ func TestEventsRoute_IsMatchedNotSPA(t *testing.T) {
 			rr := httptest.NewRecorder()
 			h.ServeHTTP(rr, r)
 
-			// The placeholder must not return an HTML body for any method.
+			// Neither the stub nor real SPA index.html may be returned for /events.
 			body := rr.Body.String()
 			if strings.Contains(body, "<!doctype html") || strings.Contains(body, "<html") {
 				t.Errorf("%s /events returned index.html — route not reserved or SPA fallback swallowed it", method)
@@ -290,8 +273,9 @@ func TestImmutableDir_NoListing(t *testing.T) {
 
 			body := rr.Body.String()
 			// A directory listing from http.FileServer is an HTML <pre> with
-			// <a href> entries; the placeholder asset name must never appear.
-			if strings.Contains(body, "placeholder.abc123def456.js") {
+			// <a href> entries — check that no directory-listing markup appeared
+			// (the handler falls back to index.html for directory paths).
+			if strings.Contains(body, "<pre>") && strings.Contains(body, "<a href") {
 				t.Errorf("path %s leaked a directory listing: %q", path, body)
 			}
 			// The long-lived immutable header must not be attached to a

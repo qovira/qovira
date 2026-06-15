@@ -14,6 +14,7 @@ This repository holds the Qovira **application server**: a single Go binary that
 
 - Go 1.26+
 - A C toolchain (GCC/Clang) and OpenSSL headers — CGO is required to build the SQLCipher driver.
+- Node 24 + pnpm — required only for `make build` (full binary with the real SPA embedded). Not needed for `make build-go`, `make test`, `make race`, or `make lint`.
 
 ## Platform support
 
@@ -30,10 +31,15 @@ CI builds and race-tests every supported target on Blacksmith runners; lint and 
 ## Build
 
 ```sh
-make build
+make build       # full build: SvelteKit SPA + Go binary with -tags embed_spa (requires Node 24 + pnpm)
+make build-go    # Go-only: skips the SPA; the binary's web UI serves an in-code stub (no Node/pnpm needed)
 ```
 
 The binary is written to `./qovira`.
+
+`make build` builds the SvelteKit SPA from `web/` (`pnpm install --frozen-lockfile && pnpm build`), syncs the output into `internal/httpx/webdist/` (a gitignored directory — nothing there is ever committed), then compiles the Go binary with `-tags embed_spa` so the real SPA is embedded. The resulting binary serves the full web UI.
+
+`make build-go` skips the SPA entirely — no Node/pnpm required, no `webdist/` directory needed. The binary's web UI shows a minimal in-code stub page ("not embedded"). Use it for fast backend iteration, or when you only need `go build ./...`, `make test`, `make race`, or `make lint` — all of these work on a fresh checkout without any Node/pnpm step.
 
 ## Run
 
@@ -52,9 +58,10 @@ To create the first admin user on a fresh installation, set `QOVIRA_ADMIN_EMAIL`
 ## Development
 
 ```sh
-make test     # run tests
-make race     # run tests with the race detector
-make lint     # run golangci-lint
+make test       # run tests (no Node/pnpm needed — uses the in-code stub)
+make race       # run tests with the race detector
+make lint       # run golangci-lint
+make build-go   # compile the binary without rebuilding the SPA (fast iteration)
 ```
 
 ## Running with Docker

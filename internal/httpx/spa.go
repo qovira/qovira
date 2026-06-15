@@ -1,28 +1,24 @@
 package httpx
 
 import (
-	"embed"
 	"io/fs"
 	"net/http"
 	"path"
 	"strings"
 )
 
-// webdist is the embedded placeholder for the SvelteKit adapter-static build. At release time the real build output
-// replaces this directory's contents. The embed directive uses the "all:" prefix so subdirectories beginning with "_"
-// (such as _app/) are included — by default the embed package skips them. The embed directive is on the unexported var;
-// spaFS is derived via fs.Sub.
-//
-//go:embed all:webdist
-var webdist embed.FS
-
-// spaFS is the sub-tree rooted at webdist/ so that http.FileServer sees paths relative to that directory (e.g.
-// "index.html", "_app/immutable/…").
-var spaFS, _ = fs.Sub(webdist, "webdist")
-
 // immutablePrefix is the URL path prefix under which SvelteKit emits content-hashed assets. Files served from here are
 // immutable: their name changes whenever their content does, so clients never need to revalidate.
 const immutablePrefix = "/_app/immutable/"
+
+// spaFS is the sub-tree FS that spaHandler reads. It is initialised by exactly
+// one of two build-tag-gated files:
+//
+//   - spa_embed.go   (//go:build embed_spa):   fs.Sub over the real //go:embed all:webdist FS.
+//   - spa_noembed.go (//go:build !embed_spa):  a tiny in-code fs.FS with a single stub index.html.
+//
+// The handler reads spaFS only; it has no knowledge of which variant is active.
+var spaFS fs.FS
 
 // spaHandler returns an http.Handler that serves the embedded SPA with the
 // required cache semantics:
