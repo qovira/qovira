@@ -46,5 +46,11 @@
   "conv_switcher_empty": "No conversations yet. Start one below.",
   "conv_switcher_new_preview": "New conversation",
   "conv_switcher_load_error": "Couldn't load conversations.",
-  "conv_switcher_retry": "Try again"
+  "conv_switcher_retry": "Try again",
+  "notification_reminder_fired_title": "Reminder: {title}",
+  "notification_reminder_fired_body": "Due {dueAt}",
+  "notification_prompt_title": "Stay on top of your reminders",
+  "notification_prompt_body": "Get notified when a reminder fires, even when the app is in the background.",
+  "notification_prompt_enable": "Turn on notifications",
+  "notification_prompt_dismiss": "Maybe later"
 }

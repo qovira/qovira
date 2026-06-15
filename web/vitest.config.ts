@@ -35,7 +35,9 @@ export default defineConfig({
         },
       },
       {
-        resolve: { alias },
+        // conditions adds "svelte" so @qovira/ui (svelte-condition-only exports)
+        // is resolvable from .svelte.test.ts suites that mock or import UI packages.
+        resolve: { alias, conditions: ["svelte", "import", "default"] },
         plugins: [svelte()],
         test: {
           name: "runes",
@@ -52,7 +54,11 @@ export default defineConfig({
         },
       },
       {
-        resolve: { alias },
+        // conditions adds "svelte" to the export-condition list so packages
+        // that only export under a "svelte" condition (e.g. @qovira/ui) are
+        // resolvable in the happy-dom test environment. SvelteKit's Vite plugin
+        // adds this condition at build time; here we mirror it for tests.
+        resolve: { alias, conditions: ["svelte", "browser", "import", "default"] },
         test: {
           name: "browser",
           environment: "happy-dom",

@@ -39,6 +39,7 @@ import {
 import { parseFrames } from "./parser.js";
 import { routeEvent, type RouterHandlers, type ToolStartedPayload } from "./router.js";
 import { nextBackoff, BACKOFF_INITIAL_MS } from "./backoff.js";
+import { notifyReminderFired } from "$lib/notifications/reminder-fired.svelte.js";
 import type { components, operations } from "$lib/api/schema.d.ts";
 
 type ReminderItem = components["schemas"]["Reminder"];
@@ -61,7 +62,8 @@ let _active = false;
 // empty; eslint-disable comments suppress the no-empty-function rule on them.
 // ---------------------------------------------------------------------------
 
-function makeHandlers(): RouterHandlers {
+/** Exported for unit-testing the reminder.fired dispatch seam. */
+export function makeHandlers(): RouterHandlers {
   return {
     onReminderEvent(eventName: string, payload: unknown): void {
       // reminder.deleted carries only an id; all others carry a full Reminder object.
@@ -70,9 +72,23 @@ function makeHandlers(): RouterHandlers {
         if (typeof p.id === "string") removeReminder(p.id);
         return;
       }
-      // reminder.fired carries FiredEventPayload (no full Reminder body) — ignore
-      // for store patching; the reconcile on reconnect will sync state.
-      if (eventName === "reminder.fired") return;
+      // reminder.fired carries FiredEventPayload (no full Reminder body).
+      // Raise an in-app toast and (when permitted) an OS notification.
+      // Store patching for the reminders list is handled by the reminders-live-list
+      // issue; this branch is additive — do not remove the created/updated/completed/deleted
+      // handling below.
+      if (eventName === "reminder.fired") {
+        const fp = payload as { reminderId: string; title: string; dueAt: string; firedAt: string };
+        if (
+          typeof fp.reminderId === "string" &&
+          typeof fp.title === "string" &&
+          typeof fp.dueAt === "string" &&
+          typeof fp.firedAt === "string"
+        ) {
+          notifyReminderFired(fp);
+        }
+        return;
+      }
       // reminder.created / reminder.updated / reminder.completed carry a full Reminder.
       const r = payload as ReminderItem;
       if (typeof r.id === "string") upsertReminder(r);

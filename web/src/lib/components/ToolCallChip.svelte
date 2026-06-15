@@ -16,6 +16,7 @@
 
   import type { ToolCallEntry } from "$lib/stores/tool-calls.svelte.js";
   import { renderSafeMarkdown } from "$lib/markdown/sanitize.js";
+  import { formatDueAt } from "$lib/format/datetime.js";
   import {
     tool_chip_creating,
     tool_chip_updating,
@@ -77,19 +78,6 @@
     if (typeof r.id !== "string" || typeof r.title !== "string") return null;
     const dueAt = typeof r.dueAt === "string" ? r.dueAt : null;
     return { id: r.id, title: r.title, dueAt };
-  }
-
-  function formatDueAt(dueAt: string | null | undefined): string {
-    if (!dueAt) return "";
-    try {
-      return new Intl.DateTimeFormat(undefined, {
-        weekday: "short",
-        hour: "numeric",
-        minute: "numeric",
-      }).format(new Date(dueAt));
-    } catch {
-      return dueAt;
-    }
   }
 
   const completedEntry = $derived(entry.state === "completed" ? entry : null);

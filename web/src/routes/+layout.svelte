@@ -27,6 +27,8 @@
   import { resetToolCalls } from "$lib/stores/tool-calls.svelte.js";
   import { resetConfirmations } from "$lib/stores/confirmations.svelte.js";
   import { openSseConnection, closeSseConnection } from "$lib/sse/client.js";
+  import { isPendingPermissionPrompt, resetNotificationPromptState } from "$lib/notifications/reminder-fired.svelte.js";
+  import OsNotificationPrompt from "$lib/components/OsNotificationPrompt.svelte";
   import RailEntry from "$lib/components/RailEntry.svelte";
   import {
     nav_aria_label,
@@ -39,6 +41,10 @@
     nav_chat,
     nav_reminders,
   } from "$lib/paraglide/messages.js";
+
+  // Reactive flag: true when the deferred OS-notification permission prompt is pending.
+  // isPendingPermissionPrompt() reads module-level $state — $derived tracks it reactively.
+  const showNotificationPrompt = $derived(isPendingPermissionPrompt());
 
   interface Props {
     children: Snippet;
@@ -134,6 +140,8 @@
       resetConversation();
       resetToolCalls();
       resetConfirmations();
+      // Reset the notification permission prompt so the next session sees a clean slate.
+      resetNotificationPromptState();
     });
 
     // Register the centralised 401 handler. This is the single authority for
@@ -283,5 +291,12 @@
     <div class="flex h-screen items-center justify-center">
       <span class="sr-only">{nav_loading()}</span>
     </div>
+  {/if}
+
+  <!-- Deferred OS-notification permission prompt (AC3).
+       Shown the first time a reminder fires with Notification.permission === "default".
+       Rendered inside ToastProvider so it layers correctly with toasts. -->
+  {#if showNotificationPrompt}
+    <OsNotificationPrompt />
   {/if}
 </ToastProvider>

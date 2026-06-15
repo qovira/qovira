@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { nextBackoff, BACKOFF_INITIAL_MS } from "./backoff.js";
-import { openSseConnection, closeSseConnection } from "./client.js";
+import { openSseConnection, closeSseConnection, makeHandlers } from "./client.js";
 
 // ---------------------------------------------------------------------------
 // Module mocks (hoisted — must be at the top level of the file)
@@ -37,6 +37,10 @@ vi.mock("$lib/stores/confirmations.svelte.js", () => ({
   confirmationExpired: vi.fn(),
   finalizeConfirmationsForMessage: vi.fn(),
   CONFIRMATION_STREAMING_SENTINEL_ID: "__confirmation_streaming__",
+}));
+
+vi.mock("$lib/notifications/reminder-fired.svelte.js", () => ({
+  notifyReminderFired: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -317,5 +321,107 @@ describe("reconcile() — reminders pagination", () => {
 
     closeSseConnection();
     await vi.runAllTimersAsync();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// makeHandlers() — reminder.fired dispatch seam (FIX 2)
+//
+// Tests the onReminderEvent branch inside makeHandlers():
+//   • a well-formed reminder.fired payload forwards to notifyReminderFired
+//   • a malformed payload (missing / non-string fields) is NOT forwarded
+//   • reminder.created routes to upsertReminder (regression guard)
+//   • reminder.deleted routes to removeReminder (regression guard)
+// ---------------------------------------------------------------------------
+
+describe("makeHandlers() — onReminderEvent dispatch", () => {
+  let notifyReminderFiredMock: ReturnType<typeof vi.fn>;
+  let upsertReminderMock: ReturnType<typeof vi.fn>;
+  let removeReminderMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const notificationsModule = await import("$lib/notifications/reminder-fired.svelte.js");
+    notifyReminderFiredMock = notificationsModule.notifyReminderFired as ReturnType<typeof vi.fn>;
+    notifyReminderFiredMock.mockClear();
+
+    const remindersModule = await import("$lib/stores/reminders.svelte.js");
+    upsertReminderMock = remindersModule.upsertReminder as ReturnType<typeof vi.fn>;
+    upsertReminderMock.mockClear();
+    removeReminderMock = remindersModule.removeReminder as ReturnType<typeof vi.fn>;
+    removeReminderMock.mockClear();
+  });
+
+  const VALID_FIRED_PAYLOAD = {
+    reminderId: "rem-1",
+    title: "Call dentist",
+    dueAt: "2030-01-15T09:00:00Z",
+    firedAt: "2030-01-15T09:00:01Z",
+  };
+
+  it("forwards a well-formed reminder.fired payload to notifyReminderFired", () => {
+    const handlers = makeHandlers();
+    handlers.onReminderEvent("reminder.fired", VALID_FIRED_PAYLOAD);
+    expect(notifyReminderFiredMock).toHaveBeenCalledOnce();
+    expect(notifyReminderFiredMock).toHaveBeenCalledWith(VALID_FIRED_PAYLOAD);
+  });
+
+  it("does NOT call notifyReminderFired when reminderId is missing", () => {
+    const handlers = makeHandlers();
+    handlers.onReminderEvent("reminder.fired", {
+      title: "X",
+      dueAt: "2030-01-01T00:00:00Z",
+      firedAt: "2030-01-01T00:00:01Z",
+    });
+    expect(notifyReminderFiredMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call notifyReminderFired when title is not a string", () => {
+    const handlers = makeHandlers();
+    handlers.onReminderEvent("reminder.fired", {
+      reminderId: "rem-1",
+      title: 42,
+      dueAt: "2030-01-01T00:00:00Z",
+      firedAt: "2030-01-01T00:00:01Z",
+    });
+    expect(notifyReminderFiredMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call notifyReminderFired when dueAt is not a string", () => {
+    const handlers = makeHandlers();
+    handlers.onReminderEvent("reminder.fired", {
+      reminderId: "rem-1",
+      title: "X",
+      dueAt: null,
+      firedAt: "2030-01-01T00:00:01Z",
+    });
+    expect(notifyReminderFiredMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call notifyReminderFired when firedAt is not a string", () => {
+    const handlers = makeHandlers();
+    handlers.onReminderEvent("reminder.fired", {
+      reminderId: "rem-1",
+      title: "X",
+      dueAt: "2030-01-01T00:00:00Z",
+      firedAt: undefined,
+    });
+    expect(notifyReminderFiredMock).not.toHaveBeenCalled();
+  });
+
+  it("routes reminder.created to upsertReminder (regression guard)", () => {
+    const reminder = { id: "rem-1", userId: "u1", title: "T", dueAt: "2030-01-01T00:00:00Z", status: "active" };
+    const handlers = makeHandlers();
+    handlers.onReminderEvent("reminder.created", reminder);
+    expect(upsertReminderMock).toHaveBeenCalledOnce();
+    expect(upsertReminderMock).toHaveBeenCalledWith(reminder);
+    expect(notifyReminderFiredMock).not.toHaveBeenCalled();
+  });
+
+  it("routes reminder.deleted to removeReminder (regression guard)", () => {
+    const handlers = makeHandlers();
+    handlers.onReminderEvent("reminder.deleted", { id: "rem-1" });
+    expect(removeReminderMock).toHaveBeenCalledOnce();
+    expect(removeReminderMock).toHaveBeenCalledWith("rem-1");
+    expect(notifyReminderFiredMock).not.toHaveBeenCalled();
   });
 });
