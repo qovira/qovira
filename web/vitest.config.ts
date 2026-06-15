@@ -13,13 +13,16 @@ const alias = {
   "$app/navigation": fileURLToPath(new URL("./src/tests/stubs/app-navigation.ts", import.meta.url)),
 };
 
-// Three test projects, each in the environment its suite needs:
+// Four test projects, each in the environment its suite needs:
 //   node    — pure-Node unit tests (file I/O, no DOM), e.g. boot.test.ts
 //   runes   — .svelte.ts rune logic; node env + the Svelte compiler transform
 //             so $state/$derived/$effect work (flushSync / $effect.root), per
 //             the conventions:writing-svelte skill
+//   jsdom   — tests that require a full DOM with correct attribute sanitization
+//             (DOMPurify XSS tests); jsdom passes DOMPurify's isSupported check
+//             and correctly handles href attribute sanitization in block context
 //   browser — DOM-dependent tests (document.cookie / fetch), e.g. the Api
-//             client; happy-dom env, excluding the rune suites above
+//             client; happy-dom env, excluding the rune suites and jsdom suites
 export default defineConfig({
   test: {
     projects: [
@@ -43,10 +46,18 @@ export default defineConfig({
       {
         resolve: { alias },
         test: {
+          name: "jsdom",
+          environment: "jsdom",
+          include: ["src/lib/**/*.jsdom.test.ts"],
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
           name: "browser",
           environment: "happy-dom",
           include: ["src/lib/**/*.test.ts"],
-          exclude: ["src/**/*.svelte.test.ts"],
+          exclude: ["src/**/*.svelte.test.ts", "src/lib/**/*.jsdom.test.ts"],
         },
       },
     ],

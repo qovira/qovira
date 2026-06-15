@@ -9,6 +9,7 @@ import {
   getConversationHistory,
   setActiveConversation,
   applyStreamingDelta,
+  appendMessage,
   finalizeStreamingMessage,
   setConversationHistory,
   resetConversation,
@@ -283,5 +284,89 @@ describe("conversationId routing invariant", () => {
     const slot = getConversationHistory()[1];
     expect(slot !== undefined && isStreaming(slot) && slot.streaming).toBe(true);
     expect(slot?.content).toBe(" delta");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// appendMessage — inserts a persisted message before any open streaming slot
+// ---------------------------------------------------------------------------
+
+describe("appendMessage()", () => {
+  it("pushes to the end when there is no streaming slot", () => {
+    setActiveConversation("conv-1", [makeMessage({ id: "m1", role: "user", content: "Hi" })]);
+    flushSync();
+
+    const userMsg = makeMessage({ id: "m2", role: "user", content: "Second" });
+    appendMessage(userMsg);
+    flushSync();
+
+    const history = getConversationHistory();
+    expect(history).toHaveLength(2);
+    expect(history[1]?.id).toBe("m2");
+  });
+
+  it("splices before the first open streaming slot so the user bubble renders before the assistant reply", () => {
+    setActiveConversation("conv-1", []);
+    flushSync();
+
+    // Simulate a message.delta arriving while the POST /messages is still in-flight.
+    applyStreamingDelta("Hello");
+    flushSync();
+
+    // Now the 202 resolves and we append the persisted user message.
+    const userMsg = makeMessage({ id: "persisted-user", role: "user", content: "Trigger text" });
+    appendMessage(userMsg);
+    flushSync();
+
+    const history = getConversationHistory();
+    // [0] = user message, [1] = streaming assistant slot
+    expect(history).toHaveLength(2);
+    expect(history[0]?.id).toBe("persisted-user");
+    expect(history[0]?.role).toBe("user");
+    const slot = history[1];
+    expect(slot !== undefined && isStreaming(slot) && slot.streaming).toBe(true);
+  });
+
+  it("preserves accumulated streaming text after inserting the user message before it", () => {
+    setActiveConversation("conv-1", []);
+    flushSync();
+
+    applyStreamingDelta("Part A ");
+    applyStreamingDelta("Part B");
+    flushSync();
+
+    const userMsg = makeMessage({ id: "u1", role: "user", content: "Ping" });
+    appendMessage(userMsg);
+    flushSync();
+
+    const history = getConversationHistory();
+    expect(history).toHaveLength(2);
+    const slot = history[1];
+    // Streaming slot content must not be clobbered by the insert.
+    expect(slot?.content).toBe("Part A Part B");
+    expect(slot !== undefined && isStreaming(slot) && slot.streaming).toBe(true);
+  });
+
+  it("places the message after existing persisted messages and before any streaming slot", () => {
+    const existingUser = makeMessage({ id: "m1", role: "user", content: "First" });
+    const existingAssistant = makeMessage({ id: "m2", role: "assistant", content: "Reply" });
+    setActiveConversation("conv-1", [existingUser, existingAssistant]);
+    flushSync();
+
+    // A new turn: streaming slot opens before the 202 resolves.
+    applyStreamingDelta("Streaming...");
+    flushSync();
+
+    const newUserMsg = makeMessage({ id: "m3", role: "user", content: "Second user turn" });
+    appendMessage(newUserMsg);
+    flushSync();
+
+    const history = getConversationHistory();
+    // [0] = existing user, [1] = existing assistant, [2] = new user, [3] = streaming slot
+    expect(history).toHaveLength(4);
+    expect(history[2]?.id).toBe("m3");
+    const slot = history[3];
+    expect(slot !== undefined && isStreaming(slot) && slot.streaming).toBe(true);
+    expect(slot?.content).toBe("Streaming...");
   });
 });

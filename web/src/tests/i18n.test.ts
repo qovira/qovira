@@ -38,11 +38,13 @@ import {
   home_placeholder,
   reminders_placeholder,
   onboarding_placeholder,
+  chat_composer_placeholder,
+  chat_send,
+  chat_turn_failed,
 } from "../lib/paraglide/messages.js";
 
 // All shell message functions expected to resolve to non-empty English strings.
-// This map covers every key catalogued for the v0.1 shell. Keys for surfaces
-// that don't exist yet (chat/reminders chrome) are intentionally absent.
+// This map covers every key catalogued for the v0.1 shell.
 const shellMessages: Record<string, () => string> = {
   nav_aria_label,
   nav_loading,
@@ -65,6 +67,9 @@ const shellMessages: Record<string, () => string> = {
   home_placeholder,
   reminders_placeholder,
   onboarding_placeholder,
+  chat_composer_placeholder,
+  chat_send,
+  chat_turn_failed,
 };
 
 describe("i18n catalog (Paraglide, en)", () => {

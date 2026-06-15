@@ -19,6 +19,9 @@
   "settings_heading": "Settings",
   "settings_logout": "Log out",
   "home_placeholder": "Chat",
-  "reminders_placeholder": "Nothing on your list yet. Tell me what’s on your mind and I’ll keep track.",
-  "onboarding_placeholder": "Onboarding"
+  "reminders_placeholder": "Nothing on your list yet. Tell me what's on your mind and I'll keep track.",
+  "onboarding_placeholder": "Onboarding",
+  "chat_composer_placeholder": "Message…",
+  "chat_send": "Send",
+  "chat_turn_failed": "Something went wrong. Please try again."
 }

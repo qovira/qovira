@@ -31,6 +31,12 @@ export interface StreamingHistoryMessage extends HistoryMessage {
 
 let _conversationId = $state<string | null>(null);
 let _history = $state<(HistoryMessage | StreamingHistoryMessage)[]>([]);
+/**
+ * Non-null when the most recent AI turn failed for the active conversation.
+ * Holds the error `code` string from the turn.failed SSE event.
+ * Cleared by clearTurnError(), setActiveConversation(), and resetConversation().
+ */
+let _turnError = $state<string | null>(null);
 
 /** Sentinel id for the in-flight streaming slot. Never matches a real server id. */
 const STREAMING_SENTINEL_ID = "__streaming__";
@@ -58,18 +64,27 @@ export function getConversationHistory(): (HistoryMessage | StreamingHistoryMess
   return _history;
 }
 
+/**
+ * Returns the current turn error code, or null when no error is set.
+ * Non-null when the most recent AI turn failed for the active conversation.
+ */
+export function getTurnError(): string | null {
+  return _turnError;
+}
+
 // ---------------------------------------------------------------------------
 // Write API
 // ---------------------------------------------------------------------------
 
 /**
  * Set the active conversation and seed its initial message history.
- * Replaces any previous conversation + history.
+ * Replaces any previous conversation + history. Clears any turn error.
  * Called when the user opens a conversation and its history is fetched.
  */
 export function setActiveConversation(id: string, messages: HistoryMessage[]): void {
   _conversationId = id;
   _history = messages;
+  _turnError = null;
 }
 
 /**
@@ -79,6 +94,30 @@ export function setActiveConversation(id: string, messages: HistoryMessage[]): v
  */
 export function setConversationHistory(messages: HistoryMessage[]): void {
   _history = messages;
+}
+
+/**
+ * Append a persisted message to the history without clobbering in-flight streaming text.
+ *
+ * Inserts `message` immediately before the first open streaming slot (streaming: true), or
+ * pushes it to the end when no slot is open. This prevents the user-message append that
+ * follows a 202 response from reordering history when a message.delta has already arrived
+ * over the concurrently-open SSE connection while the POST was still in-flight.
+ *
+ * Use this instead of setActiveConversation(..., [...history, msg]) when appending a single
+ * persisted message — a full-replace snapshot taken after an awaited POST may be stale and
+ * will clobber any streaming text accumulated between the send and the 202 response.
+ *
+ * @param message - The persisted HistoryMessage to insert.
+ */
+export function appendMessage(message: HistoryMessage): void {
+  const streamingIdx = _history.findIndex(isStreamingSlot);
+  if (streamingIdx !== -1) {
+    // Splice before the first open streaming slot so the user bubble precedes the assistant reply.
+    _history.splice(streamingIdx, 0, message);
+  } else {
+    _history.push(message);
+  }
 }
 
 /**
@@ -143,10 +182,33 @@ export function finalizeStreamingMessage(messageId: string, content: string | un
 }
 
 /**
+ * Record a turn.failed event for the active conversation.
+ *
+ * Guards on conversationId: if the event belongs to a different conversation,
+ * it is a no-op. Also a no-op when no conversation is active.
+ *
+ * @param conversationId - The conversationId from the turn.failed SSE payload.
+ * @param code           - The error code from the SSE payload (e.g. "turn_error").
+ */
+export function setTurnFailed(conversationId: string, code: string): void {
+  if (_conversationId === null || conversationId !== _conversationId) return;
+  _turnError = code;
+}
+
+/**
+ * Clear the current turn error.
+ * Call when the user dismisses the error or sends a new message.
+ */
+export function clearTurnError(): void {
+  _turnError = null;
+}
+
+/**
  * Reset the conversation store to empty state.
  * Call on logout or 401 teardown. Safe when already empty.
  */
 export function resetConversation(): void {
   _conversationId = null;
   _history = [];
+  _turnError = null;
 }

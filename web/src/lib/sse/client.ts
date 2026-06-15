@@ -21,6 +21,7 @@ import {
   finalizeStreamingMessage,
   getActiveConversationId,
   setConversationHistory,
+  setTurnFailed,
 } from "$lib/stores/conversation.svelte.js";
 import { parseFrames } from "./parser.js";
 import { routeEvent, type RouterHandlers } from "./router.js";
@@ -99,8 +100,9 @@ function makeHandlers(): RouterHandlers {
       // Future surface slice updates the pending-chip state.
     },
 
-    onTurnFailed(): void {
-      // Future surface slice shows an error state in the conversation.
+    onTurnFailed(conversationId: string, code: string): void {
+      // Guard on conversationId so only the active conversation's error is shown.
+      setTurnFailed(conversationId, code);
     },
   };
 }

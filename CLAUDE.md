@@ -51,7 +51,7 @@ pnpm check            # svelte-check (TypeScript + Svelte type-check)
 pnpm lint             # ESLint
 pnpm format:check     # Prettier check
 pnpm format           # Prettier write
-pnpm test             # vitest run (node for boot, runes for .svelte.ts, happy-dom for api/)
+pnpm test             # vitest run (node, runes, jsdom, and happy-dom browser projects)
 pnpm build            # SvelteKit static build → web/build/
 ```
 
@@ -63,7 +63,7 @@ pnpm build            # SvelteKit static build → web/build/
 
 **CSRF protocol**: `Api` automatically reads `qovira_csrf` from `document.cookie` and sends it as `CSRF-Token` on POST/PATCH/DELETE. GET/HEAD are exempt. The session cookie `__Host-qovira_session` is HttpOnly and rides automatically via `credentials: "include"`.
 
-**vitest projects**: the `web/vitest.config.ts` defines three projects — `node` (for `src/tests/`), `runes` (node + the Svelte compiler, for `*.svelte.test.ts` rune-logic suites), and `browser` (happy-dom, for `src/lib/**/*.test.ts` excluding the rune suites). Tests that need `document.cookie` or `globalThis.fetch` go under `src/lib/`; `$state`/`$derived` logic goes in a `*.svelte.test.ts`.
+**vitest projects**: the `web/vitest.config.ts` defines four projects — `node` (for `src/tests/`), `runes` (node + the Svelte compiler, for `*.svelte.test.ts` rune-logic suites), `jsdom` (jsdom env, for `*.jsdom.test.ts` DOM-faithful sanitizer/XSS tests — jsdom passes DOMPurify's `isSupported` check and correctly handles block-context href sanitization), and `browser` (happy-dom, for `src/lib/**/*.test.ts` excluding the rune and jsdom suites). Tests that need `document.cookie` or `globalThis.fetch` go under `src/lib/`; `$state`/`$derived` logic goes in a `*.svelte.test.ts`; XSS/sanitizer tests go in a `*.jsdom.test.ts`.
 
 ### i18n (Paraglide)
 
