@@ -23,8 +23,15 @@ import {
   setConversationHistory,
   setTurnFailed,
 } from "$lib/stores/conversation.svelte.js";
+import {
+  toolCallStarted,
+  toolCallCompleted,
+  toolCallFailed,
+  finalizeToolCallsForMessage,
+  STREAMING_SENTINEL_ID,
+} from "$lib/stores/tool-calls.svelte.js";
 import { parseFrames } from "./parser.js";
-import { routeEvent, type RouterHandlers } from "./router.js";
+import { routeEvent, type RouterHandlers, type ToolStartedPayload } from "./router.js";
 import { nextBackoff, BACKOFF_INITIAL_MS } from "./backoff.js";
 import type { components, operations } from "$lib/api/schema.d.ts";
 
@@ -78,18 +85,25 @@ function makeHandlers(): RouterHandlers {
       // CompletedPayload carries messageId and finishReason; no authoritative content
       // field — the server does not re-send full content on completed. Keep delta text.
       finalizeStreamingMessage(messageId, undefined, finishReason);
+      // Retag all tool-call entries from the streaming sentinel to the real messageId so
+      // the cards remain visible and clickable after the streaming slot finalizes.
+      finalizeToolCallsForMessage(STREAMING_SENTINEL_ID, messageId);
     },
 
-    onToolStarted(): void {
-      // Future conversation surface slice will render tool-call progress chips.
+    onToolStarted(payload: ToolStartedPayload): void {
+      // Guard: only apply to the currently-open conversation.
+      if (payload.conversationId !== getActiveConversationId()) return;
+      toolCallStarted(payload);
     },
 
-    onToolCompleted(): void {
-      // Future surface slice handles this.
+    onToolCompleted(conversationId: string, callId: string, result: unknown): void {
+      if (conversationId !== getActiveConversationId()) return;
+      toolCallCompleted(conversationId, callId, result);
     },
 
-    onToolFailed(): void {
-      // Future surface slice handles this.
+    onToolFailed(conversationId: string, callId: string, error: string): void {
+      if (conversationId !== getActiveConversationId()) return;
+      toolCallFailed(conversationId, callId, error);
     },
 
     onConfirmationRequired(): void {

@@ -23,5 +23,13 @@
   "onboarding_placeholder": "Onboarding",
   "chat_composer_placeholder": "Message…",
   "chat_send": "Send",
-  "chat_turn_failed": "Something went wrong. Please try again."
+  "chat_turn_failed": "Something went wrong. Please try again.",
+  "tool_chip_creating": "Creating…",
+  "tool_chip_updating": "Updating…",
+  "tool_chip_deleting": "Deleting…",
+  "tool_chip_working": "Working…",
+  "tool_chip_done": "Done",
+  "tool_chip_error_label": "Could not complete",
+  "tool_chip_entity_reminder": "Reminder",
+  "tool_chip_entity_deleted": "Deleted"
 }

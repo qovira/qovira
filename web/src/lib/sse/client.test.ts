@@ -24,6 +24,12 @@ vi.mock("$lib/stores/conversation.svelte.js", () => ({
   setConversationHistory: vi.fn(),
 }));
 
+vi.mock("$lib/stores/tool-calls.svelte.js", () => ({
+  toolCallStarted: vi.fn(),
+  toolCallCompleted: vi.fn(),
+  toolCallFailed: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // nextBackoff — exponential backoff with jitter
 // ---------------------------------------------------------------------------

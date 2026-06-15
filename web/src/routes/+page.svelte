@@ -10,12 +10,20 @@
   //   3. The persisted user message is appended to the history store.
   //   4. The assistant reply streams in via SSE (message.delta → applyStreamingDelta,
   //      message.completed → finalizeStreamingMessage) — no polling here.
-  //   5. On turn.failed, the store's getTurnError() becomes non-null and the UI
-  //      shows a calm generic error line (AC #2).
+  //   5. Tool calls emit tool.started → chip; tool.completed → entity card;
+  //      tool.failed → soft error. Chips render inline below the streaming slot.
+  //   6. On turn.failed, the store's getTurnError() becomes non-null and the UI
+  //      shows a calm generic error line.
   //
   // Security: ALL assistant/tool text flows through renderSafeMarkdown()
   // (marked → DOMPurify) before {@html}. User messages are rendered as escaped
-  // text (plain {content}), never {@html}. (AC #3)
+  // text (plain {content}), never {@html}.
+  //
+  // Tool-call / reload-dedup note: tool chips are live-only (SSE events). On a
+  // page reload the history returns with role:"tool" messages and a toolCalls
+  // field on assistant messages — those are NOT yet rendered as chips (the
+  // getToolCalls() store is empty after a reload). Dedup of live vs loaded tool
+  // calls is a follow-up; the live path is clean and keyed by callId.
 
   import { Api } from "$lib/api/index.js";
   import {
@@ -25,8 +33,10 @@
     clearTurnError,
     appendMessage,
   } from "$lib/stores/conversation.svelte.js";
+  import { getToolCallsForMessage } from "$lib/stores/tool-calls.svelte.js";
   import { renderSafeMarkdown } from "$lib/markdown/sanitize.js";
   import { chat_composer_placeholder, chat_send, chat_turn_failed } from "$lib/paraglide/messages.js";
+  import ToolCallChip from "$lib/components/ToolCallChip.svelte";
   import type { PageData } from "./$types.js";
 
   interface Props {
@@ -36,8 +46,8 @@
   const { data }: Props = $props();
 
   // ---------------------------------------------------------------------------
-  // Reactive history — derived from the conversation store.
-  // $derived reads the store reactively; no $effect needed.
+  // Reactive history and tool calls — derived from stores.
+  // $derived reads the stores reactively; no $effect needed.
   // ---------------------------------------------------------------------------
   const history = $derived(getConversationHistory());
   const turnError = $derived(getTurnError());
@@ -58,7 +68,7 @@
 
     const conversationId = getActiveConversationId() ?? data.conversationId;
 
-    // Clear any previous turn error when sending a new message (AC #2).
+    // Clear any previous turn error when sending a new message.
     clearTurnError();
 
     sending = true;
@@ -70,8 +80,7 @@
         body: { content: text },
       });
 
-      // 202: append the persisted user message to the history (AC #1).
-      // The assistant reply will arrive purely over SSE — we don't await it here.
+      // 202: append the persisted user message to the history.
       // appendMessage() splices before any open streaming slot so the user bubble
       // always precedes the assistant reply, even when a message.delta arrived
       // over the SSE connection while the POST was still in-flight.
@@ -123,7 +132,7 @@
             {:else if message.role === "assistant"}
               <!--
                 Assistant messages: sanitized Markdown via renderSafeMarkdown()
-                (marked → DOMPurify). Safe to use {@html} here (AC #3).
+                (marked → DOMPurify). Safe to use {@html} here.
                 The streaming slot has `streaming: true` while the turn is in
                 progress, allowing the in-flight bubble to animate naturally.
               -->
@@ -138,12 +147,31 @@
                   <span class="ml-1 inline-block h-2 w-2 animate-pulse rounded-full bg-current" aria-hidden="true"
                   ></span>
                 {/if}
+
+                <!--
+                  Tool-call chips: render inline below the assistant message text.
+                  Keyed by callId; transition: started → entity card / error.
+                  During streaming, message.id is the sentinel "__streaming__" and
+                  getToolCallsForMessage returns the in-flight entries. After the turn
+                  finalizes, message.id becomes the real id and the retagged entries
+                  remain visible — cards persist after streaming ends.
+                  Quiet reads (list_reminders) render as nothing inside ToolCallChip.
+                -->
+                {#if getToolCallsForMessage(message.id).length > 0}
+                  <ul class="mt-2 flex flex-col gap-1" role="list" aria-label="Tool calls">
+                    {#each getToolCallsForMessage(message.id) as entry (entry.callId)}
+                      <li>
+                        <ToolCallChip {entry} />
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
               </div>
             {/if}
           </li>
         {/each}
 
-        <!-- turn.failed error line (AC #2) -->
+        <!-- turn.failed error line -->
         {#if turnError !== null}
           <li class="flex justify-start" role="alert">
             <p class="text-text-error text-sm">{chat_turn_failed()}</p>

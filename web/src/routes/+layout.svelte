@@ -24,6 +24,7 @@
   } from "$lib/stores/session.svelte.js";
   import { resetReminders } from "$lib/stores/reminders.svelte.js";
   import { resetConversation } from "$lib/stores/conversation.svelte.js";
+  import { resetToolCalls } from "$lib/stores/tool-calls.svelte.js";
   import { openSseConnection, closeSseConnection } from "$lib/sse/client.js";
   import RailEntry from "$lib/components/RailEntry.svelte";
   import {
@@ -130,6 +131,7 @@
       // Reset per-user live stores so the next session starts clean.
       resetReminders();
       resetConversation();
+      resetToolCalls();
     });
 
     // Register the centralised 401 handler. This is the single authority for
