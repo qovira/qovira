@@ -28,6 +28,15 @@ vi.mock("$lib/stores/tool-calls.svelte.js", () => ({
   toolCallStarted: vi.fn(),
   toolCallCompleted: vi.fn(),
   toolCallFailed: vi.fn(),
+  finalizeToolCallsForMessage: vi.fn(),
+  STREAMING_SENTINEL_ID: "__streaming__",
+}));
+
+vi.mock("$lib/stores/confirmations.svelte.js", () => ({
+  confirmationRequired: vi.fn(),
+  confirmationExpired: vi.fn(),
+  finalizeConfirmationsForMessage: vi.fn(),
+  CONFIRMATION_STREAMING_SENTINEL_ID: "__confirmation_streaming__",
 }));
 
 // ---------------------------------------------------------------------------

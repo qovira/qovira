@@ -34,9 +34,11 @@
     appendMessage,
   } from "$lib/stores/conversation.svelte.js";
   import { getToolCallsForMessage } from "$lib/stores/tool-calls.svelte.js";
+  import { getConfirmationsForMessage } from "$lib/stores/confirmations.svelte.js";
   import { renderSafeMarkdown } from "$lib/markdown/sanitize.js";
   import { chat_composer_placeholder, chat_send, chat_turn_failed } from "$lib/paraglide/messages.js";
   import ToolCallChip from "$lib/components/ToolCallChip.svelte";
+  import ConfirmationCard from "$lib/components/ConfirmationCard.svelte";
   import type { PageData } from "./$types.js";
 
   interface Props {
@@ -162,6 +164,25 @@
                     {#each getToolCallsForMessage(message.id) as entry (entry.callId)}
                       <li>
                         <ToolCallChip {entry} />
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+
+                <!--
+                  Confirmation cards: inline approve/deny cards for risk-tier actions.
+                  Keyed by callId; keyed independently from tool chips.
+                  During the suspension window, message.id is the confirmation sentinel
+                  and getConfirmationsForMessage returns the in-flight entries. After
+                  message.completed fires, the sentinel is retagged to the real messageId
+                  so the cards persist inline under the finalized turn — same pattern as
+                  tool-call chips.
+                -->
+                {#if getConfirmationsForMessage(message.id).length > 0}
+                  <ul class="mt-2 flex flex-col gap-2" role="list" aria-label="Pending confirmations">
+                    {#each getConfirmationsForMessage(message.id) as entry (entry.callId)}
+                      <li>
+                        <ConfirmationCard {entry} />
                       </li>
                     {/each}
                   </ul>

@@ -30,6 +30,12 @@ import {
   finalizeToolCallsForMessage,
   STREAMING_SENTINEL_ID,
 } from "$lib/stores/tool-calls.svelte.js";
+import {
+  confirmationRequired,
+  confirmationExpired as storeConfirmationExpired,
+  finalizeConfirmationsForMessage,
+  CONFIRMATION_STREAMING_SENTINEL_ID,
+} from "$lib/stores/confirmations.svelte.js";
 import { parseFrames } from "./parser.js";
 import { routeEvent, type RouterHandlers, type ToolStartedPayload } from "./router.js";
 import { nextBackoff, BACKOFF_INITIAL_MS } from "./backoff.js";
@@ -88,6 +94,9 @@ function makeHandlers(): RouterHandlers {
       // Retag all tool-call entries from the streaming sentinel to the real messageId so
       // the cards remain visible and clickable after the streaming slot finalizes.
       finalizeToolCallsForMessage(STREAMING_SENTINEL_ID, messageId);
+      // Retag confirmation cards from the confirmation sentinel to the real messageId
+      // so the cards persist inline under the finalized assistant turn.
+      finalizeConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID, messageId);
     },
 
     onToolStarted(payload: ToolStartedPayload): void {
@@ -106,12 +115,15 @@ function makeHandlers(): RouterHandlers {
       toolCallFailed(conversationId, callId, error);
     },
 
-    onConfirmationRequired(): void {
-      // Future surface slice renders the approve/deny prompt.
+    onConfirmationRequired(payload): void {
+      // Guard on active conversation so off-screen events are ignored.
+      if (payload.conversationId !== getActiveConversationId()) return;
+      confirmationRequired(payload);
     },
 
-    onConfirmationExpired(): void {
-      // Future surface slice updates the pending-chip state.
+    onConfirmationExpired(conversationId, callId): void {
+      if (conversationId !== getActiveConversationId()) return;
+      storeConfirmationExpired(callId);
     },
 
     onTurnFailed(conversationId: string, code: string): void {

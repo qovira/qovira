@@ -31,5 +31,12 @@
   "tool_chip_done": "Done",
   "tool_chip_error_label": "Could not complete",
   "tool_chip_entity_reminder": "Reminder",
-  "tool_chip_entity_deleted": "Deleted"
+  "tool_chip_entity_deleted": "Deleted",
+  "confirmation_card_approve": "Approve",
+  "confirmation_card_deny": "Deny",
+  "confirmation_card_expired": "Expired",
+  "confirmation_card_approved": "Approved",
+  "confirmation_card_denied": "Denied",
+  "confirmation_card_confirm_prompt": "Confirm action",
+  "confirmation_card_expires_in": "Expires in {seconds}s"
 }
