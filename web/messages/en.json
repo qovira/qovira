@@ -38,5 +38,13 @@
   "confirmation_card_approved": "Approved",
   "confirmation_card_denied": "Denied",
   "confirmation_card_confirm_prompt": "Confirm action",
-  "confirmation_card_expires_in": "Expires in {seconds}s"
+  "confirmation_card_expires_in": "Expires in {seconds}s",
+  "conv_switcher_open": "Open conversations",
+  "conv_switcher_title": "Conversations",
+  "conv_switcher_new": "New conversation",
+  "conv_switcher_load_more": "Load more",
+  "conv_switcher_empty": "No conversations yet. Start one below.",
+  "conv_switcher_new_preview": "New conversation",
+  "conv_switcher_load_error": "Couldn't load conversations.",
+  "conv_switcher_retry": "Try again"
 }

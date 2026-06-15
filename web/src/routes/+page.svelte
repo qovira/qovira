@@ -36,9 +36,15 @@
   import { getToolCallsForMessage } from "$lib/stores/tool-calls.svelte.js";
   import { getConfirmationsForMessage } from "$lib/stores/confirmations.svelte.js";
   import { renderSafeMarkdown } from "$lib/markdown/sanitize.js";
-  import { chat_composer_placeholder, chat_send, chat_turn_failed } from "$lib/paraglide/messages.js";
+  import {
+    chat_composer_placeholder,
+    chat_send,
+    chat_turn_failed,
+    conv_switcher_open,
+  } from "$lib/paraglide/messages.js";
   import ToolCallChip from "$lib/components/ToolCallChip.svelte";
   import ConfirmationCard from "$lib/components/ConfirmationCard.svelte";
+  import ConversationSwitcher from "$lib/components/ConversationSwitcher.svelte";
   import type { PageData } from "./$types.js";
 
   interface Props {
@@ -53,6 +59,20 @@
   // ---------------------------------------------------------------------------
   const history = $derived(getConversationHistory());
   const turnError = $derived(getTurnError());
+
+  // ---------------------------------------------------------------------------
+  // Composer ref — used to focus the textarea after "New conversation"
+  // ---------------------------------------------------------------------------
+  let composerEl = $state<HTMLTextAreaElement | null>(null);
+
+  function focusComposer(): void {
+    composerEl?.focus();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Conversation switcher panel state
+  // ---------------------------------------------------------------------------
+  let switcherOpen = $state(false);
 
   // ---------------------------------------------------------------------------
   // Composer state
@@ -112,7 +132,31 @@
   }
 </script>
 
+<ConversationSwitcher bind:open={switcherOpen} {focusComposer} />
+
 <div class="flex h-full flex-col">
+  <!-- Chat header: conversation switcher trigger -->
+  <div class="border-border flex shrink-0 items-center justify-between border-b px-4 py-2">
+    <button
+      type="button"
+      class="text-text-subtle hover:text-text flex items-center gap-1.5 rounded px-2 py-1.5 text-sm
+             focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+      onclick={() => {
+        switcherOpen = true;
+      }}
+      aria-label={conv_switcher_open()}
+    >
+      <!-- Chat bubbles icon (X icon from phosphor; deep-import to avoid barrel-import cost) -->
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 256 256" aria-hidden="true">
+        <path
+          fill="currentColor"
+          d="M216 48H40a16 16 0 0 0-16 16v160a15.85 15.85 0 0 0 9.24 14.5A16.05 16.05 0 0 0 40 240a15.89 15.89 0 0 0 10.25-3.78l.09-.07 34.33-30.08A8 8 0 0 1 88 200h128a16 16 0 0 0 16-16V64a16 16 0 0 0-16-16Zm0 136H88a24.07 24.07 0 0 0-15.29 5.47L40 220.32V64h176Z"
+        />
+      </svg>
+      {conv_switcher_open()}
+    </button>
+  </div>
+
   <!-- Message thread -->
   <div class="flex-1 overflow-y-auto px-4 py-4">
     {#if history.length === 0 && turnError === null}
@@ -206,6 +250,7 @@
   <div class="border-border border-t px-4 py-3">
     <div class="flex items-end gap-2">
       <textarea
+        bind:this={composerEl}
         rows={1}
         placeholder={chat_composer_placeholder()}
         disabled={sending}
