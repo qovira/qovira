@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 const getConversation = `-- name: GetConversation :one
@@ -32,6 +33,96 @@ func (q *Queries) GetConversation(ctx context.Context, arg GetConversationParams
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listConversations = `-- name: ListConversations :many
+SELECT
+    c.id,
+    c.created_at,
+    c.updated_at,
+    COALESCE((
+        SELECT m.content
+        FROM messages m
+        WHERE m.conversation_id = c.id
+          AND m.user_id = ?1
+          AND m.role = 'user'
+        ORDER BY m.created_at, m.id
+        LIMIT 1
+    ), '') AS preview
+FROM conversations c
+WHERE c.user_id = ?1
+  AND (
+      ?2 IS NULL
+      OR c.updated_at < ?2
+      OR (c.updated_at = ?2 AND c.id < ?3)
+  )
+ORDER BY c.updated_at DESC, c.id DESC
+LIMIT ?4
+`
+
+type ListConversationsParams struct {
+	UserID          string
+	CursorUpdatedAt interface{}
+	CursorID        sql.NullString
+	Limit           int64
+}
+
+type ListConversationsRow struct {
+	ID        string
+	CreatedAt string
+	UpdatedAt string
+	Preview   interface{}
+}
+
+// List conversations for a user, keyset-paginated on (updated_at DESC, id DESC)
+// so the most-recently-active conversation appears first. Fetches limit+1 rows so
+// the caller can detect whether a next page exists.
+//
+// preview is derived via a correlated subquery that finds the first user message
+// in the conversation (ORDER BY created_at, id LIMIT 1). The subquery carries its
+// own user_id predicate so the scope guard accepts it without an exemption. preview
+// is empty when no user message exists yet.
+//
+// The keyset predicate uses the expanded tuple form (required because sqlc's SQLite
+// parser does not support row-value syntax): the cursor marks the last seen
+// (updated_at, id) pair and we skip rows that sort before it in the DESC order.
+// Equivalent to: (updated_at, id) < (cursor_updated_at, cursor_id) in DESC order,
+// which expands to:
+//
+//	updated_at < cursor OR (updated_at = cursor AND id < cursor_id).
+//
+// MANDATORY user_id predicate on conversations enforced by scope guard.
+func (q *Queries) ListConversations(ctx context.Context, arg ListConversationsParams) ([]ListConversationsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listConversations,
+		arg.UserID,
+		arg.CursorUpdatedAt,
+		arg.CursorID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListConversationsRow
+	for rows.Next() {
+		var i ListConversationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Preview,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const touchConversation = `-- name: TouchConversation :exec

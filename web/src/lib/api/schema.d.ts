@@ -122,6 +122,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List conversations (cursor-paginated, most-recently-active first)
+         * @description Returns a cursor-paginated list of the caller's conversations ordered by most-recently-active first (updated_at DESC, id DESC). Each item includes an opaque preview derived from the first user message in the conversation, truncated to ~80 characters. Unknown query parameters are rejected with 400 unknown_query_param.
+         */
+        get: operations["listConversations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get conversation history
+         * @description Returns the full chronological message history for the conversation. Returns 404 when the conversation does not exist or belongs to another user.
+         */
+        get: operations["getConversation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations/{id}/messages": {
         parameters: {
             query?: never;
@@ -305,6 +345,50 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        Conversation: {
+            /** @description Opaque conversation identifier. */
+            id: string;
+            /** @description First user message truncated to ~80 characters. Empty string when no user message exists yet. */
+            preview: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 UTC timestamp of when the conversation was created.
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 UTC timestamp of the most recent activity.
+             */
+            updatedAt: string;
+        };
+        HistoryMessage: {
+            /** @description Opaque message identifier. */
+            id: string;
+            /** @description Message role — one of user, assistant, tool, system. */
+            role: string;
+            /** @description Message content. For tool messages this is a JSON string. */
+            content: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Present on assistant messages that triggered tool calls. Absent otherwise. */
+            toolCalls?: {
+                [key: string]: unknown;
+            }[];
+            /** @description Present on tool-result messages. References the callId of the originating tool call. Absent otherwise. */
+            toolCallId?: string;
+            /** @description Model finish reason (stop, tool_calls, length, etc.). Present on completed assistant messages. Absent otherwise. */
+            finishReason?: string;
+            /** @description True when this assistant message was abandoned because its pending tool confirmation expired. Such messages are inert and must not be treated as outstanding work. */
+            abandoned: boolean;
+        };
+        ConversationHistory: {
+            id: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            messages: components["schemas"]["HistoryMessage"][];
         };
         MessageResponse: {
             id: string;
@@ -577,6 +661,61 @@ export interface operations {
             401: components["responses"]["ProblemUnauthorized"];
             403: components["responses"]["ProblemForbidden"];
             422: components["responses"]["ProblemUnprocessableEntity"];
+        };
+    };
+    listConversations: {
+        parameters: {
+            query?: {
+                /** @description Opaque pagination cursor from a previous response's nextCursor field. */
+                cursor?: string;
+                /** @description Page size (default 25, max 100). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated list of conversations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Conversation"][];
+                        pagination: components["schemas"]["Pagination"];
+                    };
+                };
+            };
+            400: components["responses"]["ProblemBadRequest"];
+            401: components["responses"]["ProblemUnauthorized"];
+        };
+    };
+    getConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Conversation ID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation with full message history. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationHistory"];
+                };
+            };
+            401: components["responses"]["ProblemUnauthorized"];
+            404: components["responses"]["ProblemNotFound"];
         };
     };
     postConversationMessage: {

@@ -17,6 +17,8 @@ type confirmationDecision struct {
 
 // Routes registers the harness HTTP endpoints on the provided router.
 //
+//   - GET  /api/v1/conversations           — paginated conversation list (most-recently-active).
+//   - GET  /api/v1/conversations/{id}      — full conversation history (chronological messages).
 //   - POST /api/v1/conversations/{id}/messages — persist the user message and
 //     kick off the async turn, returning 202 with the persisted message.
 //   - POST /api/v1/conversations/{id}/confirmations/{callId} — approve or deny a
@@ -24,6 +26,8 @@ type confirmationDecision struct {
 func (h *Harness) Routes(r interface {
 	HandleFunc(pattern string, handler http.HandlerFunc)
 }) {
+	r.HandleFunc("GET /api/v1/conversations", h.handleListConversations)
+	r.HandleFunc("GET /api/v1/conversations/{id}", h.handleGetConversation)
 	r.HandleFunc("POST /api/v1/conversations/{id}/messages", h.handlePostMessage)
 	r.HandleFunc("POST /api/v1/conversations/{id}/confirmations/{callId}", h.handlePostConfirmation)
 }

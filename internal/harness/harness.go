@@ -109,8 +109,9 @@ type DeltaPayload struct {
 
 // CompletedPayload is the Data for a "message.completed" event.
 type CompletedPayload struct {
-	MessageID    string `json:"messageId"`
-	FinishReason string `json:"finishReason"`
+	ConversationID string `json:"conversationId"`
+	MessageID      string `json:"messageId"`
+	FinishReason   string `json:"finishReason"`
 }
 
 // ToolStartedPayload is the Data for a "tool.started" event, emitted before a
@@ -118,17 +119,19 @@ type CompletedPayload struct {
 // "write", "external", "destructive"). ArgsSummary is compact JSON of the call
 // arguments, truncated to a reasonable length.
 type ToolStartedPayload struct {
-	CallID      string `json:"callId"`
-	Name        string `json:"name"`
-	Risk        string `json:"risk"`
-	ArgsSummary string `json:"argsSummary"`
+	ConversationID string `json:"conversationId"`
+	CallID         string `json:"callId"`
+	Name           string `json:"name"`
+	Risk           string `json:"risk"`
+	ArgsSummary    string `json:"argsSummary"`
 }
 
 // ToolCompletedPayload is the Data for a "tool.completed" event, emitted after
 // a tool call has been executed and its result persisted.
 type ToolCompletedPayload struct {
-	CallID string `json:"callId"`
-	Result any    `json:"result"`
+	ConversationID string `json:"conversationId"`
+	CallID         string `json:"callId"`
+	Result         any    `json:"result"`
 }
 
 // ConfirmationExpiredPayload is the Data for a "confirmation.expired" event,
@@ -139,6 +142,8 @@ type ToolCompletedPayload struct {
 // no round, message abandoned; mixed (some sibling approved/denied) → run re-enters
 // for the continue round so approved actions are narrated.
 type ConfirmationExpiredPayload struct {
+	// ConversationID is the conversation the expired confirmation belongs to.
+	ConversationID string `json:"conversationId"`
 	// CallID is the gateway tool call ID that was waiting for confirmation.
 	CallID string `json:"callId"`
 }
@@ -147,8 +152,9 @@ type ConfirmationExpiredPayload struct {
 // call returns a *capability.ToolError (a model-visible, self-correctable error).
 // Error carries only the model-safe ToolError.Message — no internal detail.
 type ToolFailedPayload struct {
-	CallID string `json:"callId"`
-	Error  string `json:"error"`
+	ConversationID string `json:"conversationId"`
+	CallID         string `json:"callId"`
+	Error          string `json:"error"`
 }
 
 // TurnFailedPayload is the Data for a "turn.failed" event, emitted when the
@@ -156,7 +162,8 @@ type ToolFailedPayload struct {
 // network failure, recovered panic, etc.). Code is a stable, generic class
 // string — NOT the raw error text; the raw detail goes to the server log only.
 type TurnFailedPayload struct {
-	Code string `json:"code"`
+	ConversationID string `json:"conversationId"`
+	Code           string `json:"code"`
 }
 
 // ConfirmationRequiredPayload is the Data for a "confirmation.required" event,
@@ -164,6 +171,8 @@ type TurnFailedPayload struct {
 // row has been created. The client should present the user with an approve/deny
 // choice and POST to .../confirmations/{callId}.
 type ConfirmationRequiredPayload struct {
+	// ConversationID is the conversation the confirmation belongs to.
+	ConversationID string `json:"conversationId"`
 	// CallID is the gateway tool call ID (= the pending_confirmations row ID).
 	// This is the API-addressable identifier used in POST .../confirmations/{callId}.
 	CallID string `json:"callId"`
@@ -338,7 +347,7 @@ func (h *Harness) StartTurn(
 				h.logger.Error("harness: turn panicked", "conversationId", conv, "panic", r)
 				h.bus.Publish(principal.UserID, events.Event{
 					Type: "turn.failed",
-					Data: TurnFailedPayload{Code: "infrastructure"},
+					Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
 				})
 			}
 		}()
@@ -350,7 +359,7 @@ func (h *Harness) StartTurn(
 			h.logger.Error("harness: turn failed", "conversationId", conv, "err", err)
 			h.bus.Publish(principal.UserID, events.Event{
 				Type: "turn.failed",
-				Data: TurnFailedPayload{Code: "infrastructure"},
+				Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
 			})
 		}
 	}()
@@ -480,8 +489,9 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 				h.bus.Publish(principal.UserID, events.Event{
 					Type: "message.completed",
 					Data: CompletedPayload{
-						MessageID:    assistantID,
-						FinishReason: "stop",
+						ConversationID: conv,
+						MessageID:      assistantID,
+						FinishReason:   "stop",
 					},
 				})
 				return nil
@@ -520,8 +530,9 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 	h.bus.Publish(principal.UserID, events.Event{
 		Type: "message.completed",
 		Data: CompletedPayload{
-			MessageID:    assistantID,
-			FinishReason: "step_cap",
+			ConversationID: conv,
+			MessageID:      assistantID,
+			FinishReason:   "step_cap",
 		},
 	})
 	return nil
@@ -691,8 +702,9 @@ func (h *Harness) handleContextLength(
 	h.bus.Publish(userID, events.Event{
 		Type: "message.completed",
 		Data: CompletedPayload{
-			MessageID:    assistantID,
-			FinishReason: "context_length",
+			ConversationID: conv,
+			MessageID:      assistantID,
+			FinishReason:   "context_length",
 		},
 	})
 	return true, nil
@@ -820,10 +832,11 @@ func (h *Harness) processToolCalls(
 			h.bus.Publish(userID, events.Event{
 				Type: "tool.started",
 				Data: ToolStartedPayload{
-					CallID:      c.ID,
-					Name:        c.Name,
-					Risk:        "",
-					ArgsSummary: argsSummary(c.Arguments),
+					ConversationID: conv,
+					CallID:         c.ID,
+					Name:           c.Name,
+					Risk:           "",
+					ArgsSummary:    argsSummary(c.Arguments),
 				},
 			})
 			unknownErr := &capability.ToolError{
@@ -1064,10 +1077,11 @@ func (h *Harness) executeToolAndPersist(
 	h.bus.Publish(userID, events.Event{
 		Type: "tool.started",
 		Data: ToolStartedPayload{
-			CallID:      call.ID,
-			Name:        call.Name,
-			Risk:        risk,
-			ArgsSummary: argsSummary(call.Arguments),
+			ConversationID: conv,
+			CallID:         call.ID,
+			Name:           call.Name,
+			Risk:           risk,
+			ArgsSummary:    argsSummary(call.Arguments),
 		},
 	})
 
@@ -1108,8 +1122,9 @@ func (h *Harness) executeToolAndPersist(
 	h.bus.Publish(userID, events.Event{
 		Type: "tool.completed",
 		Data: ToolCompletedPayload{
-			CallID: call.ID,
-			Result: result,
+			ConversationID: conv,
+			CallID:         call.ID,
+			Result:         result,
 		},
 	})
 
@@ -1171,11 +1186,12 @@ func (h *Harness) insertPendingConfirmation(
 	h.bus.Publish(userID, events.Event{
 		Type: "confirmation.required",
 		Data: ConfirmationRequiredPayload{
-			CallID:    call.ID,
-			Name:      call.Name,
-			Risk:      risk,
-			Args:      call.Arguments,
-			ExpiresAt: expiresAt,
+			ConversationID: conv,
+			CallID:         call.ID,
+			Name:           call.Name,
+			Risk:           risk,
+			Args:           call.Arguments,
+			ExpiresAt:      expiresAt,
 		},
 	})
 
@@ -1410,7 +1426,7 @@ func (h *Harness) Resolve(ctx context.Context, convID, callID string, approved b
 				h.logger.Error("harness: resume turn panicked", "conversationId", conv, "callId", callID, "panic", r)
 				h.bus.Publish(principal.UserID, events.Event{
 					Type: "turn.failed",
-					Data: TurnFailedPayload{Code: "infrastructure"},
+					Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
 				})
 			}
 		}()
@@ -1419,7 +1435,7 @@ func (h *Harness) Resolve(ctx context.Context, convID, callID string, approved b
 			h.logger.Error("harness: resume turn failed", "conversationId", conv, "callId", callID, "err", err)
 			h.bus.Publish(principal.UserID, events.Event{
 				Type: "turn.failed",
-				Data: TurnFailedPayload{Code: "infrastructure"},
+				Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
 			})
 		}
 	}()
@@ -1458,7 +1474,7 @@ func (h *Harness) expireCallCore(
 	// Emit confirmation.expired so the UI chip updates immediately.
 	h.bus.Publish(userID, events.Event{
 		Type: "confirmation.expired",
-		Data: ConfirmationExpiredPayload{CallID: callID},
+		Data: ConfirmationExpiredPayload{ConversationID: conv, CallID: callID},
 	})
 
 	// Gate message abandonment: count how many of this message's confirm rows are
@@ -1527,7 +1543,7 @@ func (h *Harness) expireCallAndMaybeAbandon(
 				h.logger.Error("harness: expiry resume panicked", "conversationId", conv, "callId", callID, "panic", r)
 				h.bus.Publish(principal.UserID, events.Event{
 					Type: "turn.failed",
-					Data: TurnFailedPayload{Code: "infrastructure"},
+					Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
 				})
 			}
 		}()
@@ -1535,7 +1551,7 @@ func (h *Harness) expireCallAndMaybeAbandon(
 			h.logger.Error("harness: expiry resume failed", "conversationId", conv, "callId", callID, "err", runErr)
 			h.bus.Publish(principal.UserID, events.Event{
 				Type: "turn.failed",
-				Data: TurnFailedPayload{Code: "infrastructure"},
+				Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
 			})
 		}
 	}()
@@ -1657,7 +1673,7 @@ func (h *Harness) SweepExpiredConfirmations(ctx context.Context) (int, error) {
 					h.logger.Error("harness: sweep expiry resume panicked", "conversationId", conv, "panic", r)
 					h.bus.Publish(principal.UserID, events.Event{
 						Type: "turn.failed",
-						Data: TurnFailedPayload{Code: "infrastructure"},
+						Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
 					})
 				}
 			}()
@@ -1665,7 +1681,7 @@ func (h *Harness) SweepExpiredConfirmations(ctx context.Context) (int, error) {
 				h.logger.Error("harness: sweep expiry resume failed", "conversationId", conv, "err", runErr)
 				h.bus.Publish(principal.UserID, events.Event{
 					Type: "turn.failed",
-					Data: TurnFailedPayload{Code: "infrastructure"},
+					Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
 				})
 			}
 		}()
@@ -1706,8 +1722,9 @@ func (h *Harness) persistToolError(
 	h.bus.Publish(userID, events.Event{
 		Type: "tool.failed",
 		Data: ToolFailedPayload{
-			CallID: callID,
-			Error:  toolErr.Message,
+			ConversationID: conv,
+			CallID:         callID,
+			Error:          toolErr.Message,
 		},
 	})
 

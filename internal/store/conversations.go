@@ -78,6 +78,38 @@ func (sq *ScopedQueries) GetConversation(ctx context.Context, id string) (db.Con
 	})
 }
 
+// ListConversationsParams holds the caller-supplied parameters for listing
+// conversations. The user_id is taken from the bound Scope.
+type ListConversationsParams struct {
+	// CursorUpdatedAt and CursorID are the keyset cursor values. When non-empty,
+	// the query skips rows that sort at or before this position in (updated_at DESC, id DESC).
+	CursorUpdatedAt string
+	CursorID        string
+	// Limit is the page size. Callers should fetch limit+1 to detect hasMore.
+	Limit int64
+}
+
+// ListConversations returns a cursor-paginated slice of conversations for the
+// bound user, ordered by (updated_at DESC, id DESC) — most-recently-active first.
+// Each row includes a preview derived from the first user message in the conversation.
+func (sq *ScopedQueries) ListConversations(ctx context.Context, p ListConversationsParams) ([]db.ListConversationsRow, error) {
+	if err := sq.checkUserScope(); err != nil {
+		return nil, fmt.Errorf("ListConversations: %w", err)
+	}
+	var cursorUpdatedAt any
+	var cursorID sql.NullString
+	if p.CursorUpdatedAt != "" {
+		cursorUpdatedAt = p.CursorUpdatedAt
+		cursorID = sql.NullString{String: p.CursorID, Valid: true}
+	}
+	return sq.readQ.ListConversations(ctx, db.ListConversationsParams{
+		UserID:          sq.scope.UserID(),
+		CursorUpdatedAt: cursorUpdatedAt,
+		CursorID:        cursorID,
+		Limit:           p.Limit,
+	})
+}
+
 // InsertMessage persists a message row into the messages table, scoped to the bound user. It returns the full persisted
 // row (including the server-generated created_at timestamp and abandoned flag). Returns an error if the scope is invalid.
 func (sq *ScopedQueries) InsertMessage(ctx context.Context, p InsertMessageParams) (db.InsertMessageRow, error) {

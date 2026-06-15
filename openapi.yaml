@@ -149,6 +149,74 @@ components:
           type: string
           format: date-time
 
+    Conversation:
+      type: object
+      required: [id, preview, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Opaque conversation identifier.
+        preview:
+          type: string
+          description: First user message truncated to ~80 characters. Empty string when no user message exists yet.
+        createdAt:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp of when the conversation was created.
+        updatedAt:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp of the most recent activity.
+
+    HistoryMessage:
+      type: object
+      required: [id, role, content, createdAt, abandoned]
+      properties:
+        id:
+          type: string
+          description: Opaque message identifier.
+        role:
+          type: string
+          description: Message role — one of user, assistant, tool, system.
+        content:
+          type: string
+          description: Message content. For tool messages this is a JSON string.
+        createdAt:
+          type: string
+          format: date-time
+        toolCalls:
+          type: array
+          description: Present on assistant messages that triggered tool calls. Absent otherwise.
+          items:
+            type: object
+            additionalProperties: true
+        toolCallId:
+          type: string
+          description: Present on tool-result messages. References the callId of the originating tool call. Absent otherwise.
+        finishReason:
+          type: string
+          description: Model finish reason (stop, tool_calls, length, etc.). Present on completed assistant messages. Absent otherwise.
+        abandoned:
+          type: boolean
+          description: True when this assistant message was abandoned because its pending tool confirmation expired. Such messages are inert and must not be treated as outstanding work.
+
+    ConversationHistory:
+      type: object
+      required: [id, createdAt, updatedAt, messages]
+      properties:
+        id:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryMessage"
+
     MessageResponse:
       type: object
       required: [id, conversationId, role, content, createdAt]
@@ -417,6 +485,78 @@ paths:
           $ref: "#/components/responses/ProblemUnprocessableEntity"
 
   # ---------- Conversations ----------
+  /conversations:
+    get:
+      operationId: listConversations
+      summary: List conversations (cursor-paginated, most-recently-active first)
+      description: >-
+        Returns a cursor-paginated list of the caller's conversations ordered by
+        most-recently-active first (updated_at DESC, id DESC). Each item includes
+        an opaque preview derived from the first user message in the conversation,
+        truncated to ~80 characters. Unknown query parameters are rejected with
+        400 unknown_query_param.
+      tags: [conversations]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Opaque pagination cursor from a previous response's nextCursor field.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+            minimum: 1
+            maximum: 100
+          description: Page size (default 25, max 100).
+      responses:
+        "200":
+          description: Paginated list of conversations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Conversation"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "400":
+          $ref: "#/components/responses/ProblemBadRequest"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+
+  /conversations/{id}:
+    get:
+      operationId: getConversation
+      summary: Get conversation history
+      description: >-
+        Returns the full chronological message history for the conversation.
+        Returns 404 when the conversation does not exist or belongs to another user.
+      tags: [conversations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Conversation ID.
+      responses:
+        "200":
+          description: Conversation with full message history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationHistory"
+        "401":
+          $ref: "#/components/responses/ProblemUnauthorized"
+        "404":
+          $ref: "#/components/responses/ProblemNotFound"
+
   /conversations/{id}/messages:
     post:
       operationId: postConversationMessage

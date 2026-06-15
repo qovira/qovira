@@ -127,6 +127,24 @@ type Querier interface {
 	// Parameters use sqlc named params (@name) per the house convention; the
 	// generated Params structs carry typed fields (ID, UserID, Value).
 	InsertUserData(ctx context.Context, arg InsertUserDataParams) error
+	// List conversations for a user, keyset-paginated on (updated_at DESC, id DESC)
+	// so the most-recently-active conversation appears first. Fetches limit+1 rows so
+	// the caller can detect whether a next page exists.
+	//
+	// preview is derived via a correlated subquery that finds the first user message
+	// in the conversation (ORDER BY created_at, id LIMIT 1). The subquery carries its
+	// own user_id predicate so the scope guard accepts it without an exemption. preview
+	// is empty when no user message exists yet.
+	//
+	// The keyset predicate uses the expanded tuple form (required because sqlc's SQLite
+	// parser does not support row-value syntax): the cursor marks the last seen
+	// (updated_at, id) pair and we skip rows that sort before it in the DESC order.
+	// Equivalent to: (updated_at, id) < (cursor_updated_at, cursor_id) in DESC order,
+	// which expands to:
+	//   updated_at < cursor OR (updated_at = cursor AND id < cursor_id).
+	//
+	// MANDATORY user_id predicate on conversations enforced by scope guard.
+	ListConversations(ctx context.Context, arg ListConversationsParams) ([]ListConversationsRow, error)
 	// scopeguard:allow-unscoped: SYSTEM-HOUSEKEEPING cross-user sweep. The scheduler
 	// calls SweepExpiredConfirmations across all users by TTL cutoff, so no single
 	// user_id predicate is applicable. Each returned row carries its own user_id so
