@@ -19,7 +19,6 @@ import (
 	"github.com/qovira/qovira/internal/capability"
 	"github.com/qovira/qovira/internal/config"
 	"github.com/qovira/qovira/internal/events"
-	"github.com/qovira/qovira/internal/gateway"
 	"github.com/qovira/qovira/internal/harness"
 	"github.com/qovira/qovira/internal/httpx"
 	"github.com/qovira/qovira/internal/reminders"
@@ -237,7 +236,9 @@ func New(
 	// Step 10: construct the AI harness and mount its routes. The harness is wired
 	// with reg, gw, s, bus, and harnessCfg. It does not contribute capability tools
 	// (Tools() returns nil), so it is not passed through reg.Add.
-	gw := gateway.New(s.Settings())
+	// newChatter is provided by chatter_default.go (production) or chatter_e2e.go
+	// (e2e build tag); the production file always returns a *gateway.Gateway.
+	gw := newChatter(s.Settings())
 	h := harness.New(reg, gw, s, bus, harnessCfg, logger)
 	h.Routes(router)
 

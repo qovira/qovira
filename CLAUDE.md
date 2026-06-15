@@ -23,6 +23,43 @@ make docker-run    # run the image with a volatile /data volume
 - **CGO is required** (`CGO_ENABLED=1`, the `Makefile` default). The SQLCipher driver builds via CGO — a C toolchain (GCC/Clang) and OpenSSL headers must be present.
 - **Never hand-edit generated code.** Query code under `internal/store/db` is produced by sqlc from the SQL in `internal/store/queries` and the schema in `internal/store/migrations`. Edit the SQL, then run `make generate`.
 
+## E2E server mode (scripted assistant)
+
+The server can be compiled and run in a scripted-assistant mode for Playwright E2E testing. This mode replaces the real model gateway with a deterministic `ScriptedChatter` that emits a canned sequence of streaming deltas, tool calls, and completions per turn — exercising the real auth/REST/SSE/tool-execution stack without a live LLM endpoint.
+
+**The scripted provider is physically absent from the default binary** — it is compiled only when the `e2e` build tag is passed. A default `go build ./...` will never include it; `go build -tags e2e ./...` compiles it in and tests tagged `//go:build e2e` are exercised by `go test -tags e2e ./...`.
+
+**Building and running in e2e mode:**
+
+```sh
+CGO_ENABLED=1 go build -tags e2e -o qovira-e2e ./cmd/qovira
+QOVIRA_MASTER_KEY=<key-min-16-bytes> \
+QOVIRA_ADMIN_EMAIL=<admin@example.com> \
+QOVIRA_ADMIN_PASSWORD=<password> \
+QOVIRA_E2E_SCRIPT_PATH=<path-to-fixture.json> \
+./qovira-e2e serve
+```
+
+When `QOVIRA_E2E_SCRIPT_PATH` is set, the server uses the scripted provider; when it is absent (but the binary was still built with `-tags e2e`), the server falls back to the real gateway.
+
+**Fixture schema** — a JSON file with a `rules` array; each rule has a `match` (case-insensitive `contains` / `prefix` on the latest user message) and an ordered `rounds` array; each round is an ordered `chunks` array with `textDelta`, `toolCall` (`name` + `arguments`), `done`, and `delayMs` fields. The round index is selected statelessly from the ChatRequest history: round 0 is the first model response; round 1 is the response after one assistant-message-plus-tool-results exchange; and so on. A minimal two-round example:
+
+```json
+{
+  "rules": [
+    {
+      "match": { "contains": "delete reminder" },
+      "rounds": [
+        { "chunks": [{ "toolCall": { "name": "delete_reminder", "arguments": { "id": "r1" } } }, { "done": true }] },
+        { "chunks": [{ "textDelta": "Done, I deleted that reminder." }, { "done": true }] }
+      ]
+    }
+  ]
+}
+```
+
+No journey-specific logic lives in the Go provider — all scripted behaviour is in the fixture file. The Playwright suite (a separate issue) supplies the concrete fixtures for each journey.
+
 ## Architecture
 
 Single binary (`cmd/qovira/main.go`) delegating to a Cobra command tree, wired from `internal/` packages. Package map (each entry: what it owns + the invariants that constrain edits):
