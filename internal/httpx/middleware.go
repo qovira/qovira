@@ -284,16 +284,20 @@ func RequestLogMiddleware(logger *slog.Logger) Middleware {
 // on every response:
 //
 //   - X-Content-Type-Options: nosniff — prevents MIME sniffing
-//   - Content-Security-Policy: conservative default-src 'self' with frame-ancestors 'none'
+//   - Content-Security-Policy: from spaCSP() — "default-src 'self'; script-src
+//     'self' <hashes>; frame-ancestors 'none'", where <hashes> are the SHA-256
+//     digests of the embedded SPA's first-party inline scripts (see spa_csp.go).
+//     No 'unsafe-inline' is ever used; the policy is identical in every build.
 //   - Referrer-Policy: strict-origin-when-cross-origin
 //
 // These are set before calling next so that handlers can override them for specific responses if needed (e.g. a
 // download endpoint that needs a different frame policy). Full CSP hardening is deferred to the v0.2 security slice.
 func SecurityHeadersMiddleware() Middleware {
+	policy := spaCSP()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
-			w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+			w.Header().Set("Content-Security-Policy", policy)
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			next.ServeHTTP(w, r)
 		})
