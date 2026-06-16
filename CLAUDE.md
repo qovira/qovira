@@ -49,7 +49,7 @@ QOVIRA_E2E_SCRIPT_PATH=<path-to-fixture.json> \
 
 When `QOVIRA_E2E_SCRIPT_PATH` is set, the server uses the scripted provider; when it is absent (but the binary was still built with `-tags e2e`), the server falls back to the real gateway.
 
-**Fixture schema** — a JSON file with a `rules` array; each rule has a `match` (case-insensitive `contains` / `prefix` on the latest user message) and an ordered `rounds` array; each round is an ordered `chunks` array with `textDelta`, `toolCall` (`name` + `arguments`), `done`, and `delayMs` fields. The round index is selected statelessly from the ChatRequest history: round 0 is the first model response; round 1 is the response after one assistant-message-plus-tool-results exchange; and so on. A minimal two-round example:
+**Fixture schema** — a JSON file with a `rules` array; each rule has a `match` (case-insensitive `contains` / `prefix` on the latest user message) and an ordered `rounds` array; each round is an ordered `chunks` array with `textDelta`, `toolCall` (`name` + optional `id` + `arguments`), `done`, and `delayMs` fields. The round index is selected statelessly from the ChatRequest history: round 0 is the first model response; round 1 is the response after one assistant-message-plus-tool-results exchange; and so on. A minimal two-round example:
 
 ```json
 {
@@ -59,6 +59,43 @@ When `QOVIRA_E2E_SCRIPT_PATH` is set, the server uses the scripted provider; whe
       "rounds": [
         { "chunks": [{ "toolCall": { "name": "delete_reminder", "arguments": { "id": "r1" } } }, { "done": true }] },
         { "chunks": [{ "textDelta": "Done, I deleted that reminder." }, { "done": true }] }
+      ]
+    }
+  ]
+}
+```
+
+**Result templating (`$fromResult`)** — a tool call's `arguments` may reference a value from an earlier tool's result so that fixtures can, for example, create a reminder in one turn and delete it by its real server-generated id in a later turn. Reference form (anywhere inside `arguments`):
+
+```json
+{ "$fromResult": { "callId": "<earlier call id>", "path": "<dot path>" } }
+```
+
+At emit time the provider scans `req.Messages` for a message with `Role=="tool"` and `ToolCallID==callId` (last match wins), JSON-parses its `Content`, traverses the dot-separated `path` (numeric segments index into arrays, e.g. `"items.0.id"`), and substitutes the resolved value in place. The reference may appear at any depth in the arguments tree. `path` is required and the marker object must carry **no sibling keys** beside `$fromResult`. Resolution errors are fatal — an unknown `callId`, an empty/misspelled `path`, a path segment that misses or indexes out of range, or a sibling key all make the iterator yield an error and stop, never a silent empty or wrong value. Only tool calls with an **explicit `id`** field in the fixture are referenceable; auto-generated ids (when `id` is omitted) are random and cannot be predicted by a reference.
+
+The `create_reminder` result shape is the full `Reminder` object (same as the REST response). The path to the generated id is `"id"`. Example fixture using a cross-turn reference:
+
+```json
+{
+  "rules": [
+    {
+      "match": { "contains": "create then delete" },
+      "rounds": [
+        {
+          "chunks": [
+            { "toolCall": { "id": "c-create-dentist", "name": "create_reminder",
+                "arguments": { "title": "Dentist", "dueAt": "2026-07-01T09:00:00Z" } } },
+            { "done": true }
+          ]
+        },
+        {
+          "chunks": [
+            { "toolCall": { "name": "delete_reminder",
+                "arguments": { "id": { "$fromResult": { "callId": "c-create-dentist", "path": "id" } } } } },
+            { "done": true }
+          ]
+        },
+        { "chunks": [{ "textDelta": "Done, deleted the dentist reminder." }, { "done": true }] }
       ]
     }
   ]

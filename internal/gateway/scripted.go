@@ -55,6 +55,53 @@ package gateway
 // When no rule matches, or the round index exceeds the rule's rounds array, the
 // provider emits a safe default reply (a short text delta + Done) rather than
 // hanging, and logs a warning.
+//
+// # Result templating ($fromResult)
+//
+// A tool call's arguments may reference values from earlier tool results so that
+// E2E fixtures can, for example, create a reminder in one turn and then delete it
+// by its real server-generated id in a later turn.
+//
+// Reference form — anywhere inside a tool call's arguments JSON, a value may be:
+//
+//	{"$fromResult": {"callId": "<earlier call id>", "path": "<dot path>"}}
+//
+// At emit time the scripted provider scans req.Messages for a message with
+// Role=="tool" && ToolCallID==callId (last match wins), JSON-parses its Content,
+// traverses the dot-separated path (numeric segments index into arrays, e.g.
+// "items.0.id"), and substitutes the resolved JSON value in place.
+//
+// Example fixture fragment:
+//
+//	{ "toolCall": { "name": "delete_reminder",
+//	  "arguments": { "id": { "$fromResult": { "callId": "c-create-dentist", "path": "id" } } } } }
+//
+// For the create_reminder tool, the result JSON shape is the full Reminder
+// object returned by the service (same shape as the REST response):
+//
+//	{
+//	  "id":           "01JXXXXXXXXXXXXXXXXXXXXX",
+//	  "userId":       "...",
+//	  "title":        "Dentist",
+//	  "dueAt":        "2026-07-01T09:00:00Z",
+//	  "tz":           "UTC",
+//	  "autoComplete": true,
+//	  "status":       "active",
+//	  "createdAt":    "...",
+//	  "updatedAt":    "..."
+//	}
+//
+// To reference the generated id in a later tool call, use path "id".
+//
+// IMPORTANT: only tool calls whose id is explicitly set in the fixture (via the
+// "id" field on the toolCall object) are referenceable — auto-generated ids
+// (when "id" is omitted) receive a random value that cannot be predicted in the
+// fixture. Always set an explicit id on any tool call you intend to reference.
+//
+// Fail-loud behaviour: if a reference cannot resolve — no matching tool message,
+// malformed result JSON, or a path segment that doesn't exist or indexes out of
+// range — Chat yields an error from the iterator and stops. Resolution errors
+// are never silent.
 
 import (
 	"context"
@@ -64,6 +111,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -167,6 +215,10 @@ func NewScriptedChatterFromFile(path string) (*ScriptedChatter, error) {
 //
 // Rule and round selection is entirely stateless — no per-conversation state is
 // kept in ScriptedChatter.  See the package-level comment for the algorithm.
+//
+// $fromResult references in tool call arguments are resolved against
+// req.Messages at emit time.  If a reference cannot be resolved the iterator
+// yields an error and stops.
 func (sc *ScriptedChatter) Chat(ctx context.Context, req ChatRequest) (iter.Seq2[Chunk, error], error) {
 	chunks := sc.selectChunks(req)
 	seq := func(yield func(Chunk, error) bool) {
@@ -190,7 +242,11 @@ func (sc *ScriptedChatter) Chat(ctx context.Context, req ChatRequest) (iter.Seq2
 			default:
 			}
 
-			chunk := toChunk(sc2)
+			chunk, err := toChunk(sc2, req.Messages)
+			if err != nil {
+				yield(Chunk{}, err)
+				return
+			}
 			if !yield(chunk, nil) {
 				return
 			}
@@ -270,7 +326,10 @@ func matchesRule(m scriptMatch, userMsg string) bool {
 }
 
 // toChunk converts a scriptChunk into a gateway Chunk for emission.
-func toChunk(sc scriptChunk) Chunk {
+// msgs is the full ChatRequest.Messages slice used to resolve $fromResult
+// references in tool call arguments.  A resolution failure is returned as an
+// error; the caller must stop iteration and surface it.
+func toChunk(sc scriptChunk, msgs []Message) (Chunk, error) {
 	if sc.ToolCall != nil {
 		callID := sc.ToolCall.ID
 		if callID == "" {
@@ -280,17 +339,196 @@ func toChunk(sc scriptChunk) Chunk {
 		if args == nil {
 			args = json.RawMessage(`{}`)
 		}
+
+		resolved, err := resolveArguments(args, msgs)
+		if err != nil {
+			return Chunk{}, err
+		}
+
 		return Chunk{
 			ToolCall: &ToolCall{
 				ID:        callID,
 				Name:      sc.ToolCall.Name,
-				Arguments: args,
+				Arguments: resolved,
 			},
-		}
+		}, nil
 	}
 	return Chunk{
 		TextDelta: sc.TextDelta,
 		Done:      sc.Done,
+	}, nil
+}
+
+// resolveArguments walks the raw JSON arguments, replaces any $fromResult
+// marker objects with the resolved value from msgs, and re-marshals the result.
+// Arguments with no $fromResult markers are returned byte-equivalent.
+func resolveArguments(args json.RawMessage, msgs []Message) (json.RawMessage, error) {
+	// Unmarshal into any so we can walk and mutate the tree. UseNumber keeps
+	// numeric literals as json.Number so they re-marshal without float64
+	// rounding (an integer id or count survives the round-trip intact).
+	var tree any
+	dec := json.NewDecoder(strings.NewReader(string(args)))
+	dec.UseNumber()
+	if err := dec.Decode(&tree); err != nil {
+		return nil, fmt.Errorf("scripted: resolve $fromResult: unmarshal arguments: %w", err)
+	}
+
+	resolved, err := resolveNode(tree, msgs)
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := json.Marshal(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("scripted: resolve $fromResult: re-marshal arguments: %w", err)
+	}
+	return out, nil
+}
+
+// resolveNode recursively walks a decoded JSON value and replaces any
+// map[string]any that carries the "$fromResult" marker key with the looked-up
+// value from msgs.
+func resolveNode(node any, msgs []Message) (any, error) {
+	switch v := node.(type) {
+	case map[string]any:
+		// Check for the $fromResult marker first — if present, resolve and
+		// return the looked-up value directly (do not recurse into it). The
+		// marker must be the sole key: a sibling key signals a fixture mistake
+		// (a typo, or a misplaced reference) whose siblings would otherwise be
+		// silently dropped, so fail loud rather than guess the author's intent.
+		if ref, ok := v["$fromResult"]; ok {
+			if len(v) != 1 {
+				return nil, fmt.Errorf(
+					"scripted: resolve $fromResult: marker object must have no sibling keys, found %d",
+					len(v),
+				)
+			}
+			return resolveFromResult(ref, msgs)
+		}
+		// Otherwise recurse into every value.
+		out := make(map[string]any, len(v))
+		for k, val := range v {
+			resolved, err := resolveNode(val, msgs)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = resolved
+		}
+		return out, nil
+
+	case []any:
+		out := make([]any, len(v))
+		for i, elem := range v {
+			resolved, err := resolveNode(elem, msgs)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = resolved
+		}
+		return out, nil
+
+	default:
+		// Scalar (string, number, bool, null) — return as-is.
+		return v, nil
+	}
+}
+
+// fromResultRef holds the decoded fields of a $fromResult marker.
+type fromResultRef struct {
+	CallID string `json:"callId"`
+	Path   string `json:"path"`
+}
+
+// resolveFromResult decodes the value of the "$fromResult" key and performs the
+// lookup against msgs.  It returns the resolved value (any — string/number/bool/
+// object/array) or an error.
+func resolveFromResult(ref any, msgs []Message) (any, error) {
+	// Re-marshal and re-unmarshal via fromResultRef for type-safe field access.
+	refBytes, err := json.Marshal(ref)
+	if err != nil {
+		return nil, fmt.Errorf("scripted: resolve $fromResult: marshal ref: %w", err)
+	}
+	var r fromResultRef
+	if err := json.Unmarshal(refBytes, &r); err != nil {
+		return nil, fmt.Errorf("scripted: resolve $fromResult: decode ref: %w", err)
+	}
+	if r.CallID == "" {
+		return nil, fmt.Errorf("scripted: resolve $fromResult: callId is required")
+	}
+
+	// Find the last tool message with ToolCallID == r.CallID.
+	content := ""
+	found := false
+	for _, m := range msgs {
+		if m.Role == "tool" && m.ToolCallID == r.CallID {
+			content = m.Content
+			found = true
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("scripted: resolve $fromResult: no tool result message found for callId %q", r.CallID)
+	}
+
+	// Parse the result JSON. UseNumber preserves numeric fidelity through the
+	// later re-marshal (see resolveArguments).
+	var result any
+	rdec := json.NewDecoder(strings.NewReader(content))
+	rdec.UseNumber()
+	if err := rdec.Decode(&result); err != nil {
+		return nil, fmt.Errorf("scripted: resolve $fromResult: parse result content for callId %q: %w", r.CallID, err)
+	}
+
+	// A path is required: extracting a specific value is the whole point, and an
+	// empty/misspelled path key (decoding to "") must not silently substitute the
+	// entire result object.
+	if r.Path == "" {
+		return nil, fmt.Errorf("scripted: resolve $fromResult: path is required (callId %q)", r.CallID)
+	}
+	segments := strings.Split(r.Path, ".")
+	return traversePath(result, segments, r.CallID, r.Path)
+}
+
+// traversePath walks the decoded JSON value following the dot-separated path
+// segments.  Numeric segments index into arrays.
+func traversePath(node any, segments []string, callID, fullPath string) (any, error) {
+	if len(segments) == 0 {
+		return node, nil
+	}
+	seg := segments[0]
+	rest := segments[1:]
+
+	switch v := node.(type) {
+	case map[string]any:
+		child, ok := v[seg]
+		if !ok {
+			return nil, fmt.Errorf(
+				"scripted: resolve $fromResult: path %q: key %q not found in object (callId %q)",
+				fullPath, seg, callID,
+			)
+		}
+		return traversePath(child, rest, callID, fullPath)
+
+	case []any:
+		idx, err := strconv.Atoi(seg)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"scripted: resolve $fromResult: path %q: segment %q is not a valid array index (callId %q)",
+				fullPath, seg, callID,
+			)
+		}
+		if idx < 0 || idx >= len(v) {
+			return nil, fmt.Errorf(
+				"scripted: resolve $fromResult: path %q: array index %d out of range [0, %d) (callId %q)",
+				fullPath, idx, len(v), callID,
+			)
+		}
+		return traversePath(v[idx], rest, callID, fullPath)
+
+	default:
+		return nil, fmt.Errorf(
+			"scripted: resolve $fromResult: path %q: cannot index into %T with segment %q (callId %q)",
+			fullPath, node, seg, callID,
+		)
 	}
 }
 

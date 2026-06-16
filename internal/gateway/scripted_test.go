@@ -672,7 +672,534 @@ func TestScriptedChatter_ToolCallChunkFields(t *testing.T) {
 	}
 }
 
-// ── 10. Latest-user-message keying ───────────────────────────────────────────
+// ── 10. $fromResult — result templating ──────────────────────────────────────
+
+// TestScriptedChatter_FromResult_TopLevel verifies that a top-level tool
+// argument referencing $fromResult is resolved to the value from the matching
+// tool result message in the history.
+func TestScriptedChatter_FromResult_TopLevel(t *testing.T) {
+	t.Parallel()
+
+	// Round 1: round 0 would have emitted create_reminder; round 1 deletes it by
+	// id using a $fromResult reference.
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "delete by result"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"id": "c-delete",
+									"name": "delete_reminder",
+									"arguments": {
+										"id": {"$fromResult": {"callId": "c-create-dentist", "path": "id"}}
+									}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	// History has a tool result for callId "c-create-dentist" with id="r-server-42".
+	req := buildRequest(
+		userMsg("delete by result"),
+		toolMsg("c-create-dentist", `{"id":"r-server-42","title":"Dentist","dueAt":"2026-07-01T09:00:00Z"}`),
+	)
+
+	chunks, err := collectChunks(t, sc, req)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	var toolChunk *gateway.Chunk
+	for i := range chunks {
+		if chunks[i].ToolCall != nil {
+			c := chunks[i]
+			toolChunk = &c
+			break
+		}
+	}
+	if toolChunk == nil {
+		t.Fatal("expected a ToolCall chunk, none found")
+	}
+	if toolChunk.ToolCall.Name != "delete_reminder" {
+		t.Errorf("ToolCall.Name = %q, want delete_reminder", toolChunk.ToolCall.Name)
+	}
+
+	var args map[string]string
+	if err := json.Unmarshal(toolChunk.ToolCall.Arguments, &args); err != nil {
+		t.Fatalf("ToolCall.Arguments unmarshal: %v", err)
+	}
+	if args["id"] != "r-server-42" {
+		t.Errorf("ToolCall.Arguments[id] = %q, want r-server-42", args["id"])
+	}
+}
+
+// TestScriptedChatter_FromResult_ArrayIndexPath verifies resolution via an
+// array-index path segment (e.g. "reminders.0.id" from a list result).
+func TestScriptedChatter_FromResult_ArrayIndexPath(t *testing.T) {
+	t.Parallel()
+
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "array-path test"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"name": "delete_reminder",
+									"arguments": {
+										"id": {"$fromResult": {"callId": "c-list", "path": "items.0.id"}}
+									}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	// Tool result carries an array-shaped payload.
+	req := buildRequest(
+		userMsg("array-path test"),
+		toolMsg("c-list", `{"items":[{"id":"r-first","title":"First reminder"},{"id":"r-second","title":"Second"}]}`),
+	)
+
+	chunks, err := collectChunks(t, sc, req)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	var toolChunk *gateway.Chunk
+	for i := range chunks {
+		if chunks[i].ToolCall != nil {
+			c := chunks[i]
+			toolChunk = &c
+			break
+		}
+	}
+	if toolChunk == nil {
+		t.Fatal("expected a ToolCall chunk, none found")
+	}
+
+	var args map[string]string
+	if err := json.Unmarshal(toolChunk.ToolCall.Arguments, &args); err != nil {
+		t.Fatalf("ToolCall.Arguments unmarshal: %v", err)
+	}
+	if args["id"] != "r-first" {
+		t.Errorf("ToolCall.Arguments[id] = %q, want r-first", args["id"])
+	}
+}
+
+// TestScriptedChatter_FromResult_NestedReference verifies that a $fromResult
+// reference can appear inside a nested sub-object of the arguments.
+func TestScriptedChatter_FromResult_NestedReference(t *testing.T) {
+	t.Parallel()
+
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "nested ref test"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"name": "update_reminder",
+									"arguments": {
+										"id": {"$fromResult": {"callId": "c-create", "path": "id"}},
+										"title": "Updated title"
+									}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	req := buildRequest(
+		userMsg("nested ref test"),
+		toolMsg("c-create", `{"id":"r-nested-99","title":"Original","dueAt":"2026-08-01T10:00:00Z"}`),
+	)
+
+	chunks, err := collectChunks(t, sc, req)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	var toolChunk *gateway.Chunk
+	for i := range chunks {
+		if chunks[i].ToolCall != nil {
+			c := chunks[i]
+			toolChunk = &c
+			break
+		}
+	}
+	if toolChunk == nil {
+		t.Fatal("expected a ToolCall chunk, none found")
+	}
+
+	var args map[string]any
+	if err := json.Unmarshal(toolChunk.ToolCall.Arguments, &args); err != nil {
+		t.Fatalf("ToolCall.Arguments unmarshal: %v", err)
+	}
+	if args["id"] != "r-nested-99" {
+		t.Errorf("ToolCall.Arguments[id] = %v, want r-nested-99", args["id"])
+	}
+	if args["title"] != "Updated title" {
+		t.Errorf("ToolCall.Arguments[title] = %v, want Updated title", args["title"])
+	}
+}
+
+// TestScriptedChatter_FromResult_NoReference verifies that arguments with no
+// $fromResult references pass through byte-identical in structure (regression).
+func TestScriptedChatter_FromResult_NoReference(t *testing.T) {
+	t.Parallel()
+
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "no ref test"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"name": "create_reminder",
+									"arguments": {"title": "Buy milk", "dueAt": "2026-06-15T09:00:00Z"}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	// No tool result messages needed — no references to resolve.
+	req := buildRequest(userMsg("no ref test"))
+
+	chunks, err := collectChunks(t, sc, req)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	var toolChunk *gateway.Chunk
+	for i := range chunks {
+		if chunks[i].ToolCall != nil {
+			c := chunks[i]
+			toolChunk = &c
+			break
+		}
+	}
+	if toolChunk == nil {
+		t.Fatal("expected a ToolCall chunk, none found")
+	}
+
+	var args map[string]string
+	if err := json.Unmarshal(toolChunk.ToolCall.Arguments, &args); err != nil {
+		t.Fatalf("ToolCall.Arguments unmarshal: %v", err)
+	}
+	if args["title"] != "Buy milk" {
+		t.Errorf("ToolCall.Arguments[title] = %q, want Buy milk", args["title"])
+	}
+	if args["dueAt"] != "2026-06-15T09:00:00Z" {
+		t.Errorf("ToolCall.Arguments[dueAt] = %q, want 2026-06-15T09:00:00Z", args["dueAt"])
+	}
+}
+
+// TestScriptedChatter_FromResult_UnresolvableCallID verifies that referencing a
+// callId with no matching tool result message in history yields an error from
+// the iterator (not silent wrong output).
+func TestScriptedChatter_FromResult_UnresolvableCallID(t *testing.T) {
+	t.Parallel()
+
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "bad callid test"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"name": "delete_reminder",
+									"arguments": {
+										"id": {"$fromResult": {"callId": "c-nonexistent", "path": "id"}}
+									}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	// No tool result messages in history — the reference cannot be resolved.
+	req := buildRequest(userMsg("bad callid test"))
+
+	_, iterErr := collectChunks(t, sc, req)
+	if iterErr == nil {
+		t.Fatal("expected an error for unresolvable callId, got nil")
+	}
+	if !strings.Contains(iterErr.Error(), "scripted") {
+		t.Errorf("error %q should mention \"scripted\"", iterErr.Error())
+	}
+}
+
+// TestScriptedChatter_FromResult_MissingPathSegment verifies that a path that
+// does not exist in the resolved JSON yields an error (not silent empty output).
+func TestScriptedChatter_FromResult_MissingPathSegment(t *testing.T) {
+	t.Parallel()
+
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "bad path test"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"name": "delete_reminder",
+									"arguments": {
+										"id": {"$fromResult": {"callId": "c-create", "path": "nonexistent.field"}}
+									}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	req := buildRequest(
+		userMsg("bad path test"),
+		toolMsg("c-create", `{"id":"r-xyz","title":"Dentist"}`),
+	)
+
+	_, iterErr := collectChunks(t, sc, req)
+	if iterErr == nil {
+		t.Fatal("expected an error for missing path segment, got nil")
+	}
+	if !strings.Contains(iterErr.Error(), "scripted") {
+		t.Errorf("error %q should mention \"scripted\"", iterErr.Error())
+	}
+}
+
+// TestScriptedChatter_FromResult_OutOfRangeIndex verifies that an array index
+// that exceeds the array length yields an error.
+func TestScriptedChatter_FromResult_OutOfRangeIndex(t *testing.T) {
+	t.Parallel()
+
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "out of range index"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"name": "delete_reminder",
+									"arguments": {
+										"id": {"$fromResult": {"callId": "c-list", "path": "items.5.id"}}
+									}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	// Only one item in array; index 5 is out of range.
+	req := buildRequest(
+		userMsg("out of range index"),
+		toolMsg("c-list", `{"items":[{"id":"r-only","title":"Only item"}]}`),
+	)
+
+	_, iterErr := collectChunks(t, sc, req)
+	if iterErr == nil {
+		t.Fatal("expected an error for out-of-range array index, got nil")
+	}
+	if !strings.Contains(iterErr.Error(), "scripted") {
+		t.Errorf("error %q should mention \"scripted\"", iterErr.Error())
+	}
+}
+
+// TestScriptedChatter_FromResult_EmptyPathErrors verifies that a $fromResult
+// reference whose path is empty or misspelled (decoding to "") is a hard error,
+// not a silent substitution of the entire result object.
+func TestScriptedChatter_FromResult_EmptyPathErrors(t *testing.T) {
+	t.Parallel()
+
+	// "pat" is a typo for "path", so fromResultRef.Path decodes to "".
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "empty path test"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"name": "delete_reminder",
+									"arguments": {
+										"id": {"$fromResult": {"callId": "c-create", "pat": "id"}}
+									}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	req := buildRequest(
+		userMsg("empty path test"),
+		toolMsg("c-create", `{"id":"r-xyz","title":"Dentist"}`),
+	)
+
+	_, iterErr := collectChunks(t, sc, req)
+	if iterErr == nil {
+		t.Fatal("expected an error for an empty/missing path, got nil")
+	}
+	if !strings.Contains(iterErr.Error(), "path is required") {
+		t.Errorf("error %q should mention \"path is required\"", iterErr.Error())
+	}
+}
+
+// TestScriptedChatter_FromResult_SiblingKeysError verifies that a marker object
+// carrying a sibling key alongside "$fromResult" is rejected, rather than
+// silently dropping the sibling.
+func TestScriptedChatter_FromResult_SiblingKeysError(t *testing.T) {
+	t.Parallel()
+
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "sibling key test"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"name": "delete_reminder",
+									"arguments": {
+										"id": {
+											"$fromResult": {"callId": "c-create", "path": "id"},
+											"extra": "x"
+										}
+									}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	req := buildRequest(
+		userMsg("sibling key test"),
+		toolMsg("c-create", `{"id":"r-xyz","title":"Dentist"}`),
+	)
+
+	_, iterErr := collectChunks(t, sc, req)
+	if iterErr == nil {
+		t.Fatal("expected an error for a $fromResult marker with sibling keys, got nil")
+	}
+	if !strings.Contains(iterErr.Error(), "sibling keys") {
+		t.Errorf("error %q should mention \"sibling keys\"", iterErr.Error())
+	}
+}
+
+// TestScriptedChatter_FromResult_PreservesNumericLiteral verifies that a numeric
+// argument literal survives the resolve round-trip without float64 rounding (the
+// arguments tree is decoded with json.Number, not as a float).
+func TestScriptedChatter_FromResult_PreservesNumericLiteral(t *testing.T) {
+	t.Parallel()
+
+	// A large integer that float64 cannot represent exactly.
+	fixture := `{
+		"rules": [
+			{
+				"match": {"contains": "numeric literal test"},
+				"rounds": [
+					{
+						"chunks": [
+							{
+								"toolCall": {
+									"name": "create_reminder",
+									"arguments": {"count": 1234567890123456789}
+								}
+							},
+							{"done": true}
+						]
+					}
+				]
+			}
+		]
+	}`
+	sc := mustNewScripted(t, fixture)
+
+	req := buildRequest(userMsg("numeric literal test"))
+
+	chunks, err := collectChunks(t, sc, req)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	var toolChunk *gateway.Chunk
+	for i := range chunks {
+		if chunks[i].ToolCall != nil {
+			c := chunks[i]
+			toolChunk = &c
+			break
+		}
+	}
+	if toolChunk == nil {
+		t.Fatal("expected a ToolCall chunk, none found")
+	}
+	if got := string(toolChunk.ToolCall.Arguments); !strings.Contains(got, "1234567890123456789") {
+		t.Errorf("ToolCall.Arguments = %q, want the integer 1234567890123456789 preserved exactly", got)
+	}
+}
+
+// ── 11. Latest-user-message keying ───────────────────────────────────────────
 
 // TestScriptedChatter_LatestUserMessageKeying verifies that the scripted chatter
 // keys off the LATEST user message in the request, not the first. This is the
