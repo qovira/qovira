@@ -426,3 +426,87 @@ describe("makeHandlers() — onReminderEvent dispatch", () => {
     expect(notifyReminderFiredMock).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// makeHandlers() — onMessageCompleted reconciles conversation history
+//
+// On message.completed the authoritative assistant message is persisted
+// server-side. The handler refetches the conversation and replaces history with
+// server truth, healing any deltas the client missed (e.g. a mid-turn reload
+// that reconnected after the early deltas had already been streamed to the old
+// connection — reload-resilience, journey 5).
+// ---------------------------------------------------------------------------
+
+describe("makeHandlers() — onMessageCompleted conversation reconcile", () => {
+  let getActiveConversationIdMock: ReturnType<typeof vi.fn>;
+  let setConversationHistoryMock: ReturnType<typeof vi.fn>;
+  let finalizeStreamingMessageMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const convModule = await import("$lib/stores/conversation.svelte.js");
+    getActiveConversationIdMock = convModule.getActiveConversationId as ReturnType<typeof vi.fn>;
+    setConversationHistoryMock = convModule.setConversationHistory as ReturnType<typeof vi.fn>;
+    finalizeStreamingMessageMock = convModule.finalizeStreamingMessage as ReturnType<typeof vi.fn>;
+    getActiveConversationIdMock.mockReturnValue("conv-1");
+    setConversationHistoryMock.mockClear();
+    finalizeStreamingMessageMock.mockClear();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes("/conversations/conv-1")) {
+          const body = JSON.stringify({
+            messages: [
+              {
+                id: "m-full",
+                role: "assistant",
+                content: "Once upon a time, in a land far away.",
+                createdAt: "2025-01-01T00:00:00Z",
+                abandoned: false,
+              },
+            ],
+          });
+          return Promise.resolve(new Response(body, { status: 200, headers: { "Content-Type": "application/json" } }));
+        }
+        return Promise.resolve(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+      }),
+    );
+  });
+
+  afterEach(() => {
+    getActiveConversationIdMock.mockReturnValue(null);
+    vi.unstubAllGlobals();
+  });
+
+  it("refetches the conversation and replaces history with server truth on completion", async () => {
+    const handlers = makeHandlers();
+    handlers.onMessageCompleted("conv-1", "m-full", "stop");
+
+    // Drain microtask turns so the async reconcile fetch resolves.
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+
+    // The streaming slot is finalized synchronously first…
+    expect(finalizeStreamingMessageMock).toHaveBeenCalledWith("m-full", undefined, "stop");
+    // …then the authoritative history replaces it.
+    expect(setConversationHistoryMock).toHaveBeenCalledOnce();
+    const [messages] = setConversationHistoryMock.mock.calls[0] as [{ id: string; content: string }[]];
+    expect(messages[0]?.id).toBe("m-full");
+    expect(messages[0]?.content).toBe("Once upon a time, in a land far away.");
+  });
+
+  it("does not reconcile when the completion is for a different conversation", async () => {
+    getActiveConversationIdMock.mockReturnValue("conv-other");
+    const handlers = makeHandlers();
+    handlers.onMessageCompleted("conv-1", "m-full", "stop");
+
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+
+    expect(finalizeStreamingMessageMock).not.toHaveBeenCalled();
+    expect(setConversationHistoryMock).not.toHaveBeenCalled();
+  });
+});

@@ -113,6 +113,14 @@ export function makeHandlers(): RouterHandlers {
       // Retag confirmation cards from the streaming sentinel to the real messageId
       // so the cards persist inline under the finalized assistant turn.
       finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, messageId);
+      // Heal any deltas the client missed. The completed assistant message is now
+      // persisted server-side, so refetch the conversation and replace history with
+      // server truth. This is what makes a mid-turn reload lose nothing: after a
+      // reload the new SSE connection misses the deltas already streamed to the old
+      // connection, leaving only a partial slot — the reconcile restores the full
+      // text (reload-resilience, journey 5). Fire-and-forget: a failure here must
+      // not disrupt the live stream; reconcileConversationHistory swallows its own errors.
+      void reconcileConversationHistory();
     },
 
     onToolStarted(payload: ToolStartedPayload): void {
@@ -191,17 +199,30 @@ async function reconcile(): Promise<void> {
   }
 
   // 2. Refetch the open conversation history, if any.
+  await reconcileConversationHistory();
+}
+
+// ---------------------------------------------------------------------------
+// reconcileConversationHistory — refetch the open conversation from the server
+// and replace the local history with server truth.
+//
+// Used on (re)connect (gap healing) and on message.completed (to recover any
+// deltas missed when a mid-turn reload reconnected after early deltas had
+// already streamed — reload-resilience). A no-op when no conversation is open.
+// Swallows its own errors so a transient failure never disrupts the live stream.
+// ---------------------------------------------------------------------------
+
+async function reconcileConversationHistory(): Promise<void> {
   const convId = getActiveConversationId();
-  if (convId !== null) {
-    try {
-      const { data: convData } = await Api.GET("/conversations/{id}", { params: { path: { id: convId } } });
-      if (convData?.messages !== undefined) {
-        setConversationHistory(convData.messages);
-      }
-    } catch (err) {
-      // Non-fatal — stream continues.
-      console.warn("[sse] reconcile: conversation fetch failed", err);
+  if (convId === null) return;
+  try {
+    const { data: convData } = await Api.GET("/conversations/{id}", { params: { path: { id: convId } } });
+    if (convData?.messages !== undefined) {
+      setConversationHistory(convData.messages);
     }
+  } catch (err) {
+    // Non-fatal — stream continues.
+    console.warn("[sse] reconcile: conversation fetch failed", err);
   }
 }
 
