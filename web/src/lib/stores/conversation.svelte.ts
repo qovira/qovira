@@ -38,8 +38,15 @@ let _history = $state<(HistoryMessage | StreamingHistoryMessage)[]>([]);
  */
 let _turnError = $state<string | null>(null);
 
-/** Sentinel id for the in-flight streaming slot. Never matches a real server id. */
-const STREAMING_SENTINEL_ID = "__streaming__";
+/**
+ * Sentinel id for the in-flight streaming slot. Never matches a real server id.
+ *
+ * Exported because it is the single anchor every in-flight turn adornment hangs
+ * off: streaming text fills this slot, and tool-call chips and confirmation cards
+ * are tagged with this id so they render under the slot until message.completed
+ * retags them to the real message id.
+ */
+export const STREAMING_SENTINEL_ID = "__streaming__";
 
 // ---------------------------------------------------------------------------
 // Internal type predicate
@@ -148,6 +155,31 @@ export function applyStreamingDelta(text: string): void {
     };
     _history.push(slot);
   }
+}
+
+/**
+ * Ensure an in-flight streaming slot exists, opening an empty one if none is open.
+ *
+ * A destructive tool call can suspend a turn that emitted no preceding text delta
+ * (the model went straight to the tool), so applyStreamingDelta never ran and
+ * there is no assistant slot to anchor the confirmation card to. The SSE client
+ * calls this on confirmation.required so the suspended turn has a rendered
+ * assistant message under which the card (tagged STREAMING_SENTINEL_ID) shows.
+ *
+ * Idempotent: a no-op when a slot is already open (the common case where the model
+ * narrated before calling the tool), so it never disturbs accumulated delta text.
+ */
+export function ensureStreamingSlot(): void {
+  if (_history.some(isStreamingSlot)) return;
+
+  _history.push({
+    id: STREAMING_SENTINEL_ID,
+    role: "assistant",
+    content: "",
+    createdAt: new Date().toISOString(),
+    abandoned: false,
+    streaming: true,
+  });
 }
 
 /**

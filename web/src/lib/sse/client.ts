@@ -18,23 +18,23 @@ import { Api } from "$lib/api/index.js";
 import { setReminders, upsertReminder, removeReminder } from "$lib/stores/reminders.svelte.js";
 import {
   applyStreamingDelta,
+  ensureStreamingSlot,
   finalizeStreamingMessage,
   getActiveConversationId,
   setConversationHistory,
   setTurnFailed,
+  STREAMING_SENTINEL_ID,
 } from "$lib/stores/conversation.svelte.js";
 import {
   toolCallStarted,
   toolCallCompleted,
   toolCallFailed,
   finalizeToolCallsForMessage,
-  STREAMING_SENTINEL_ID,
 } from "$lib/stores/tool-calls.svelte.js";
 import {
   confirmationRequired,
   confirmationExpired as storeConfirmationExpired,
   finalizeConfirmationsForMessage,
-  CONFIRMATION_STREAMING_SENTINEL_ID,
 } from "$lib/stores/confirmations.svelte.js";
 import { parseFrames } from "./parser.js";
 import { routeEvent, type RouterHandlers, type ToolStartedPayload } from "./router.js";
@@ -110,9 +110,9 @@ export function makeHandlers(): RouterHandlers {
       // Retag all tool-call entries from the streaming sentinel to the real messageId so
       // the cards remain visible and clickable after the streaming slot finalizes.
       finalizeToolCallsForMessage(STREAMING_SENTINEL_ID, messageId);
-      // Retag confirmation cards from the confirmation sentinel to the real messageId
+      // Retag confirmation cards from the streaming sentinel to the real messageId
       // so the cards persist inline under the finalized assistant turn.
-      finalizeConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID, messageId);
+      finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, messageId);
     },
 
     onToolStarted(payload: ToolStartedPayload): void {
@@ -134,6 +134,10 @@ export function makeHandlers(): RouterHandlers {
     onConfirmationRequired(payload): void {
       // Guard on active conversation so off-screen events are ignored.
       if (payload.conversationId !== getActiveConversationId()) return;
+      // A destructive tool can suspend a turn that streamed no preceding text, so
+      // open an in-flight assistant slot if none exists — the card (tagged with
+      // STREAMING_SENTINEL_ID) needs a rendered message to hang under.
+      ensureStreamingSlot();
       confirmationRequired(payload);
     },
 

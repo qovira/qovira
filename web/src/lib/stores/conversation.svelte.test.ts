@@ -9,10 +9,12 @@ import {
   getConversationHistory,
   setActiveConversation,
   applyStreamingDelta,
+  ensureStreamingSlot,
   appendMessage,
   finalizeStreamingMessage,
   setConversationHistory,
   resetConversation,
+  STREAMING_SENTINEL_ID,
   type HistoryMessage,
   type StreamingHistoryMessage,
 } from "./conversation.svelte.js";
@@ -173,6 +175,43 @@ describe("applyStreamingDelta()", () => {
     const msg1 = getConversationHistory()[1];
     expect(msg1?.role).toBe("assistant");
     expect(msg1 !== undefined && isStreaming(msg1) && msg1.streaming).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ensureStreamingSlot — opens an anchor slot for a no-text suspended turn
+// ---------------------------------------------------------------------------
+
+describe("ensureStreamingSlot()", () => {
+  it("opens an empty streaming slot when none is open", () => {
+    setActiveConversation("conv-1", [makeMessage({ id: "user-msg", role: "user", content: "delete it" })]);
+    flushSync();
+
+    ensureStreamingSlot();
+    flushSync();
+
+    const history = getConversationHistory();
+    expect(history).toHaveLength(2);
+    const slot = history[1];
+    expect(slot?.id).toBe(STREAMING_SENTINEL_ID);
+    expect(slot?.role).toBe("assistant");
+    expect(slot?.content).toBe("");
+    expect(slot !== undefined && isStreaming(slot) && slot.streaming).toBe(true);
+  });
+
+  it("is idempotent and never disturbs an open slot's accumulated text", () => {
+    applyStreamingDelta("partial text");
+    flushSync();
+
+    ensureStreamingSlot();
+    flushSync();
+
+    // Still exactly one streaming slot, with its text intact — no empty slot added.
+    const history = getConversationHistory();
+    expect(history).toHaveLength(1);
+    const slot = history[0];
+    expect(slot?.content).toBe("partial text");
+    expect(slot !== undefined && isStreaming(slot) && slot.streaming).toBe(true);
   });
 });
 

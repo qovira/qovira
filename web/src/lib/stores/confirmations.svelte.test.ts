@@ -24,11 +24,13 @@ import {
   finalizeConfirmationsForMessage,
   resolveConfirmation,
   resetConfirmations,
-  CONFIRMATION_STREAMING_SENTINEL_ID,
   type PendingConfirmation,
   type ResolvedConfirmation,
   type ExpiredConfirmation,
 } from "./confirmations.svelte.js";
+// Confirmations anchor to the shared in-flight streaming-slot sentinel (the same
+// id streaming text and tool chips use), so the card renders under that slot.
+import { STREAMING_SENTINEL_ID } from "./conversation.svelte.js";
 
 // ---------------------------------------------------------------------------
 // Reset between tests — module singleton
@@ -73,7 +75,7 @@ describe("confirmationRequired()", () => {
     expect(entry.name).toBe("delete_reminder");
     expect(entry.risk).toBe("destructive");
     expect(entry.expiresAt).toBe("2030-01-01T00:00:00Z");
-    expect(entry.assistantMessageId).toBe(CONFIRMATION_STREAMING_SENTINEL_ID);
+    expect(entry.assistantMessageId).toBe(STREAMING_SENTINEL_ID);
   });
 
   it("ignores a duplicate callId (second arrival is a reconnect race)", () => {
@@ -258,7 +260,7 @@ describe("confirmationExpired()", () => {
 
 describe("getConfirmationsForMessage()", () => {
   it("returns empty when no entries exist", () => {
-    expect(getConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID)).toEqual([]);
+    expect(getConfirmationsForMessage(STREAMING_SENTINEL_ID)).toEqual([]);
     expect(getConfirmationsForMessage("msg-real")).toEqual([]);
   });
 
@@ -273,7 +275,7 @@ describe("getConfirmationsForMessage()", () => {
     });
     flushSync();
 
-    const inFlight = getConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID);
+    const inFlight = getConfirmationsForMessage(STREAMING_SENTINEL_ID);
     expect(inFlight).toHaveLength(1);
     expect(inFlight[0]?.callId).toBe("call-1");
 
@@ -298,10 +300,10 @@ describe("finalizeConfirmationsForMessage() — card persists after turn finaliz
     });
     flushSync();
 
-    finalizeConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID, "real-msg-42");
+    finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, "real-msg-42");
     flushSync();
 
-    expect(getConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID)).toHaveLength(0);
+    expect(getConfirmationsForMessage(STREAMING_SENTINEL_ID)).toHaveLength(0);
 
     const cards = getConfirmationsForMessage("real-msg-42");
     expect(cards).toHaveLength(1);
@@ -320,7 +322,7 @@ describe("finalizeConfirmationsForMessage() — card persists after turn finaliz
     flushSync();
 
     // Finalize the turn (sentinel → real id).
-    finalizeConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID, "real-msg-1");
+    finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, "real-msg-1");
     flushSync();
 
     // Card must still be visible under the real message id (not gone, not under sentinel).
@@ -344,7 +346,7 @@ describe("finalizeConfirmationsForMessage() — card persists after turn finaliz
     confirmationResolved("call-1", "approve");
     flushSync();
 
-    finalizeConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID, "real-msg-2");
+    finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, "real-msg-2");
     flushSync();
 
     const cards = getConfirmationsForMessage("real-msg-2");
@@ -367,7 +369,7 @@ describe("finalizeConfirmationsForMessage() — card persists after turn finaliz
     confirmationExpired("call-1");
     flushSync();
 
-    finalizeConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID, "real-msg-3");
+    finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, "real-msg-3");
     flushSync();
 
     const cards = getConfirmationsForMessage("real-msg-3");
@@ -386,7 +388,7 @@ describe("finalizeConfirmationsForMessage() — card persists after turn finaliz
       expiresAt: "2030-01-01T00:00:00Z",
     });
     flushSync();
-    finalizeConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID, "msg-turn-a");
+    finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, "msg-turn-a");
     flushSync();
 
     // Turn B: new streaming turn.
@@ -399,7 +401,7 @@ describe("finalizeConfirmationsForMessage() — card persists after turn finaliz
       expiresAt: "2030-06-01T00:00:00Z",
     });
     flushSync();
-    finalizeConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID, "msg-turn-b");
+    finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, "msg-turn-b");
     flushSync();
 
     // Turn A unchanged.
@@ -414,7 +416,7 @@ describe("finalizeConfirmationsForMessage() — card persists after turn finaliz
   });
 
   it("is a no-op when no entries are tagged with oldId", () => {
-    finalizeConfirmationsForMessage(CONFIRMATION_STREAMING_SENTINEL_ID, "real-msg-x");
+    finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, "real-msg-x");
     flushSync();
     expect(getConfirmations()).toEqual([]);
   });
@@ -517,7 +519,7 @@ function makeEntry(): PendingConfirmation {
     state: "pending",
     callId: "call-resolve-test",
     conversationId: "conv-1",
-    assistantMessageId: CONFIRMATION_STREAMING_SENTINEL_ID,
+    assistantMessageId: STREAMING_SENTINEL_ID,
     name: "delete_reminder",
     risk: "destructive",
     args: { id: "r-1" },

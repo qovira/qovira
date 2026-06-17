@@ -19,9 +19,12 @@ vi.mock("$lib/stores/reminders.svelte.js", () => ({
 
 vi.mock("$lib/stores/conversation.svelte.js", () => ({
   applyStreamingDelta: vi.fn(),
+  ensureStreamingSlot: vi.fn(),
   finalizeStreamingMessage: vi.fn(),
   getActiveConversationId: vi.fn(() => null),
   setConversationHistory: vi.fn(),
+  setTurnFailed: vi.fn(),
+  STREAMING_SENTINEL_ID: "__streaming__",
 }));
 
 vi.mock("$lib/stores/tool-calls.svelte.js", () => ({
@@ -29,14 +32,12 @@ vi.mock("$lib/stores/tool-calls.svelte.js", () => ({
   toolCallCompleted: vi.fn(),
   toolCallFailed: vi.fn(),
   finalizeToolCallsForMessage: vi.fn(),
-  STREAMING_SENTINEL_ID: "__streaming__",
 }));
 
 vi.mock("$lib/stores/confirmations.svelte.js", () => ({
   confirmationRequired: vi.fn(),
   confirmationExpired: vi.fn(),
   finalizeConfirmationsForMessage: vi.fn(),
-  CONFIRMATION_STREAMING_SENTINEL_ID: "__confirmation_streaming__",
 }));
 
 vi.mock("$lib/notifications/reminder-fired.svelte.js", () => ({

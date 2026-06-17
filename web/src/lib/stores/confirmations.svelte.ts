@@ -5,11 +5,14 @@
 // each entry carries an assistantMessageId so the card stays attached to the
 // assistant turn that produced the confirmation.required event.
 //
-// While the turn is streaming (suspension point before the decision is taken)
-// the assistantMessageId is the sentinel "__confirmation_streaming__". When
-// message.completed fires, finalizeConfirmationsForMessage retags all in-flight
-// entries to the real messageId so the cards persist inline under the turn
-// after the turn eventually re-enters and finalizes.
+// While the turn is suspended (waiting on the user's decision) the
+// assistantMessageId is the in-flight streaming-slot sentinel
+// (STREAMING_SENTINEL_ID), the SAME anchor tool chips and streaming text use, so
+// the card renders under the in-flight assistant slot. The SSE client opens that
+// slot (ensureStreamingSlot) when the suspending turn emitted no preceding text.
+// When message.completed eventually fires (after the turn re-enters and finishes),
+// finalizeConfirmationsForMessage retags all in-flight entries to the real
+// messageId so the cards persist inline under the finalized turn.
 //
 // State machine per callId:
 //   confirmation.required  → state "pending"  (approve/deny card)
@@ -20,14 +23,12 @@
 // The layout resets on logout / 401.
 
 import { Api } from "$lib/api/index.js";
+import { STREAMING_SENTINEL_ID } from "$lib/stores/conversation.svelte.js";
 import type { ConfirmationRequiredPayload } from "$lib/sse/router.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/** The sentinel assistantMessageId used while the confirmation turn is streaming. */
-export const CONFIRMATION_STREAMING_SENTINEL_ID = "__confirmation_streaming__";
 
 /** A pending confirmation — waiting for an approve or deny decision. */
 export interface PendingConfirmation {
@@ -99,8 +100,8 @@ export function getConfirmations(): ConfirmationEntry[] {
 /**
  * Returns confirmation entries for a specific assistant message turn.
  *
- * During the suspension window, pass CONFIRMATION_STREAMING_SENTINEL_ID to get
- * in-flight entries. After finalization, pass the real messageId.
+ * During the suspension window, pass STREAMING_SENTINEL_ID to get in-flight
+ * entries. After finalization, pass the real messageId.
  * Reactive — reads derive from this automatically.
  *
  * @param assistantMessageId - The message id (or sentinel) of the owning turn.
@@ -127,7 +128,7 @@ export function confirmationRequired(payload: ConfirmationRequiredPayload): void
     state: "pending",
     callId: payload.callId,
     conversationId: payload.conversationId,
-    assistantMessageId: CONFIRMATION_STREAMING_SENTINEL_ID,
+    assistantMessageId: STREAMING_SENTINEL_ID,
     name: payload.name,
     risk: payload.risk,
     args: payload.args,
@@ -199,11 +200,11 @@ export function confirmationExpired(callId: string): void {
  * Retag all confirmation entries from oldId to newId.
  *
  * Called alongside finalizeToolCallsForMessage when message.completed fires.
- * Confirmation entries are tagged with CONFIRMATION_STREAMING_SENTINEL_ID while
- * the turn is suspended; this retag makes them persist under the real messageId
- * after the turn re-enters and the message.completed event arrives.
+ * Confirmation entries are tagged with STREAMING_SENTINEL_ID while the turn is
+ * suspended; this retag makes them persist under the real messageId after the
+ * turn re-enters and the message.completed event arrives.
  *
- * @param oldId - The id to retag from (typically CONFIRMATION_STREAMING_SENTINEL_ID).
+ * @param oldId - The id to retag from (typically STREAMING_SENTINEL_ID).
  * @param newId - The real server-assigned messageId.
  */
 export function finalizeConfirmationsForMessage(oldId: string, newId: string): void {
