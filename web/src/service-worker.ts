@@ -38,13 +38,20 @@ const CACHE_NAME = `qovira-shell-v${version}`;
 /**
  * The navigation fallback document.
  *
- * SvelteKit's adapter-static emits "index.html" as the fallback for any
+ * SvelteKit's adapter-static emits the shell HTML as the fallback for any
  * unmatched navigation, but $service-worker.build contains only hashed
  * _app/* assets — the HTML document is absent from all three arrays (build,
  * files, prerendered). Adding it explicitly ensures a cold start with no
  * network can serve the shell for any route.
+ *
+ * This MUST be the canonical shell URL "/", not "/index.html": the server
+ * 301-redirects "/index.html" → "/" (Go's http.ServeFile convention), so
+ * precaching "/index.html" stores a `redirected` Response — and a service
+ * worker cannot satisfy a navigation request with a redirected response, which
+ * fails the navigation with ERR_FAILED (every deep-link reload breaks). "/"
+ * returns the shell with a 200 directly, so the cached Response is clean.
  */
-const NAV_FALLBACK = "/index.html";
+const NAV_FALLBACK = "/";
 
 /** All assets that make up the app shell, including the navigation fallback. */
 const SHELL_ASSETS = [...build, ...files, NAV_FALLBACK];
