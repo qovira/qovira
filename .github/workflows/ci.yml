@@ -135,6 +135,57 @@ jobs:
       - name: govulncheck
         run: govulncheck ./...
 
+  # End-to-end journeys: drive the real server (scripted Chatter, e2e build tag)
+  # plus the embedded SPA with Playwright. This leg needs BOTH toolchains — Go +
+  # OpenSSL (the composite setup) to compile the CGo e2e binary that
+  # `make e2e-server` builds and starts, and Node/pnpm + Chromium to build the
+  # SPA and run the browser journeys. Linux x64 only: the journeys are browser
+  # behaviour above the CGo layer, which the per-arch build/race legs already
+  # cover; re-running them on every arch would buy nothing.
+  e2e:
+    needs: web
+    name: E2E (Playwright journeys)
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+          standalone: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright browser
+        # The journeys run on Chromium; --with-deps pulls the system libraries the
+        # browser needs on a bare runner.
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run journeys
+        # Playwright's webServer builds and starts the e2e binary via
+        # `make e2e-server` (reuseExistingServer is false in CI) and polls
+        # /healthz before the specs run. Server env (master key, admin
+        # credentials, fixture path) comes from playwright.config.ts.
+        working-directory: web
+        run: pnpm exec playwright test
+      - name: Upload report and traces
+        # Upload on failure too — the blob report and on-retry traces/videos are
+        # the artifacts that make a red run diagnosable.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-report
+          path: |
+            web/blob-report/
+            web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # Build the container image for both supported Linux arches. The image is not
   # published — this leg only proves the multi-stage Dockerfile builds cleanly,
   # including the arm64 cross-compile path that `make docker-build` can't
