@@ -21,7 +21,16 @@ export default tseslint.config(
           // vite.config.ts is already included via .svelte-kit/tsconfig.json.
           // service-worker.ts is excluded by .svelte-kit/tsconfig.json (it uses
           // the webworker lib instead of DOM); add it here so ESLint can parse it.
-          allowDefaultProject: ["*.config.js", "vitest.config.ts", "src/service-worker.ts", ".storybook/*.ts"],
+          // playwright.config.ts sits at the web/ root; e2e/tsconfig.json includes
+          // it, but the project service resolves it from web/ (not e2e/), so add it
+          // here too. The e2e/*.ts specs are covered by e2e/tsconfig.json directly.
+          allowDefaultProject: [
+            "*.config.js",
+            "vitest.config.ts",
+            "playwright.config.ts",
+            "src/service-worker.ts",
+            ".storybook/*.ts",
+          ],
         },
         tsconfigRootDir: import.meta.dirname,
         extraFileExtensions: [".svelte"],

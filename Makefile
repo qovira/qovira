@@ -21,7 +21,11 @@ GOFLAGS := -trimpath
 # WEBDIST is the target directory the embed directive reads.
 WEBDIST := internal/httpx/webdist
 
-.PHONY: build build-go web sync-web generate test race lint clean docker-build docker-run
+# E2E binary name and ephemeral data dir.
+E2E_BINARY   := qovira-e2e
+E2E_DATA_DIR := /tmp/qovira-e2e-data
+
+.PHONY: build build-go web sync-web generate test race lint clean docker-build docker-run e2e-server
 
 # build: full pipeline — build the SvelteKit SPA, sync its output into webdist/,
 # then compile the Go binary with -tags embed_spa so the real SPA is embedded.
@@ -84,3 +88,16 @@ docker-run:
 		-e QOVIRA_MASTER_KEY \
 		-v qovira-data:/data \
 		qovira:$(VERSION)
+
+# e2e-server: build the SvelteKit SPA, embed it in the e2e binary, wipe the
+# ephemeral data dir (so first-run admin seeding fires fresh), then exec the
+# server. Playwright's webServer calls this target and polls /healthz until 200.
+# The server env (master key, admin credentials, ports, fixture path) is
+# injected by playwright.config.ts via webServer.env so it never appears here.
+# Reuses the web + sync-web prerequisites so the SPA is always current.
+e2e-server: web sync-web
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GOFLAGS) -tags e2e,embed_spa -ldflags "$(LDFLAGS)" \
+		-o $(E2E_BINARY) ./cmd/qovira
+	rm -rf $(E2E_DATA_DIR)
+	mkdir -p $(E2E_DATA_DIR)
+	exec ./$(E2E_BINARY) serve

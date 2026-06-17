@@ -6,3 +6,8 @@ dist/
 storybook-static/
 # Paraglide-JS generated output — compiled by pnpm compile:i18n before each gate
 src/lib/paraglide/
+# Playwright E2E — auth storageState and test output
+e2e/.auth/
+playwright-report/
+blob-report/
+test-results/

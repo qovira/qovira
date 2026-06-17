@@ -18,7 +18,9 @@
     "test:unit": "pnpm compile:i18n && vitest run --project node --project runes --project jsdom --project browser",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "test:storybook": "pnpm compile:i18n && vitest run --project storybook"
+    "test:storybook": "pnpm compile:i18n && vitest run --project storybook",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@internationalized/date": "^3.8.0",
@@ -55,7 +57,8 @@
     "happy-dom": "^20.10.3",
     "jsdom": "^29.1.1",
     "openapi-typescript": "7.13.0",
-    "playwright": "^1.60.0",
+    "@playwright/test": "1.60.0",
+    "playwright": "1.60.0",
     "prettier": "^3.0.0",
     "prettier-plugin-svelte": "^3.0.0",
     "storybook": "^10.4.4",

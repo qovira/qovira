@@ -1,0 +1,120 @@
+{
+  "rules": [
+    {
+      "match": { "contains": "buy milk" },
+      "rounds": [
+        {
+          "chunks": [
+            { "textDelta": "Sure, I'll ", "delayMs": 30 },
+            { "textDelta": "set a reminder", "delayMs": 30 },
+            { "textDelta": " for you.", "delayMs": 30 },
+            {
+              "toolCall": {
+                "id": "c-milk",
+                "name": "create_reminder",
+                "arguments": { "title": "Buy milk", "dueAt": "2026-12-01T09:00:00Z", "tz": "UTC" }
+              }
+            },
+            { "done": true }
+          ]
+        },
+        {
+          "chunks": [
+            { "textDelta": "Done! I've created a reminder to buy milk.", "delayMs": 30 },
+            { "done": true }
+          ]
+        }
+      ]
+    },
+    {
+      "match": { "contains": "delete the dentist" },
+      "rounds": [
+        {
+          "chunks": [
+            {
+              "toolCall": {
+                "id": "c-delete-dentist",
+                "name": "delete_reminder",
+                "arguments": { "id": { "$fromResult": { "callId": "c-dentist", "path": "id" } } }
+              }
+            },
+            { "done": true }
+          ]
+        },
+        {
+          "chunks": [
+            { "textDelta": "Done, I've deleted the dentist reminder.", "delayMs": 30 },
+            { "done": true }
+          ]
+        }
+      ]
+    },
+    {
+      "match": { "contains": "dentist" },
+      "rounds": [
+        {
+          "chunks": [
+            { "textDelta": "I'll ", "delayMs": 30 },
+            { "textDelta": "set that up for you.", "delayMs": 30 },
+            {
+              "toolCall": {
+                "id": "c-dentist",
+                "name": "create_reminder",
+                "arguments": { "title": "Dentist", "dueAt": "2026-12-02T09:00:00Z", "tz": "UTC" }
+              }
+            },
+            { "done": true }
+          ]
+        },
+        {
+          "chunks": [
+            { "textDelta": "Done! Your dentist reminder is set.", "delayMs": 30 },
+            { "done": true }
+          ]
+        }
+      ]
+    },
+    {
+      "match": { "contains": "call mom" },
+      "rounds": [
+        {
+          "chunks": [
+            { "textDelta": "On it!", "delayMs": 30 },
+            {
+              "toolCall": {
+                "id": "c-mom",
+                "name": "create_reminder",
+                "arguments": { "title": "Call mom", "dueAt": "2026-12-01T20:00:00Z", "tz": "UTC" }
+              }
+            },
+            { "done": true }
+          ]
+        },
+        {
+          "chunks": [
+            { "textDelta": "Done! I've added a reminder to call mom tonight.", "delayMs": 30 },
+            { "done": true }
+          ]
+        }
+      ]
+    },
+    {
+      "match": { "contains": "slowly" },
+      "rounds": [
+        {
+          "chunks": [
+            { "textDelta": "Once ", "delayMs": 500 },
+            { "textDelta": "upon ", "delayMs": 500 },
+            { "textDelta": "a ", "delayMs": 500 },
+            { "textDelta": "time, ", "delayMs": 500 },
+            { "textDelta": "in ", "delayMs": 500 },
+            { "textDelta": "a ", "delayMs": 500 },
+            { "textDelta": "land ", "delayMs": 500 },
+            { "textDelta": "far away.", "delayMs": 500 },
+            { "done": true }
+          ]
+        }
+      ]
+    }
+  ]
+}

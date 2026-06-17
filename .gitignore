@@ -1,5 +1,6 @@
 # Build output
 /qovira
+/qovira-e2e
 /dist/
 
 # Go workspace / module cache artefacts
