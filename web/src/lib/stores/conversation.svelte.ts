@@ -26,10 +26,52 @@ export interface StreamingHistoryMessage extends HistoryMessage {
 }
 
 // ---------------------------------------------------------------------------
+// Active-conversation persistence (reload-resilience, AC #4).
+//
+// The active conversation id is mirrored into sessionStorage so a full page
+// reload — which discards this module's $state — can restore the same
+// conversation instead of minting a fresh empty one, letting the user's
+// in-flight turn survive the reload. Only the id is persisted, never message
+// content: history is refetched from the server (the authoritative encrypted
+// store) by the page load. sessionStorage — not localStorage — scopes this to
+// the tab and clears it when the tab closes, so conversation ids are not left
+// on disk across browser sessions.
+// ---------------------------------------------------------------------------
+
+const ACTIVE_CONVERSATION_STORAGE_KEY = "qovira:active-conversation";
+
+/** Best-effort read of the persisted active conversation id; null when absent or unavailable. */
+function readPersistedConversationId(): string | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    return sessionStorage.getItem(ACTIVE_CONVERSATION_STORAGE_KEY);
+  } catch {
+    // sessionStorage access can throw (e.g. disabled in some privacy modes).
+    return null;
+  }
+}
+
+/** Best-effort mirror of the active conversation id into sessionStorage (null clears it). */
+function persistConversationId(id: string | null): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    if (id === null) {
+      sessionStorage.removeItem(ACTIVE_CONVERSATION_STORAGE_KEY);
+    } else {
+      sessionStorage.setItem(ACTIVE_CONVERSATION_STORAGE_KEY, id);
+    }
+  } catch {
+    // Persistence is best-effort: a failure costs reload-resilience, not correctness.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Module-level $state — safe: ssr=false, browser-only singleton.
 // ---------------------------------------------------------------------------
 
-let _conversationId = $state<string | null>(null);
+// Seeded from sessionStorage so a reload restores the active conversation id;
+// the page load then refetches its history from the server.
+let _conversationId = $state<string | null>(readPersistedConversationId());
 let _history = $state<(HistoryMessage | StreamingHistoryMessage)[]>([]);
 /**
  * Non-null when the most recent AI turn failed for the active conversation.
@@ -92,6 +134,7 @@ export function setActiveConversation(id: string, messages: HistoryMessage[]): v
   _conversationId = id;
   _history = messages;
   _turnError = null;
+  persistConversationId(id);
 }
 
 /**
@@ -243,4 +286,5 @@ export function resetConversation(): void {
   _conversationId = null;
   _history = [];
   _turnError = null;
+  persistConversationId(null);
 }

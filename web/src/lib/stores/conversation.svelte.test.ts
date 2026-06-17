@@ -2,7 +2,7 @@
 // Rune environment: node + Svelte compiler (vitest project "runes").
 // Uses flushSync to drain $derived updates synchronously.
 import { flushSync } from "svelte";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getActiveConversationId,
@@ -407,5 +407,65 @@ describe("appendMessage()", () => {
     const slot = history[3];
     expect(slot !== undefined && isStreaming(slot) && slot.streaming).toBe(true);
     expect(slot?.content).toBe("Streaming...");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sessionStorage persistence — the active conversation id survives a reload
+// (reload-resilience, AC #4). The runes env is node (no sessionStorage), so we
+// install an in-memory Storage mock around these tests.
+// ---------------------------------------------------------------------------
+
+const STORAGE_KEY = "qovira:active-conversation";
+
+function makeStorageMock(): Storage {
+  const backing = new Map<string, string>();
+  return {
+    getItem: (key) => backing.get(key) ?? null,
+    setItem: (key, value) => {
+      backing.set(key, value);
+    },
+    removeItem: (key) => {
+      backing.delete(key);
+    },
+    clear: () => {
+      backing.clear();
+    },
+    key: (i) => [...backing.keys()][i] ?? null,
+    get length() {
+      return backing.size;
+    },
+  };
+}
+
+describe("active-conversation persistence", () => {
+  beforeEach(() => {
+    vi.stubGlobal("sessionStorage", makeStorageMock());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("mirrors the active conversation id into sessionStorage", () => {
+    setActiveConversation("conv-persist", []);
+    flushSync();
+    expect(sessionStorage.getItem(STORAGE_KEY)).toBe("conv-persist");
+  });
+
+  it("clears the persisted id on resetConversation", () => {
+    setActiveConversation("conv-persist", []);
+    flushSync();
+    resetConversation();
+    flushSync();
+    expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("seeds the active conversation id from sessionStorage when the module initializes (reload restore)", async () => {
+    sessionStorage.setItem(STORAGE_KEY, "conv-restored");
+    vi.resetModules();
+    const mod = await import("./conversation.svelte.js");
+    expect(mod.getActiveConversationId()).toBe("conv-restored");
+    mod.resetConversation();
   });
 });
