@@ -159,6 +159,15 @@ func (g *responseGuard) Write(b []byte) (int, error) {
 	return g.ResponseWriter.Write(b)
 }
 
+// Unwrap exposes the wrapped ResponseWriter to http.ResponseController. Because
+// responseGuard embeds the http.ResponseWriter *interface*, only Header/Write/
+// WriteHeader are promoted — Flush and SetWriteDeadline are not. Without this
+// method the ResponseController dead-ends here and Flush returns ErrNotSupported,
+// breaking the /events SSE stream that flushes through this chain.
+func (g *responseGuard) Unwrap() http.ResponseWriter {
+	return g.ResponseWriter
+}
+
 // RequestIDMiddleware propagates or generates a per-request correlation ID.
 //
 // If the incoming request carries a "Request-Id" header, that value is reused; otherwise a new random-hex ID is
@@ -228,6 +237,14 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 		r.status = http.StatusOK
 	}
 	return r.ResponseWriter.Write(b)
+}
+
+// Unwrap exposes the wrapped ResponseWriter to http.ResponseController. As with
+// responseGuard, statusRecorder embeds the http.ResponseWriter interface, so
+// Flush/SetWriteDeadline are not promoted; this method lets the controller reach
+// the real flusher so the /events SSE stream can flush through the log middleware.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 // statusCode returns the recorded status or 200 if WriteHeader was never called.
