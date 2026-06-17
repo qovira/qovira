@@ -19,10 +19,7 @@
           ]
         },
         {
-          "chunks": [
-            { "textDelta": "Done! I've created a reminder to buy milk.", "delayMs": 30 },
-            { "done": true }
-          ]
+          "chunks": [{ "textDelta": "Done! I've created a reminder to buy milk.", "delayMs": 30 }, { "done": true }]
         }
       ]
     },
@@ -42,10 +39,7 @@
           ]
         },
         {
-          "chunks": [
-            { "textDelta": "Done, I've deleted the dentist reminder.", "delayMs": 30 },
-            { "done": true }
-          ]
+          "chunks": [{ "textDelta": "Done, I've deleted the dentist reminder.", "delayMs": 30 }, { "done": true }]
         }
       ]
     },
@@ -67,10 +61,7 @@
           ]
         },
         {
-          "chunks": [
-            { "textDelta": "Done! Your dentist reminder is set.", "delayMs": 30 },
-            { "done": true }
-          ]
+          "chunks": [{ "textDelta": "Done! Your dentist reminder is set.", "delayMs": 30 }, { "done": true }]
         }
       ]
     },

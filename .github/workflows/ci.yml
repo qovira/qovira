@@ -58,6 +58,11 @@ jobs:
         run: pnpm lint
       - name: Format check
         run: pnpm format:check
+      - name: Install Playwright browser
+        # `pnpm test` runs the Storybook project in Vitest Browser Mode, which
+        # drives Chromium via Playwright — install it (and its system libs)
+        # before the test step on the bare runner.
+        run: pnpm exec playwright install --with-deps chromium
       - name: Test
         run: pnpm test
       - name: Build
