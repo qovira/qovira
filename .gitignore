@@ -49,3 +49,6 @@ mem.out
 # (i.e. `make build` and the Docker image). A bare `go build ./...` or
 # `make build-go` uses the in-code stub from spa_noembed.go instead.
 internal/httpx/webdist/
+
+# Playwright MCP browser scratch (console logs, page snapshots)
+.playwright-mcp/
