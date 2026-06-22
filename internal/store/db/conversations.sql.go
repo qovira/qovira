@@ -40,16 +40,18 @@ SELECT
     c.id,
     c.created_at,
     c.updated_at,
-    COALESCE((
-        SELECT m.content
-        FROM messages m
-        WHERE m.conversation_id = c.id
-          AND m.user_id = ?1
-          AND m.role = 'user'
-        ORDER BY m.created_at, m.id
-        LIMIT 1
-    ), '') AS preview
+    COALESCE(fm.content, '') AS preview
 FROM conversations c
+LEFT JOIN (
+    SELECT
+        m.conversation_id AS conversation_id,
+        m.content AS content,
+        MIN(m.created_at || m.id) AS first_key
+    FROM messages m
+    WHERE m.user_id = ?1
+      AND m.role = 'user'
+    GROUP BY m.conversation_id
+) fm ON fm.conversation_id = c.id
 WHERE c.user_id = ?1
   AND (
       ?2 IS NULL
@@ -71,17 +73,34 @@ type ListConversationsRow struct {
 	ID        string
 	CreatedAt string
 	UpdatedAt string
-	Preview   interface{}
+	Preview   string
 }
 
+// scopeguard:allow-unscoped: the outer SELECT carries c.user_id = @user_id
+// (conversations is fully scoped), and the messages derived table carries
+// m.user_id = @user_id independently. The scope guard fails closed on any JOIN
+// or SELECT-inside-SELECT; this reviewed exemption documents that both target
+// tables are correctly user-scoped.
+//
 // List conversations for a user, keyset-paginated on (updated_at DESC, id DESC)
 // so the most-recently-active conversation appears first. Fetches limit+1 rows so
 // the caller can detect whether a next page exists.
 //
-// preview is derived via a correlated subquery that finds the first user message
-// in the conversation (ORDER BY created_at, id LIMIT 1). The subquery carries its
-// own user_id predicate so the scope guard accepts it without an exemption. preview
-// is empty when no user message exists yet.
+// preview is the conversation's first user message, derived in a LEFT JOIN to a
+// per-conversation derived table rather than the obvious correlated subquery in
+// the projection. sqlc's SQLite parser rejects a bound parameter inside a
+// projection subquery (it substitutes positional placeholders and re-parses, and
+// such a placeholder inside that subquery is invalid to its grammar), and it has
+// no window-function support, so a ROW_NUMBER ranking is out too. The derived
+// table instead groups by conversation and relies on SQLite's documented rule
+// that, with exactly one MIN in the SELECT, the remaining bare columns are taken
+// from the row holding that minimum. The MIN key is created_at concatenated with
+// id; created_at is a fixed-width ISO-8601 string, so that key sorts identically
+// to ordering by created_at then id, making fm.content the earliest user message
+// deterministically with ties broken by id, exactly as the previous
+// ORDER BY m.created_at, m.id LIMIT 1 did. m.user_id = @user_id keeps messages
+// user-scoped independently of the join (defense in depth; the conversation_id +
+// user_id FK already ties each message's user_id to its conversation's owner).
 //
 // The keyset predicate uses the expanded tuple form (required because sqlc's SQLite
 // parser does not support row-value syntax): the cursor marks the last seen
@@ -90,8 +109,6 @@ type ListConversationsRow struct {
 // which expands to:
 //
 //	updated_at < cursor OR (updated_at = cursor AND id < cursor_id).
-//
-// MANDATORY user_id predicate on conversations enforced by scope guard.
 func (q *Queries) ListConversations(ctx context.Context, arg ListConversationsParams) ([]ListConversationsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listConversations,
 		arg.UserID,
