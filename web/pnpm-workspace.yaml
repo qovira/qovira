@@ -1,4 +1,7 @@
 allowBuilds:
   esbuild: true
+# Qovira's own packages are exempt from the registry minimum-release-age
+# cooldown — we consume them as soon as they publish (they're first-party).
 minimumReleaseAgeExclude:
-  - "@qovira/ui@2.0.0"
+  - "@qovira/theme"
+  - "@qovira/ui"

@@ -18,7 +18,7 @@
   }
 </script>
 
-<h1 class="text-text text-xl font-semibold">{settings_heading()}</h1>
+<h1 class="text-fg text-xl font-semibold">{settings_heading()}</h1>
 
 <div class="mt-6">
   <Button variant="secondary" loading={loggingOut} onclick={handleLogout}>{settings_logout()}</Button>

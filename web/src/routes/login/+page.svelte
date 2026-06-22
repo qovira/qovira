@@ -54,7 +54,7 @@
 
 <div class="flex min-h-screen items-center justify-center">
   <form class="flex w-full max-w-sm flex-col gap-4" onsubmit={handleSubmit}>
-    <h1 class="text-text text-xl font-semibold">{login_heading()}</h1>
+    <h1 class="text-fg text-xl font-semibold">{login_heading()}</h1>
 
     {#if errorMessage}
       <p class="text-sm text-red-600" role="alert">{errorMessage}</p>

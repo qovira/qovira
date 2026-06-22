@@ -139,7 +139,7 @@
   <div class="border-border flex shrink-0 items-center justify-between border-b px-4 py-2">
     <button
       type="button"
-      class="text-text-muted hover:text-text flex items-center gap-1.5 rounded px-2 py-1.5 text-sm
+      class="text-fg-muted hover:text-fg flex items-center gap-1.5 rounded px-2 py-1.5 text-sm
              focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
       onclick={() => {
         switcherOpen = true;
@@ -161,7 +161,7 @@
   <div class="flex-1 overflow-y-auto px-4 py-4">
     {#if history.length === 0 && turnError === null}
       <!-- Empty state: no messages yet -->
-      <p class="text-text-muted text-sm">Start a conversation below.</p>
+      <p class="text-fg-muted text-sm">Start a conversation below.</p>
     {:else}
       <ul class="flex flex-col gap-4" role="list">
         {#each history as message (message.id)}
@@ -172,7 +172,7 @@
                 User input is trusted only in the sense that it belongs to the
                 authenticated user, but XSS prevention still requires escaping.
               -->
-              <div class="bg-surface-raised text-text max-w-[80%] rounded-xl px-4 py-2 text-sm">
+              <div class="bg-surface-raised text-fg max-w-[80%] rounded-xl px-4 py-2 text-sm">
                 {message.content}
               </div>
             {:else if message.role === "assistant"}
@@ -183,7 +183,7 @@
                 progress, allowing the in-flight bubble to animate naturally.
               -->
               <div
-                class="text-text max-w-[80%] rounded-xl px-4 py-2 text-sm {'streaming' in message && message.streaming
+                class="text-fg max-w-[80%] rounded-xl px-4 py-2 text-sm {'streaming' in message && message.streaming
                   ? 'opacity-80'
                   : ''}"
               >
@@ -239,7 +239,7 @@
         <!-- turn.failed error line -->
         {#if turnError !== null}
           <li class="flex justify-start">
-            <p class="text-error-text text-sm" role="alert">{chat_turn_failed()}</p>
+            <p class="text-fg-error text-sm" role="alert">{chat_turn_failed()}</p>
           </li>
         {/if}
       </ul>
@@ -254,7 +254,7 @@
         rows={1}
         placeholder={chat_composer_placeholder()}
         disabled={sending}
-        class="border-border bg-surface text-text focus:ring-border-focus flex-1 resize-none rounded-lg border px-3 py-2 text-sm
+        class="border-border bg-surface text-fg focus:ring-border-focus flex-1 resize-none rounded-lg border px-3 py-2 text-sm
                focus:outline-none focus:ring-2 disabled:opacity-50"
         bind:value={composerText}
         onkeydown={handleKeydown}

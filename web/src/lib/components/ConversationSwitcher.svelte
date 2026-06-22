@@ -173,10 +173,10 @@
     {:else if loadError}
       <!-- Error state — network throw; distinguish from a genuine empty list -->
       <div class="flex flex-col items-start gap-2 px-4 py-6">
-        <p class="text-text-muted text-sm">{conv_switcher_load_error()}</p>
+        <p class="text-fg-muted text-sm">{conv_switcher_load_error()}</p>
         <button
           type="button"
-          class="text-text-muted hover:text-text text-sm underline focus-visible:outline-2
+          class="text-fg-muted hover:text-fg text-sm underline focus-visible:outline-2
                  focus-visible:outline-offset-2 focus-visible:outline-current"
           onclick={() => void loadPage(undefined)}
         >
@@ -184,7 +184,7 @@
         </button>
       </div>
     {:else if conversations.length === 0}
-      <p class="text-text-muted px-4 py-6 text-sm">{conv_switcher_empty()}</p>
+      <p class="text-fg-muted px-4 py-6 text-sm">{conv_switcher_empty()}</p>
     {:else}
       <ul class="flex flex-col" role="list">
         {#each conversations as conv (conv.id)}
@@ -194,7 +194,7 @@
               class="w-full px-4 py-3 text-left text-sm transition-colors
                      hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-[-2px]
                      focus-visible:outline-current
-                     {activeId === conv.id ? 'bg-surface-raised font-medium text-text' : 'text-text-muted'}"
+                     {activeId === conv.id ? 'bg-surface-raised font-medium text-fg' : 'text-fg-muted'}"
               onclick={() => void handleSelect(conv.id)}
               aria-current={activeId === conv.id ? "true" : undefined}
             >
@@ -210,8 +210,8 @@
           <button
             type="button"
             disabled={loadingMore}
-            class="text-text-muted w-full rounded px-2 py-1.5 text-sm
-                   hover:bg-surface-raised hover:text-text
+            class="text-fg-muted w-full rounded px-2 py-1.5 text-sm
+                   hover:bg-surface-raised hover:text-fg
                    focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current
                    disabled:cursor-not-allowed disabled:opacity-50"
             onclick={() => void handleLoadMore()}

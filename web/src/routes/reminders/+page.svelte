@@ -365,7 +365,7 @@
 
 <div class="reminders-page">
   {#if showPlaceholder}
-    <p class="text-text-muted text-sm">{reminders_placeholder()}</p>
+    <p class="text-fg-muted text-sm">{reminders_placeholder()}</p>
   {:else if hasNoActive}
     <!-- Zero active but some done — no active buckets; Done section below shows them. -->
   {:else}
@@ -459,11 +459,11 @@
 
     {#if doneOpen}
       {#if doneLoading}
-        <p class="text-text-muted text-sm" role="status" aria-live="polite">{reminders_done_loading()}</p>
+        <p class="text-fg-muted text-sm" role="status" aria-live="polite">{reminders_done_loading()}</p>
       {:else if doneError !== null}
-        <p class="text-error-text text-sm" role="alert">{doneError}</p>
+        <p class="text-fg-error text-sm" role="alert">{doneError}</p>
       {:else if done.length === 0}
-        <p class="text-text-muted text-sm">{reminders_done_empty()}</p>
+        <p class="text-fg-muted text-sm">{reminders_done_empty()}</p>
       {:else}
         <ul class="reminders-list" role="list">
           {#each done as reminder (reminder.id)}
@@ -600,12 +600,12 @@
     outline: none;
     background: transparent;
     font-size: 0.875rem;
-    color: var(--color-text, oklch(0.2 0 0));
+    color: var(--color-fg, oklch(0.2 0 0));
     padding: 0.25rem 0;
   }
 
   .reminder-quick-add__title::placeholder {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
   }
 
   .reminder-quick-add__title:focus {
@@ -614,7 +614,7 @@
 
   .reminder-quick-add__due-label {
     font-size: 0.75rem;
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -624,7 +624,7 @@
     border-radius: 0.375rem;
     padding: 0.25rem 0.5rem;
     font-size: 0.8125rem;
-    color: var(--color-text, oklch(0.2 0 0));
+    color: var(--color-fg, oklch(0.2 0 0));
     background: var(--color-surface, #fff);
     flex-shrink: 0;
   }
@@ -659,7 +659,7 @@
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     padding-bottom: 0.25rem;
     border-bottom: 1px solid var(--color-border, oklch(0.9 0 0));
     margin-bottom: 0.125rem;
@@ -667,11 +667,11 @@
   }
 
   .reminders-bucket__heading--overdue {
-    color: var(--color-error-text, #a8331f);
+    color: var(--color-fg-error, #a8331f);
   }
 
   .reminders-done-count {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     font-weight: 400;
   }
 
@@ -702,7 +702,7 @@
   }
 
   .reminders-done-chevron {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     flex-shrink: 0;
     transition: transform 150ms ease;
   }
@@ -736,7 +736,7 @@
     border-radius: 0.375rem;
     padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
-    color: var(--color-text, oklch(0.2 0 0));
+    color: var(--color-fg, oklch(0.2 0 0));
     background: var(--color-surface, #fff);
   }
 
@@ -751,7 +751,7 @@
     border-radius: 0.375rem;
     padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
-    color: var(--color-text, oklch(0.2 0 0));
+    color: var(--color-fg, oklch(0.2 0 0));
     background: var(--color-surface, #fff);
   }
 
@@ -762,7 +762,7 @@
 
   .edit-sheet-error {
     font-size: 0.875rem;
-    color: var(--color-error-text, #a8331f);
+    color: var(--color-fg-error, #a8331f);
   }
 
   .edit-sheet-footer {

@@ -160,7 +160,7 @@
   /* In-progress chip: muted surface, pulse animation on the spinner dot. */
   .tool-chip--started {
     background-color: var(--color-surface-raised, oklch(0.95 0 0));
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
   }
 
   .tool-chip__spinner {
@@ -194,7 +194,7 @@
   /* Entity card: calm link styled as a subtle pill. */
   .tool-chip--entity {
     background-color: var(--color-surface-raised, oklch(0.95 0 0));
-    color: var(--color-text, oklch(0.2 0 0));
+    color: var(--color-fg, oklch(0.2 0 0));
     text-decoration: none;
     cursor: pointer;
     transition: background-color 120ms ease;
@@ -210,11 +210,11 @@
   }
 
   .tool-chip__entity-type {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
   }
 
   .tool-chip__entity-dot {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
   }
 
   .tool-chip__entity-title {
@@ -226,18 +226,18 @@
   }
 
   .tool-chip__entity-due {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
   }
 
   .tool-chip__entity-arrow {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     font-size: 0.65rem;
     align-self: center;
   }
 
   /* Done chip: invisible/minimal for successful reads. */
   .tool-chip--done {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     background-color: transparent;
     padding-inline: 0;
   }
@@ -245,7 +245,7 @@
   /* Error chip: soft, non-alarming, recoverable. */
   .tool-chip--failed {
     background-color: var(--color-surface-raised, oklch(0.95 0 0));
-    color: var(--color-error-text, #a8331f);
+    color: var(--color-fg-error, #a8331f);
   }
 
   .tool-chip__error-label {
@@ -253,7 +253,7 @@
   }
 
   .tool-chip__error-dot {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
   }
 
   .tool-chip__error-text {

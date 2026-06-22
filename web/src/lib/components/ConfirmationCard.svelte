@@ -205,16 +205,16 @@
 
   /* Destructive / external risk: clay/error surface (red-tinted tint). */
   .confirmation-card--destructive {
-    background-color: var(--color-error-tint, #fbe6e1);
+    background-color: var(--color-tint-error, #fbe6e1);
     border-color: var(--color-error, #cc4029);
-    color: var(--color-error-text, #a8331f);
+    color: var(--color-fg-error, #a8331f);
   }
 
   /* Routine write: honey-bordered result style. */
   .confirmation-card--routine {
-    background-color: var(--color-warning-tint, #fbebd2);
+    background-color: var(--color-tint-warning, #fbebd2);
     border-color: var(--color-honey-500, #e0a458);
-    color: var(--color-warning-text, #855400);
+    color: var(--color-fg-warning, #855400);
   }
 
   /* Expired state: grey overlay regardless of tone. */
@@ -325,7 +325,7 @@
 
   .confirmation-card--destructive .confirmation-card__btn--deny {
     border-color: var(--color-error, #cc4029);
-    color: var(--color-error-text, #a8331f);
+    color: var(--color-fg-error, #a8331f);
   }
 
   .confirmation-card--destructive .confirmation-card__btn--deny:hover:not(:disabled) {
@@ -334,7 +334,7 @@
 
   .confirmation-card--routine .confirmation-card__btn--deny {
     border-color: var(--color-honey-500, #e0a458);
-    color: var(--color-warning-text, #855400);
+    color: var(--color-fg-warning, #855400);
   }
 
   .confirmation-card--routine .confirmation-card__btn--deny:hover:not(:disabled) {

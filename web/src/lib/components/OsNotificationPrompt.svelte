@@ -46,8 +46,8 @@
   class="bg-surface border-border fixed bottom-4 left-1/2 z-50 flex w-full max-w-sm -translate-x-1/2 flex-col gap-3 rounded-lg border px-4 py-3 shadow-md"
 >
   <div class="flex flex-col gap-1">
-    <p class="text-text text-sm font-medium">{notification_prompt_title()}</p>
-    <p class="text-text-muted text-sm">{notification_prompt_body()}</p>
+    <p class="text-fg text-sm font-medium">{notification_prompt_title()}</p>
+    <p class="text-fg-muted text-sm">{notification_prompt_body()}</p>
   </div>
   <div class="flex gap-2">
     <Button variant="primary" onclick={handleEnable}>

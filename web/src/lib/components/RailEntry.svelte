@@ -35,7 +35,7 @@
       {href}
       aria-current={active ? "page" : undefined}
       class="flex h-10 items-center gap-3 rounded px-2 text-sm font-medium transition-colors
-             {active ? 'bg-accent/10 text-accent' : 'text-text hover:bg-surface-raised'}
+             {active ? 'bg-accent/10 text-accent' : 'text-fg hover:bg-surface-raised'}
              focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
       {...props}
     >

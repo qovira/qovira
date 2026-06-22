@@ -24,18 +24,18 @@
 
 <div class="flex flex-col gap-4 p-4" style="min-height: 200px; max-width: 640px;">
   {#if history.length === 0 && turnError === null}
-    <p class="text-text-muted text-sm">Start a conversation below.</p>
+    <p class="text-fg-muted text-sm">Start a conversation below.</p>
   {:else}
     <ul class="flex flex-col gap-4" role="list">
       {#each history as message (message.id)}
         <li class="flex {message.role === 'user' ? 'justify-end' : 'justify-start'}">
           {#if message.role === "user"}
-            <div class="bg-surface-raised text-text max-w-[80%] rounded-xl px-4 py-2 text-sm">
+            <div class="bg-surface-raised text-fg max-w-[80%] rounded-xl px-4 py-2 text-sm">
               {message.content}
             </div>
           {:else if message.role === "assistant"}
             <div
-              class="text-text max-w-[80%] rounded-xl px-4 py-2 text-sm {'streaming' in message && message.streaming
+              class="text-fg max-w-[80%] rounded-xl px-4 py-2 text-sm {'streaming' in message && message.streaming
                 ? 'opacity-80'
                 : ''}"
             >
@@ -71,7 +71,7 @@
 
       {#if turnError !== null}
         <li class="flex justify-start">
-          <p class="text-error-text text-sm" role="alert">{chat_turn_failed()}</p>
+          <p class="text-fg-error text-sm" role="alert">{chat_turn_failed()}</p>
         </li>
       {/if}
     </ul>

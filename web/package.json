@@ -25,8 +25,8 @@
   },
   "dependencies": {
     "@internationalized/date": "^3.8.0",
-    "@qovira/theme": "^1.1.0",
-    "@qovira/ui": "^2.0.0",
+    "@qovira/theme": "^2.1.0",
+    "@qovira/ui": "^2.1.0",
     "dompurify": "^3.4.10",
     "marked": "^18.0.5",
     "openapi-fetch": "0.17.0",

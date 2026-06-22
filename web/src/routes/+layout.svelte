@@ -265,7 +265,7 @@
                    focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
           >
             <Avatar name="User" size="sm" />
-            <span class={railOpen ? "text-text text-sm" : "sr-only"}>{nav_account()}</span>
+            <span class={railOpen ? "text-fg text-sm" : "sr-only"}>{nav_account()}</span>
           </a>
 
           <!-- Theme toggle -->

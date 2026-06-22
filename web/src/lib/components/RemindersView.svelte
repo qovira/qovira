@@ -61,7 +61,7 @@
 
 <div class="reminders-page" style="max-width: 480px;">
   {#if showPlaceholder}
-    <p class="text-text-muted text-sm">{reminders_placeholder()}</p>
+    <p class="text-fg-muted text-sm">{reminders_placeholder()}</p>
   {:else if hasNoActive}
     <!-- Zero active but some done — no active buckets; Done section below shows them. -->
   {:else}
@@ -154,7 +154,7 @@
 
     {#if doneOpen}
       {#if done.length === 0}
-        <p class="text-text-muted text-sm">{reminders_done_empty()}</p>
+        <p class="text-fg-muted text-sm">{reminders_done_empty()}</p>
       {:else}
         <ul class="reminders-list" role="list">
           {#each done as reminder (reminder.id)}
@@ -187,7 +187,7 @@
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     padding-bottom: 0.25rem;
     border-bottom: 1px solid var(--color-border, oklch(0.9 0 0));
     margin-bottom: 0.125rem;
@@ -195,11 +195,11 @@
   }
 
   .reminders-bucket__heading--overdue {
-    color: var(--color-error-text, #a8331f);
+    color: var(--color-fg-error, #a8331f);
   }
 
   .reminders-done-count {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     font-weight: 400;
   }
 
@@ -229,7 +229,7 @@
   }
 
   .reminders-done-chevron {
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     flex-shrink: 0;
     transition: transform 150ms ease;
   }

@@ -134,10 +134,10 @@
   >
     <!-- Panel header -->
     <div class="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-      <h2 id="slide-over-title" class="text-text text-base font-semibold">{title}</h2>
+      <h2 id="slide-over-title" class="text-fg text-base font-semibold">{title}</h2>
       <button
         type="button"
-        class="text-text-muted hover:text-text rounded p-1
+        class="text-fg-muted hover:text-fg rounded p-1
                focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
         onclick={handleClose}
         aria-label="Close"

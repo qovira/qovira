@@ -124,7 +124,7 @@
     background: transparent;
     cursor: pointer;
     border-radius: 50%;
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     transition: color 80ms ease;
   }
 
@@ -146,7 +146,7 @@
   /* Done rows: the check icon is a bare SVG (not a button), needs the same padding */
   .reminder-row--done > .reminder-row__check {
     padding: 0.375rem;
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
   }
 
   /* Row body button — fills the rest of the row, opens the edit sheet */
@@ -172,7 +172,7 @@
   /* Title */
   .reminder-row__title {
     font-size: 0.875rem;
-    color: var(--color-text, oklch(0.2 0 0));
+    color: var(--color-fg, oklch(0.2 0 0));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -199,7 +199,7 @@
   .reminder-row__due {
     flex-shrink: 0;
     font-size: 0.75rem;
-    color: var(--color-text-muted, #5c4a37);
+    color: var(--color-fg-muted, #5c4a37);
     white-space: nowrap;
   }
 </style>
