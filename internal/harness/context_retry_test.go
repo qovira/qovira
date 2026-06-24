@@ -456,10 +456,12 @@ func TestContextRetry_ExhaustsAndEmitsGraceful(t *testing.T) {
 		t.Errorf("turn.failed count = %d, want 0 — context_length exhaust must NOT emit turn.failed", failedCount)
 	}
 
-	// The call count must be bounded (at most MaxContextRetries + 1 original attempt).
-	// Default MaxContextRetries is 2, so at most 3 total calls.
-	if gw.callCount > 3 {
-		t.Errorf("gateway called %d times, want <= 3 (1 original + 2 retries)", gw.callCount)
+	// The call count must be exactly 1 original attempt + MaxContextRetries (= 2).
+	// A regression that skips retries would call the gateway fewer times and still
+	// emit a graceful context_length terminal — the lower bound catches it.
+	const wantCallCount = 1 + 2 // 1 original + MaxContextRetries
+	if gw.callCount != wantCallCount {
+		t.Errorf("gateway called %d times, want exactly %d (1 original + 2 retries)", gw.callCount, wantCallCount)
 	}
 }
 
@@ -480,10 +482,12 @@ func TestContextRetry_BoundedRetries(t *testing.T) {
 	convID := id.New()
 	_ = startAndWaitCompletion(t, h, s, p, convID, bus)
 
-	// Total calls = 1 original attempt + maxRetries.
-	wantMax := 1 + maxRetries
-	if gw.callCount > wantMax {
-		t.Errorf("gateway called %d times, want <= %d (1 + MaxContextRetries=%d)", gw.callCount, wantMax, maxRetries)
+	// Total calls must be exactly 1 original attempt + maxRetries. The lower bound
+	// catches a regression that emits the graceful terminal after fewer retries than
+	// configured (e.g. off-by-one in the retry counter).
+	wantCallCount := 1 + maxRetries
+	if gw.callCount != wantCallCount {
+		t.Errorf("gateway called %d times, want exactly %d (1 + MaxContextRetries=%d)", gw.callCount, wantCallCount, maxRetries)
 	}
 }
 
@@ -504,9 +508,12 @@ func TestContextRetry_DefaultConfigApplied(t *testing.T) {
 	convID := id.New()
 	_ = startAndWaitCompletion(t, h, s, p, convID, bus)
 
-	// Default MaxContextRetries=2 → at most 3 calls.
-	if gw.callCount > 3 {
-		t.Errorf("gateway called %d times with default config, want <= 3", gw.callCount)
+	// Default MaxContextRetries=2 → exactly 3 calls (1 original + 2 retries).
+	// The lower bound catches a regression where the default is not applied and
+	// the harness calls once and immediately emits the graceful terminal.
+	const wantCallCount = 1 + 2 // default MaxContextRetries=2
+	if gw.callCount != wantCallCount {
+		t.Errorf("gateway called %d times with default config, want exactly %d (1 original + 2 default retries)", gw.callCount, wantCallCount)
 	}
 }
 
@@ -614,8 +621,12 @@ func TestContextRetry_StreamLevel_DoesNotConsumeStepBudget(t *testing.T) {
 	if failedCount != 0 {
 		t.Errorf("turn.failed count = %d, want 0", failedCount)
 	}
-	if gw.callCount > 3 {
-		t.Errorf("gateway called %d times, want <= 3 (1 original + 2 retries)", gw.callCount)
+	// The stream-CL retries must not be "free" in both directions: if the harness
+	// retried fewer than MaxContextRetries times it would still reach the success
+	// path early — but here gw fails 2 times then succeeds, so callCount must be 3.
+	const wantCallCount = 3 // 2 stream-CL failures + 1 success
+	if gw.callCount != wantCallCount {
+		t.Errorf("gateway called %d times, want exactly %d (2 stream-CL failures + 1 success)", gw.callCount, wantCallCount)
 	}
 }
 
@@ -659,8 +670,12 @@ func TestContextRetry_StreamLevel_ExhaustsGracefully(t *testing.T) {
 	if failedCount != 0 {
 		t.Errorf("turn.failed count = %d, want 0 — stream CL exhaust must not emit turn.failed", failedCount)
 	}
-	if gw.callCount > 3 {
-		t.Errorf("gateway called %d times, want <= 3 (1 + MaxContextRetries=2)", gw.callCount)
+	// Exact lower+upper bound: MaxContextRetries=2 → exactly 3 calls (1 original + 2
+	// stream-CL retries). Under-retrying (e.g. retrying only once) would still emit a
+	// graceful context_length terminal, so the lower bound is load-bearing here.
+	const wantCallCount = 1 + 2 // 1 original + MaxContextRetries=2
+	if gw.callCount != wantCallCount {
+		t.Errorf("gateway called %d times, want exactly %d (1 original + MaxContextRetries=2 retries)", gw.callCount, wantCallCount)
 	}
 }
 

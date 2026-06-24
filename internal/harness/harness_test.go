@@ -410,7 +410,12 @@ func (b *assertPersistBus) Publish(userID string, e events.Event) {
 	}
 	payload, ok := e.Data.(harness.CompletedPayload)
 	if !ok {
+		// The event shape has changed — the DB check was never reached.
+		// Mark this as a violation so the test fails loudly rather than
+		// passing vacuously (done=true, viol=false = silent skip).
+		b.viol = true
 		b.done = true
+		b.t.Logf("assertPersistBus: message.completed Data is %T, want harness.CompletedPayload — invariant was not checked", e.Data)
 		return
 	}
 	var n int

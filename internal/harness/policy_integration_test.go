@@ -227,9 +227,12 @@ func TestPolicy_TrustedTurn_ExternalConfirmSuspends(t *testing.T) {
 		t.Fatalf("StartTurn: %v", err)
 	}
 
-	// Wait long enough for the turn to process the tool call and either suspend or execute.
-	// We give it 500ms — long enough for execution but short enough to not hang the test suite.
-	evs := waitForSuspendOrCompleted(t, bus, 500*time.Millisecond)
+	// Gate the "no terminal yet" assertion on the positive signal that the turn
+	// actually reached the Confirm-path: wait for confirmation.required (emitted by
+	// insertPendingConfirmation when the turn suspends). This replaces a bare 500ms
+	// sleep — if confirmation.required fires, the turn is past the policy gate and is
+	// suspended; asserting no terminal event is then load-bearing, not vacuous.
+	evs := waitForConfirmationRequired(t, bus, 3*time.Second)
 
 	// The turn MUST suspend: no terminal event emitted.
 	if hasTerminalEvent(evs) {
@@ -303,7 +306,9 @@ func TestPolicy_TrustedTurn_DestructiveConfirmSuspends(t *testing.T) {
 		t.Fatalf("StartTurn: %v", err)
 	}
 
-	evs := waitForSuspendOrCompleted(t, bus, 500*time.Millisecond)
+	// Gate on confirmation.required (positive signal that the turn reached the Confirm
+	// path and is now suspended), replacing the bare 500ms sleep.
+	evs := waitForConfirmationRequired(t, bus, 3*time.Second)
 
 	// The turn MUST suspend: no terminal event.
 	if hasTerminalEvent(evs) {
@@ -550,8 +555,11 @@ func TestPolicy_UntrustedOrigin_WriteConfirms(t *testing.T) {
 		t.Fatalf("StartTurn: %v", err)
 	}
 
-	// Write/Untrusted → Confirm → suspend (no terminal event).
-	evs := waitForSuspendOrCompleted(t, bus, 500*time.Millisecond)
+	// Write/Untrusted → Confirm → suspend. Gate the negative assertion on the
+	// positive signal that the turn actually reached the Confirm path: wait for
+	// confirmation.required (emitted by insertPendingConfirmation when the turn
+	// suspends). This replaces a bare 500ms sleep.
+	evs := waitForConfirmationRequired(t, bus, 3*time.Second)
 	if hasTerminalEvent(evs) {
 		t.Error("Write/Untrusted turn emitted a terminal event — should suspend (Confirm routes to seam)")
 	}

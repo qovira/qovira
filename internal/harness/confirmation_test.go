@@ -81,6 +81,28 @@ func waitForConfirmationRequired(t *testing.T, bus *fakeBus, timeout time.Durati
 	return bus.snapshot()
 }
 
+// waitForToolStarted blocks until a "tool.started" event with the given callID
+// appears on the bus or the timeout expires. It is used as a positive signal
+// that the resumed turn actually executed the approved tool call, so that
+// subsequent "no terminal yet" assertions are gated on real work having occurred
+// rather than on a wall-clock delay.
+func waitForToolStarted(t *testing.T, bus *fakeBus, callID string, timeout time.Duration) []fakeEvent {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		evs := bus.snapshot()
+		for _, e := range evs {
+			if e.event.Type == "tool.started" {
+				if pl, ok := e.event.Data.(harness.ToolStartedPayload); ok && pl.CallID == callID {
+					return evs
+				}
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return bus.snapshot()
+}
+
 // countEventType counts events of the given type in the snapshot.
 func countEventType(evs []fakeEvent, typ string) int {
 	n := 0
@@ -579,8 +601,11 @@ func TestConfirm_AC5_ThreeCallsThreeConfirmations(t *testing.T) {
 		t.Fatalf("AC-5: approve call1 status = %d, want 202", rr1.Code)
 	}
 
-	// Wait for call2's confirmation.required to be re-emitted (or just the tool.started for call1).
-	time.Sleep(200 * time.Millisecond)
+	// Gate the "no terminal yet" assertion on the positive signal that the resumed
+	// turn actually ran: wait for tool.started for callID1 (proving execution reached
+	// the approved call), then snapshot — at that point the turn has re-suspended and
+	// no terminal event can have been emitted.
+	waitForToolStarted(t, bus, callID1, 3*time.Second)
 
 	// Tool executed for call1 but turn still suspended (call2 & call3 pending).
 	if !hasToolResult(t, s, p, convID, callID1) {
@@ -596,7 +621,9 @@ func TestConfirm_AC5_ThreeCallsThreeConfirmations(t *testing.T) {
 	if rr2.Code != http.StatusAccepted {
 		t.Fatalf("AC-5: approve call2 status = %d, want 202", rr2.Code)
 	}
-	time.Sleep(200 * time.Millisecond)
+
+	// Same pattern: wait for callID2's tool.started, then assert no terminal.
+	waitForToolStarted(t, bus, callID2, 3*time.Second)
 
 	if !hasToolResult(t, s, p, convID, callID2) {
 		t.Error("AC-5: tool-result not persisted for call2 after approval")
