@@ -17,7 +17,7 @@ CREATE TABLE users (
     language      TEXT NOT NULL,                -- BCP 47
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
-);
+) STRICT;
 -- +goose StatementEnd
 
 -- +goose Down

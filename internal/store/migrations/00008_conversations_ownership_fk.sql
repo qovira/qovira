@@ -14,6 +14,18 @@
 --
 -- foreign_keys is set ON per-connection in store.applyPragmas, so this
 -- constraint is enforced at runtime.
+--
+-- HOUSE RULE — future post-release table rebuilds of FK-referenced tables:
+-- If conversations (or any table referenced by FKs) ever needs a column-type
+-- or constraint change after the schema has shipped, the rebuild MUST use the
+-- goose NO TRANSACTION directive with manual PRAGMA foreign_keys=OFF before
+-- BEGIN and PRAGMA foreign_key_check before COMMIT (see SQLite guide §7.2).
+-- PRAGMA foreign_keys is a no-op inside a goose per-migration transaction, so
+-- toggling it inside the migration body is silently ineffective; the NO
+-- TRANSACTION directive is the only way to set it before the transaction
+-- begins. All in-branch rebuilds (not yet shipped) may use normal goose
+-- transactions and the inline PRAGMA foreign_keys=OFF approach, as this schema
+-- is not yet published.
 
 -- Step 1: add a UNIQUE index on conversations(id, user_id) so the composite
 -- FK target is resolvable.
@@ -32,7 +44,7 @@ CREATE TABLE messages_new (
     finish_reason   TEXT,
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     FOREIGN KEY (conversation_id, user_id) REFERENCES conversations (id, user_id)
-);
+) STRICT, WITHOUT ROWID;
 
 INSERT INTO messages_new
 SELECT id, conversation_id, user_id, role, content, tool_calls, tool_call_id, finish_reason, created_at
@@ -56,7 +68,7 @@ CREATE TABLE messages_old (
     tool_call_id    TEXT,
     finish_reason   TEXT,
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
+) STRICT, WITHOUT ROWID;
 
 INSERT INTO messages_old
 SELECT id, conversation_id, user_id, role, content, tool_calls, tool_call_id, finish_reason, created_at

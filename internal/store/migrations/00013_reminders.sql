@@ -29,14 +29,14 @@ CREATE TABLE reminders (
     due_at         TEXT    NOT NULL,
     rrule          TEXT,
     tz             TEXT    NOT NULL,
-    auto_complete  INTEGER NOT NULL DEFAULT 1,
+    auto_complete  INTEGER NOT NULL DEFAULT 1 CHECK (auto_complete IN (0,1)),
     status         TEXT    NOT NULL DEFAULT 'active',
     completed_at   TEXT,
     last_fired_at  TEXT,
     fire_job_id    TEXT,
     created_at     TEXT    NOT NULL,
     updated_at     TEXT    NOT NULL
-);
+) STRICT, WITHOUT ROWID;
 -- +goose StatementEnd
 
 -- +goose StatementBegin

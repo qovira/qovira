@@ -14,7 +14,7 @@ CREATE TABLE messages (
     tool_call_id    TEXT,                       -- NULL unless role='tool'
     finish_reason   TEXT,                       -- NULL unless role='assistant'
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
+) STRICT, WITHOUT ROWID;
 -- +goose StatementEnd
 
 -- +goose Down

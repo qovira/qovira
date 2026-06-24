@@ -5,6 +5,12 @@
 -- approved|denied|expired) when the user resolves it via POST .../confirmations/{id}.
 -- The ID is the gateway tool call ID (a ULID-shaped string) so it is directly
 -- addressable via the API without a separate lookup.
+--
+-- The composite FOREIGN KEY (conversation_id, user_id) REFERENCES conversations(id,
+-- user_id) mirrors the messages backstop: it enforces at the DB level that a
+-- pending_confirmation row can only be inserted for a conversation owned by the
+-- matching user. The target index conversations_id_user_id was added in migration
+-- 00008 and satisfies the UNIQUE constraint required by SQLite for composite FKs.
 CREATE TABLE pending_confirmations (
     id              TEXT NOT NULL PRIMARY KEY,     -- gateway tool call ID (ULID); API-addressable
     conversation_id TEXT NOT NULL,                 -- references conversations(id) logically
@@ -15,8 +21,9 @@ CREATE TABLE pending_confirmations (
     risk            TEXT NOT NULL,                 -- risk tier string (read|write|external|destructive)
     status          TEXT NOT NULL DEFAULT 'pending',  -- pending|approved|denied|expired
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    expires_at      TEXT NOT NULL                  -- RFC 3339 UTC; set to now+ConfirmationTTL on insert
-);
+    expires_at      TEXT NOT NULL,                 -- RFC 3339 UTC; set to now+ConfirmationTTL on insert
+    FOREIGN KEY (conversation_id, user_id) REFERENCES conversations (id, user_id)
+) STRICT, WITHOUT ROWID;
 -- +goose StatementEnd
 
 -- +goose Down

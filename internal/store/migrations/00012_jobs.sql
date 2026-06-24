@@ -34,7 +34,7 @@ CREATE TABLE jobs (
     last_error     TEXT,
     created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
+) STRICT, WITHOUT ROWID;
 -- +goose StatementEnd
 
 -- +goose StatementBegin

@@ -6,12 +6,12 @@
 -- window) at validation time — no expiry column is needed, so a TTL change requires no
 -- migration.  ON DELETE CASCADE ensures sessions are removed when the owning user is deleted.
 CREATE TABLE sessions (
-  id           TEXT PRIMARY KEY,      -- ULID
+  id           TEXT NOT NULL PRIMARY KEY,  -- ULID
   user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  token_hash   BLOB NOT NULL UNIQUE,  -- sha256(token); the lookup key
-  created_at   TEXT NOT NULL,         -- anchors the absolute cap
-  last_used_at TEXT NOT NULL          -- anchors the sliding idle window
-);
+  token_hash   BLOB NOT NULL UNIQUE,       -- sha256(token); the lookup key
+  created_at   TEXT NOT NULL,              -- anchors the absolute cap
+  last_used_at TEXT NOT NULL               -- anchors the sliding idle window
+) STRICT, WITHOUT ROWID;
 CREATE INDEX sessions_user_id ON sessions(user_id);
 -- +goose StatementEnd
 

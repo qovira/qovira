@@ -11,7 +11,7 @@ CREATE TABLE user_data (
     user_id    TEXT    NOT NULL,
     value      TEXT    NOT NULL,
     created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
+) STRICT;
 -- +goose StatementEnd
 
 -- +goose Down
