@@ -2,7 +2,7 @@ package reminders
 
 // tools.go — AI tool adapters for the reminders module (slice 5).
 //
-// Tools() returns four capability.Tool instances that are thin adapters over the
+// Tools() returns five capability.Tool instances that are thin adapters over the
 // same Service methods used by the REST handlers. This proves one-service-two-surfaces:
 // all validation, fire-job sync, and event emission stay in the Service layer.
 //
@@ -470,10 +470,10 @@ func (m *Module) toolList(ctx context.Context, scope store.Scope, args listRemin
 	// ── Validate and coerce args ─────────────────────────────────────────────
 	status := args.Status
 	if status == "" {
-		status = "active" // default: active
+		status = statusActive // default: active
 	}
 	switch status {
-	case "active", "completed":
+	case statusActive, statusCompleted:
 		// valid
 	default:
 		return nil, &capability.ToolError{

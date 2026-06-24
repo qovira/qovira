@@ -152,6 +152,26 @@ const (
 	listMaxLimit     = 100
 )
 
+// ── Package-level constants ───────────────────────────────────────────────────
+//
+// These correctness-load-bearing strings appear at both the Register call-site
+// and every Enqueue call-site; a single source of truth makes a mismatch a
+// compile-time (renaming) error rather than a silent runtime failure.
+
+const (
+	fireJobKind  = "reminder.fire" // scheduler job kind; must match Register + all Enqueue calls
+	jobKeyPrefix = "reminder:"     // dedup key prefix; must match every Enqueue call
+
+	statusActive    = "active"
+	statusCompleted = "completed"
+
+	eventCreated   = "reminder.created"
+	eventUpdated   = "reminder.updated"
+	eventCompleted = "reminder.completed"
+	eventDeleted   = "reminder.deleted"
+	eventFired     = "reminder.fired"
+)
+
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 // ErrNotFound is returned by Service.Get when the reminder does not exist or
@@ -368,7 +388,7 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 		Rrule:        nullStr(in.Rrule),
 		Tz:           tz,
 		AutoComplete: autoCompleteInt,
-		Status:       "active",
+		Status:       statusActive,
 		CompletedAt:  sql.NullString{},
 		LastFiredAt:  sql.NullString{},
 		FireJobID:    sql.NullString{},
@@ -380,55 +400,18 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 		return Reminder{}, fmt.Errorf("reminders: create insert: %w", err)
 	}
 
-	// ── Enqueue fire-job ─────────────────────────────────────────────────────
-	payload, err := json.Marshal(firePayload{ReminderID: reminderID})
-	if err != nil {
-		// Row was inserted but we cannot build the payload; delete the orphan.
+	// ── Enqueue fire-job and stamp fire_job_id ──────────────────────────────
+	// enqueueFireJobAndStamp handles the Enqueue → SetReminderFireJobID sequence
+	// and best-effort-Cancels the orphaned job on stamp failure. For Create we
+	// additionally delete the row on any failure so no orphan row persists with
+	// no fire_job_id.
+	jobID, enqErr := s.enqueueFireJobAndStamp(ctx, scope, reminderID, dueAtCanon, recurrenceFor(in.Rrule, tz))
+	if enqErr != nil {
 		if delErr := s.deleteReminder(ctx, scope, reminderID); delErr != nil {
-			s.logger.Error("reminders: create: cleanup after marshal failure",
+			s.logger.Error("reminders: create: cleanup row after enqueue+stamp failure",
 				"reminder_id", reminderID, "err", delErr)
 		}
-		return Reminder{}, fmt.Errorf("reminders: marshal fire payload: %w", err)
-	}
-
-	jobID, err := s.prod.Enqueue(ctx, scheduler.EnqueueRequest{
-		Kind:       "reminder.fire",
-		Scope:      scope,
-		RunAt:      dueAtCanon, // canonical truncated instant matches persisted due_at
-		Key:        "reminder:" + reminderID,
-		Payload:    payload,
-		Recurrence: recurrenceFor(in.Rrule, tz),
-	})
-	if err != nil {
-		// Best-effort: delete the orphan row so it doesn't persist with no fire-job.
-		enqErr := fmt.Errorf("reminders: enqueue fire job: %w", err)
-		if delErr := s.deleteReminder(ctx, scope, reminderID); delErr != nil {
-			s.logger.Error("reminders: create: cleanup after enqueue failure",
-				"reminder_id", reminderID, "err", delErr)
-		}
-		return Reminder{}, enqErr
-	}
-
-	// ── Stamp fire_job_id ────────────────────────────────────────────────────
-	_, err = db.New(s.st.Writer()).SetReminderFireJobID(ctx, db.SetReminderFireJobIDParams{
-		FireJobID: sql.NullString{String: jobID, Valid: true},
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		ID:        reminderID,
-		UserID:    scope.UserID(),
-	})
-	if err != nil {
-		// Best-effort: cancel the live job and delete the row to avoid a phantom
-		// job with no fire_job_id on the row (which would block future reschedule/cancel).
-		stampErr := fmt.Errorf("reminders: stamp fire_job_id: %w", err)
-		if cancelErr := s.prod.Cancel(ctx, jobID); cancelErr != nil {
-			s.logger.Error("reminders: create: cancel job after stamp failure",
-				"reminder_id", reminderID, "job_id", jobID, "err", cancelErr)
-		}
-		if delErr := s.deleteReminder(ctx, scope, reminderID); delErr != nil {
-			s.logger.Error("reminders: create: cleanup row after stamp failure",
-				"reminder_id", reminderID, "err", delErr)
-		}
-		return Reminder{}, stampErr
+		return Reminder{}, fmt.Errorf("reminders: create: %w", enqErr)
 	}
 
 	r := Reminder{
@@ -440,7 +423,7 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 		Rrule:        in.Rrule,
 		Tz:           tz,
 		AutoComplete: autoComplete,
-		Status:       "active",
+		Status:       statusActive,
 		FireJobID:    jobID,
 		CreatedAt:    nowStr,
 		UpdatedAt:    nowStr,
@@ -448,7 +431,7 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 
 	// ── Publish reminder.created ─────────────────────────────────────────────
 	s.bus.Publish(scope.UserID(), events.Event{
-		Type: "reminder.created",
+		Type: eventCreated,
 		Data: r,
 	})
 
@@ -637,7 +620,7 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 
 	if in.Status != nil {
 		switch *in.Status {
-		case "active", "completed":
+		case statusActive, statusCompleted:
 			// valid
 		default:
 			fields = append(fields, httpx.FieldError{
@@ -678,7 +661,7 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 		}
 	}
 
-	wasCompleted := row.Status == "completed"
+	wasCompleted := row.Status == statusCompleted
 	prevFireJobID := ""
 	if row.FireJobID.Valid {
 		prevFireJobID = row.FireJobID.String
@@ -728,19 +711,19 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 	reopening := false
 	if in.Status != nil {
 		switch *in.Status {
-		case "completed":
+		case statusCompleted:
 			// Transition to completed: set completed_at if not already set.
 			// The REST adapter routes all PATCH requests (including those that
 			// combine status=completed with other field changes) through Update,
 			// so this branch is the single writer for the active→completed transition.
-			status = "completed"
+			status = statusCompleted
 			if !completedAt.Valid {
 				completedAt = sql.NullString{String: time.Now().UTC().Format(time.RFC3339), Valid: true}
 			}
-		case "active":
+		case statusActive:
 			if wasCompleted {
 				// Re-open path: clear completed_at and enqueue a fresh job.
-				status = "active"
+				status = statusActive
 				completedAt = sql.NullString{}
 				reopening = true
 			}
@@ -753,7 +736,7 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 	if reopening {
 		// Clear it now; we'll stamp after Enqueue below.
 		fireJobID = sql.NullString{}
-	} else if status == "completed" && !wasCompleted {
+	} else if status == statusCompleted && !wasCompleted {
 		// Completing via Update — cancel the job and clear.
 		if prevFireJobID != "" {
 			if cancelErr := s.prod.Cancel(ctx, prevFireJobID); cancelErr != nil {
@@ -799,58 +782,55 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 	case reopening:
 		// Re-open: enqueue a fresh one-shot fire-job (same shape as Create).
 		dueAtCanon, _ := time.Parse(time.RFC3339, dueAtStr)
-		payload, marshalErr := json.Marshal(firePayload{ReminderID: id})
-		if marshalErr != nil {
-			s.logger.Error("reminders: update: marshal reopen payload", "reminder_id", id, "err", marshalErr)
-		} else {
-			newJobID, enqErr := s.prod.Enqueue(ctx, scheduler.EnqueueRequest{
-				Kind:    "reminder.fire",
-				Scope:   scope,
-				RunAt:   dueAtCanon,
-				Key:     "reminder:" + id,
-				Payload: payload,
-			})
-			if enqErr != nil {
-				s.logger.Error("reminders: update: enqueue reopen fire-job",
-					"reminder_id", id, "err", enqErr)
-			} else {
-				// Stamp the new fire_job_id onto the row.
-				_, stampErr := db.New(s.st.Writer()).SetReminderFireJobID(ctx, db.SetReminderFireJobIDParams{
-					FireJobID: sql.NullString{String: newJobID, Valid: true},
-					UpdatedAt: time.Now().UTC().Format(time.RFC3339),
-					ID:        id,
-					UserID:    scope.UserID(),
-				})
-				if stampErr != nil {
-					s.logger.Error("reminders: update: stamp reopen fire_job_id",
-						"reminder_id", id, "job_id", newJobID, "err", stampErr)
-					// Best-effort cancel so the job doesn't orphan.
-					if cancelErr := s.prod.Cancel(ctx, newJobID); cancelErr != nil {
-						s.logger.Error("reminders: update: cancel orphaned reopen job",
-							"reminder_id", id, "job_id", newJobID, "err", cancelErr)
-					}
+		if _, enqErr := s.enqueueFireJobAndStamp(ctx, scope, id, dueAtCanon, nil); enqErr != nil {
+			s.logger.Error("reminders: update: reopen enqueue+stamp",
+				"reminder_id", id, "err", enqErr)
+		}
+		// The reload below picks up the stamped fire_job_id.
+
+	case !newDueAt.IsZero() && prevFireJobID != "" && status == statusActive && !rrule.Valid && !rruleChanged:
+		// Pure dueAt time-shift on an active ONE-SHOT reminder with no rrule change:
+		// Reschedule the existing job.
+		//
+		// The !rruleChanged guard is critical: a PATCH that simultaneously clears the
+		// rrule (rruleChanged=true, rrule.Valid now false) AND shifts dueAt must NOT
+		// match here — it must fall through to syncFireJobForRecurrenceChange below,
+		// which Cancels the old recurring job and Enqueues a fresh one-shot job.
+		// Without this guard the dueAt-shift case would match first (because !rrule.Valid
+		// is now true after the clear), calling Reschedule instead of Cancel+re-enqueue
+		// and leaving the scheduler job's rrule columns intact while the reminder is
+		// now one-shot.
+		//
+		// For RECURRING reminders where only dueAt changes (rrule unchanged), a dueAt
+		// shift also changes the RRULE anchor — that path is covered by the
+		// rruleChanged/rrule.Valid case below.
+		//
+		// ErrJobNotFound fallback (keep-active one-shot): after a keep-active fire the
+		// scheduler deletes the job but StampFiredKeepActive keeps the reminder active
+		// with its old fire_job_id. Reschedule returns ErrJobNotFound for the gone job;
+		// we fall back to Enqueue+stamp so the reminder will fire at the new dueAt.
+		reschedErr := s.prod.Reschedule(ctx, prevFireJobID, newDueAt)
+		if reschedErr != nil {
+			if errors.Is(reschedErr, scheduler.ErrJobNotFound) {
+				// Job is gone (fired keep-active one-shot or otherwise deleted).
+				// Fall back to Enqueue+stamp so the reminder can fire again.
+				if _, fbErr := s.enqueueFireJobAndStamp(ctx, scope, id, newDueAt, nil); fbErr != nil {
+					s.logger.Error("reminders: update: ErrJobNotFound fallback enqueue",
+						"reminder_id", id, "err", fbErr)
 				}
-				// The reload below picks up the stamped fire_job_id.
+			} else {
+				s.logger.Error("reminders: update: reschedule fire-job",
+					"reminder_id", id, "job_id", prevFireJobID, "err", reschedErr)
 			}
 		}
 
-	case !newDueAt.IsZero() && prevFireJobID != "" && status == "active" && !rrule.Valid:
-		// Pure dueAt time-shift on an active ONE-SHOT reminder: Reschedule the existing job.
-		// For RECURRING reminders, a dueAt shift also changes the anchor for the RRULE
-		// engine — cancel and re-enqueue so the scheduler's recurrence columns stay
-		// consistent with the new anchor. That path is handled by the rruleChanged case
-		// below (or the combined-change fallthrough when both change at once).
-		if reschedErr := s.prod.Reschedule(ctx, prevFireJobID, newDueAt); reschedErr != nil {
-			s.logger.Error("reminders: update: reschedule fire-job",
-				"reminder_id", id, "job_id", prevFireJobID, "err", reschedErr)
-		}
-
-	case status == "active" &&
+	case status == statusActive &&
 		((!newDueAt.IsZero() && rrule.Valid && prevFireJobID != "") ||
 			(rruleChanged && prevFireJobID != "")):
-		// Recurrence-affecting change on an ACTIVE reminder: either rrule changed,
-		// or dueAt shifted on a recurring reminder (which changes the RRULE anchor).
-		// Cancel the old job and enqueue a fresh one with the correct Recurrence field.
+		// Recurrence-affecting change on an ACTIVE reminder: either rrule changed
+		// (including being cleared — rruleChanged covers clearing to ""), or dueAt
+		// shifted on a recurring reminder (which changes the RRULE anchor). Cancel
+		// the old job and enqueue a fresh one with the correct Recurrence field.
 		// Non-active reminders must not have a live fire-job re-enqueued here; the
 		// reopen path (above) handles the active transition separately.
 		s.syncFireJobForRecurrenceChange(ctx, scope, id, prevFireJobID, dueAtStr, rrule, row.Tz)
@@ -866,13 +846,13 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 	//   active → completed  → "reminder.completed"
 	//   completed → active  → "reminder.updated"  (reopen)
 	//   no status change    → "reminder.updated"  (plain field update)
-	eventType := "reminder.updated"
-	if !wasCompleted && status == "completed" {
-		eventType = "reminder.completed"
+	evtType := eventUpdated
+	if !wasCompleted && status == statusCompleted {
+		evtType = eventCompleted
 	}
 
 	s.bus.Publish(scope.UserID(), events.Event{
-		Type: eventType,
+		Type: evtType,
 		Data: final,
 	})
 
@@ -912,48 +892,76 @@ func (s *Service) syncFireJobForRecurrenceChange(
 		return
 	}
 
-	payload, err := json.Marshal(firePayload{ReminderID: reminderID})
-	if err != nil {
-		s.logger.Error("reminders: syncFireJobForRecurrenceChange: marshal payload",
-			"reminder_id", reminderID, "err", err)
-		return
-	}
-
 	var recurrence *scheduler.Recurrence
 	if newRrule.Valid && newRrule.String != "" {
 		recurrence = recurrenceFor(newRrule.String, tz)
 	}
 
+	// Enqueue the new job (recurring or one-shot per the new rrule) and stamp
+	// fire_job_id. The old-job Cancel above is unique to this call site and is
+	// not part of the shared enqueueFireJobAndStamp helper.
+	if _, err := s.enqueueFireJobAndStamp(ctx, scope, reminderID, dueAtCanon, recurrence); err != nil {
+		s.logger.Error("reminders: syncFireJobForRecurrenceChange: enqueue+stamp",
+			"reminder_id", reminderID, "err", err)
+	}
+}
+
+// enqueueFireJobAndStamp enqueues a reminder.fire job for reminderID at runAt
+// with the given recurrence (nil for a one-shot job), then stamps fire_job_id
+// on the row via SetReminderFireJobID. On stamp failure it best-effort-Cancels
+// the orphaned job so it doesn't accumulate in the scheduler.
+//
+// Returns the new job ID on success so callers can include it in an in-memory
+// response without a second DB read.
+//
+// This helper centralises the open-coded enqueue+stamp+compensate sequence that
+// appears in Create, the Update re-open branch, syncFireJobForRecurrenceChange,
+// and the ErrJobNotFound fallback in the dueAt-shift branch. Callers are
+// responsible for any preceding Cancel of an old job.
+//
+// Returned errors are the raw marshal/Enqueue/stamp failures; the caller decides
+// whether to propagate them (Create) or log+swallow them (Update paths).
+func (s *Service) enqueueFireJobAndStamp(
+	ctx context.Context,
+	scope store.Scope,
+	reminderID string,
+	runAt time.Time,
+	recurrence *scheduler.Recurrence,
+) (string, error) {
+	payload, err := json.Marshal(firePayload{ReminderID: reminderID})
+	if err != nil {
+		return "", fmt.Errorf("reminders: enqueueFireJobAndStamp: marshal payload: %w", err)
+	}
+
 	newJobID, err := s.prod.Enqueue(ctx, scheduler.EnqueueRequest{
-		Kind:       "reminder.fire",
+		Kind:       fireJobKind,
 		Scope:      scope,
-		RunAt:      dueAtCanon,
-		Key:        "reminder:" + reminderID,
+		RunAt:      runAt,
+		Key:        jobKeyPrefix + reminderID,
 		Payload:    payload,
 		Recurrence: recurrence,
 	})
 	if err != nil {
-		s.logger.Error("reminders: syncFireJobForRecurrenceChange: enqueue new job",
-			"reminder_id", reminderID, "err", err)
-		return
+		return "", fmt.Errorf("reminders: enqueueFireJobAndStamp: enqueue job: %w", err)
 	}
 
-	// Stamp the new fire_job_id. The Service is the sole writer of this column.
-	_, err = db.New(s.st.Writer()).SetReminderFireJobID(ctx, db.SetReminderFireJobIDParams{
+	// Stamp the new fire_job_id. Service is the sole writer of this column.
+	_, stampErr := db.New(s.st.Writer()).SetReminderFireJobID(ctx, db.SetReminderFireJobIDParams{
 		FireJobID: sql.NullString{String: newJobID, Valid: true},
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 		ID:        reminderID,
 		UserID:    scope.UserID(),
 	})
-	if err != nil {
-		s.logger.Error("reminders: syncFireJobForRecurrenceChange: stamp fire_job_id",
-			"reminder_id", reminderID, "job_id", newJobID, "err", err)
-		// Best-effort cancel the orphaned job.
+	if stampErr != nil {
+		// Best-effort cancel the orphaned job so it doesn't fire for a row that
+		// has no fire_job_id pointing at it.
 		if cancelErr := s.prod.Cancel(ctx, newJobID); cancelErr != nil {
-			s.logger.Error("reminders: syncFireJobForRecurrenceChange: cancel orphaned job",
+			s.logger.Error("reminders: enqueueFireJobAndStamp: cancel orphaned job",
 				"reminder_id", reminderID, "job_id", newJobID, "err", cancelErr)
 		}
+		return "", fmt.Errorf("reminders: enqueueFireJobAndStamp: stamp fire_job_id: %w", stampErr)
 	}
+	return newJobID, nil
 }
 
 // Complete marks the reminder as completed, cancels the active fire-job (if
@@ -992,7 +1000,7 @@ func (s *Service) Complete(ctx context.Context, scope store.Scope, id string) (R
 		DueAt:        row.DueAt,
 		Rrule:        row.Rrule,
 		AutoComplete: row.AutoComplete,
-		Status:       "completed",
+		Status:       statusCompleted,
 		CompletedAt:  completedAt,
 		FireJobID:    sql.NullString{}, // cleared
 		UpdatedAt:    now,
@@ -1013,7 +1021,7 @@ func (s *Service) Complete(ctx context.Context, scope store.Scope, id string) (R
 	}
 
 	s.bus.Publish(scope.UserID(), events.Event{
-		Type: "reminder.completed",
+		Type: eventCompleted,
 		Data: final,
 	})
 
@@ -1058,7 +1066,7 @@ func (s *Service) Delete(ctx context.Context, scope store.Scope, id string) erro
 	}
 
 	s.bus.Publish(scope.UserID(), events.Event{
-		Type: "reminder.deleted",
+		Type: eventDeleted,
 		Data: snapshot,
 	})
 
@@ -1096,7 +1104,7 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 	// reminder reached a terminal state (at-least-once reclaim, or a finite
 	// series that just exhausted on the previous run). Return nil — do NOT
 	// dead-letter, so the scheduler can clean up the job normally.
-	if row.Status != "active" {
+	if row.Status != statusActive {
 		s.logger.Info("reminders: fire: reminder no longer active — skipping",
 			"reminder_id", p.ReminderID, "status", row.Status)
 		return nil
@@ -1105,9 +1113,12 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 
-	// Publish reminder.fired fat event.
+	// Publish reminder.fired thin event before any stamp so that clients see the
+	// notification even if the subsequent stamp fails transiently. The thin event
+	// carries only the reminder id, title, dueAt, and firedAt — enough for a
+	// notification surface without a follow-up fetch.
 	s.bus.Publish(job.Scope.UserID(), events.Event{
-		Type: "reminder.fired",
+		Type: eventFired,
 		Data: FiredEventPayload{
 			ReminderID: row.ID,
 			Title:      row.Title,
@@ -1152,34 +1163,49 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 			// distinct from a user-initiated completion: the series simply ran out.
 			s.logger.Info("reminders: fire: recurrence series exhausted — completing reminder",
 				"reminder_id", row.ID, "rrule", row.Rrule.String, "last_fired_at", nowStr)
-			_, err = db.New(s.st.Writer()).StampFiredAutoComplete(ctx, db.StampFiredAutoCompleteParams{
+			n, stampErr := db.New(s.st.Writer()).StampFiredAutoComplete(ctx, db.StampFiredAutoCompleteParams{
 				LastFiredAt: sql.NullString{String: nowStr, Valid: true},
 				CompletedAt: sql.NullString{String: nowStr, Valid: true},
 				UpdatedAt:   nowStr,
 				ID:          row.ID,
 				UserID:      job.Scope.UserID(),
 			})
-			if err != nil {
-				return fmt.Errorf("reminders: fire: stamp exhausted recurring: %w", err)
+			if stampErr != nil {
+				return fmt.Errorf("reminders: fire: stamp exhausted recurring: %w", stampErr)
+			}
+			if n == 0 {
+				// Row was deleted between the status gate and this stamp (TOCTOU).
+				// The reminder.fired thin event was already published above; log and
+				// return nil so the scheduler does not retry a non-existent row.
+				s.logger.Warn("reminders: fire: stamp exhausted recurring: 0 rows (reminder gone)",
+					"reminder_id", row.ID)
+				return nil
 			}
 			// Emit fat reminder.completed so every surface reflects the terminal state.
-			s.publishFiredState(ctx, job.Scope, row.ID, "reminder.completed")
+			s.publishFiredState(ctx, job.Scope, row.ID, eventCompleted)
 			return nil
 		}
 
 		nextStr := next.UTC().Format(time.RFC3339)
-		_, err = db.New(s.st.Writer()).StampFiredRecurring(ctx, db.StampFiredRecurringParams{
+		n, stampErr := db.New(s.st.Writer()).StampFiredRecurring(ctx, db.StampFiredRecurringParams{
 			LastFiredAt: sql.NullString{String: nowStr, Valid: true},
 			DueAt:       nextStr,
 			UpdatedAt:   nowStr,
 			ID:          row.ID,
 			UserID:      job.Scope.UserID(),
 		})
-		if err != nil {
-			return fmt.Errorf("reminders: fire: stamp recurring: %w", err)
+		if stampErr != nil {
+			return fmt.Errorf("reminders: fire: stamp recurring: %w", stampErr)
+		}
+		if n == 0 {
+			// Row was deleted between the status gate and this stamp (TOCTOU).
+			// Return nil — do not advance the scheduler job for a gone reminder.
+			s.logger.Warn("reminders: fire: stamp recurring: 0 rows (reminder gone)",
+				"reminder_id", row.ID)
+			return nil
 		}
 		// Emit fat reminder.updated with the advanced due_at so clients reflect the new state.
-		s.publishFiredState(ctx, job.Scope, row.ID, "reminder.updated")
+		s.publishFiredState(ctx, job.Scope, row.ID, eventUpdated)
 		// Return nil so the scheduler advances the recurring job to the next occurrence.
 		return nil
 	}
@@ -1187,8 +1213,9 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 	// ── One-shot branch ──────────────────────────────────────────────────────
 	// Stamp last_fired_at and optionally auto-complete, then emit the matching
 	// fat domain event so clients reflect the new state without a refetch.
+	var n int64
 	if row.AutoComplete == 1 {
-		_, err = db.New(s.st.Writer()).StampFiredAutoComplete(ctx, db.StampFiredAutoCompleteParams{
+		n, err = db.New(s.st.Writer()).StampFiredAutoComplete(ctx, db.StampFiredAutoCompleteParams{
 			LastFiredAt: sql.NullString{String: nowStr, Valid: true},
 			CompletedAt: sql.NullString{String: nowStr, Valid: true},
 			UpdatedAt:   nowStr,
@@ -1196,7 +1223,7 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 			UserID:      job.Scope.UserID(),
 		})
 	} else {
-		_, err = db.New(s.st.Writer()).StampFiredKeepActive(ctx, db.StampFiredKeepActiveParams{
+		n, err = db.New(s.st.Writer()).StampFiredKeepActive(ctx, db.StampFiredKeepActiveParams{
 			LastFiredAt: sql.NullString{String: nowStr, Valid: true},
 			UpdatedAt:   nowStr,
 			ID:          row.ID,
@@ -1206,14 +1233,21 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 	if err != nil {
 		return fmt.Errorf("reminders: fire: stamp fired: %w", err)
 	}
+	if n == 0 {
+		// Row was deleted between the status gate and this stamp (TOCTOU).
+		// Return nil — the reminder.fired thin event was already published above.
+		s.logger.Warn("reminders: fire: stamp one-shot: 0 rows (reminder gone)",
+			"reminder_id", row.ID)
+		return nil
+	}
 
 	// Emit the fat post-stamp event, mirroring the event type emitted by Update/Complete.
 	// auto_complete=true → "reminder.completed"; auto_complete=false → "reminder.updated".
-	firedEventType := "reminder.updated"
+	firedEvtType := eventUpdated
 	if row.AutoComplete == 1 {
-		firedEventType = "reminder.completed"
+		firedEvtType = eventCompleted
 	}
-	s.publishFiredState(ctx, job.Scope, row.ID, firedEventType)
+	s.publishFiredState(ctx, job.Scope, row.ID, firedEvtType)
 
 	return nil
 }
@@ -1367,23 +1401,31 @@ type Module struct {
 	logger *slog.Logger
 }
 
-// New constructs a Module, registers the "reminder.fire" handler on reg, and
+// New constructs a Module, registers the fireJobKind handler on reg, and
 // returns the Module. reg must be the concrete scheduler; it is used only for
 // handler registration.
 //
+// logger is optional: when nil, slog.Default() is used (mirroring the
+// authhttp/httpx nil-fallback pattern). Pass the app logger at the call site
+// so structured log records carry the same handler and attributes as the rest
+// of the app.
+//
 // Call New before scheduler.Start so the handler is visible on the first tick.
-func New(st *store.Store, prod Producer, bus events.Publisher, reg Registrar) *Module {
+func New(st *store.Store, prod Producer, bus events.Publisher, reg Registrar, logger *slog.Logger) *Module {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	svc := &Service{
 		st:     st,
 		prod:   prod,
 		bus:    bus,
-		logger: slog.Default(),
+		logger: logger,
 	}
 
 	// Register the fire handler before Start is called.
-	reg.Register("reminder.fire", svc.handleFire)
+	reg.Register(fireJobKind, svc.handleFire)
 
-	return &Module{svc: svc, logger: slog.Default()}
+	return &Module{svc: svc, logger: logger}
 }
 
 // Service returns the underlying Service for direct use in tests or wiring.
@@ -1572,7 +1614,7 @@ func (m *Module) listHandler(w http.ResponseWriter, r *http.Request) {
 
 	// ── status ───────────────────────────────────────────────────────────────
 	status := q.Get("status")
-	if status != "" && status != "active" && status != "completed" {
+	if status != "" && status != statusActive && status != statusCompleted {
 		httpx.WriteProblem(w, r, httpx.ValidationProblem(
 			"validation_error",
 			"Request validation failed.",

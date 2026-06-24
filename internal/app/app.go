@@ -257,7 +257,7 @@ func New(
 	// Step 10b: construct the reminders module and mount its routes. reminders.New
 	// registers the "reminder.fire" handler on sched before Start is called (step 13),
 	// satisfying the invariant that all handlers are registered before the first tick.
-	remMod := reminders.New(s, sched, bus, sched)
+	remMod := reminders.New(s, sched, bus, sched, logger)
 	remMod.Routes(router)
 	if err := reg.Add(remMod); err != nil {
 		return nil, fmt.Errorf("app: register %s tools: %w", remMod.Name(), err)

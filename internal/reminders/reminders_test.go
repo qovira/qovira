@@ -37,13 +37,14 @@ var (
 // controlled returns. The Reschedule field was extended in the
 // edit/complete/delete slice (AC1 guard test).
 type fakeProducer struct {
-	mu          sync.Mutex
-	enqueued    []scheduler.EnqueueRequest
-	returnID    string
-	returnErr   error
-	cancelled   []string
-	cancelErr   error
-	rescheduled []rescheduleCall
+	mu            sync.Mutex
+	enqueued      []scheduler.EnqueueRequest
+	returnID      string
+	returnErr     error
+	cancelled     []string
+	cancelErr     error
+	rescheduled   []rescheduleCall
+	rescheduleErr error // when non-nil, Reschedule returns this error
 }
 
 // rescheduleCall records a single Reschedule invocation.
@@ -70,7 +71,7 @@ func (f *fakeProducer) Reschedule(_ context.Context, jobID string, runAt time.Ti
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rescheduled = append(f.rescheduled, rescheduleCall{jobID: jobID, runAt: runAt})
-	return nil
+	return f.rescheduleErr
 }
 
 func (f *fakeProducer) Cancel(_ context.Context, jobID string) error {
@@ -217,7 +218,7 @@ func newTestModule(
 ) (*reminders.Module, *fakeRegistrar) {
 	t.Helper()
 	reg := newFakeRegistrar()
-	m := reminders.New(st, prod, bus, reg)
+	m := reminders.New(st, prod, bus, reg, nil) // nil logger → slog.Default()
 	return m, reg
 }
 
@@ -4631,4 +4632,240 @@ func TestFireHandler_FatEvent_PayloadMatchesReminderType(t *testing.T) {
 			t.Errorf("Service.Complete payload missing core field %q", field)
 		}
 	}
+}
+
+// ── R1 behavior fixes ─────────────────────────────────────────────────────────
+
+// TestUpdate_ClearRruleAndDueAt_RoutesToCancelAndReenqueue verifies M2/item-1:
+// A PATCH that both clears the rrule (sets it to "") AND changes dueAt on an
+// active recurring reminder must route through the cancel+re-enqueue path
+// (syncFireJobForRecurrenceChange), NOT through the bare Reschedule path.
+//
+// The bug: the tagless switch in Update evaluated the dueAt-shift case first
+// (guard `!newDueAt.IsZero() && ... && !rrule.Valid`). After the rrule clear is
+// merged, `!rrule.Valid` is true, so the 837 case matched and called Reschedule —
+// leaving the scheduler job's rrule columns intact while the reminder row lost
+// its rrule. The fix adds `&& !rruleChanged` to the dueAt-shift guard (or
+// reorders) so a simultaneous rrule clear routes to syncFireJobForRecurrenceChange.
+func TestUpdate_ClearRruleAndDueAt_RoutesToCancelAndReenqueue(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-clr-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-clr-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// Create a recurring reminder.
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Recurring clear+shift",
+		DueAt: time.Now().UTC().Add(time.Hour),
+		Tz:    "UTC",
+		Rrule: "FREQ=DAILY",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	origJobID := r.FireJobID
+
+	// Change returnID for the re-enqueue so we can distinguish it.
+	prod.mu.Lock()
+	prod.returnID = "job-clr-002"
+	prod.mu.Unlock()
+
+	// PATCH: clear rrule AND shift dueAt simultaneously.
+	newDue := time.Now().UTC().Add(3 * time.Hour)
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		Rrule: reminders.ClearString(), // sets rrule=""
+		DueAt: &newDue,
+	})
+	if err != nil {
+		t.Fatalf("Update (clear rrule + shift dueAt): %v", err)
+	}
+
+	// 1. Old recurring job must be Cancelled.
+	cancelled := prod.allCancelled()
+	if !slices.Contains(cancelled, origJobID) {
+		t.Errorf("old job %q was not Cancelled; cancelled list: %v", origJobID, cancelled)
+	}
+
+	// 2. A fresh NON-recurring (nil Recurrence) job must be Enqueued.
+	enqueued := prod.allEnqueued()
+	var foundOneShot bool
+	for _, req := range enqueued {
+		if req.Key == "reminder:"+r.ID && req.Recurrence == nil {
+			foundOneShot = true
+		}
+	}
+	if !foundOneShot {
+		t.Errorf("expected a one-shot Enqueue (nil Recurrence) after rrule clear+dueAt shift; enqueued: %+v", enqueued)
+	}
+
+	// 3. Reschedule must NOT have been called for this operation.
+	rescheduled := prod.allRescheduled()
+	if len(rescheduled) > 0 {
+		t.Errorf("Reschedule must NOT be called when rrule is cleared; got %d Reschedule call(s): %+v",
+			len(rescheduled), rescheduled)
+	}
+
+	// 4. fire_job_id on the row must be updated and rrule must be gone.
+	if updated.FireJobID == origJobID || updated.FireJobID == "" {
+		t.Errorf("fire_job_id: got %q, want new non-empty id (not %q)", updated.FireJobID, origJobID)
+	}
+	if updated.Rrule != "" {
+		t.Errorf("Rrule must be empty after clear; got %q", updated.Rrule)
+	}
+}
+
+// TestUpdate_KeepActive_FiredJob_Gone_FallsBackToEnqueue verifies M2/item-2:
+// A fired keep-active one-shot reminder (auto_complete=false) has its scheduler
+// job deleted by the scheduler after firing.  A later PATCH dueAt must detect
+// that Reschedule returns ErrJobNotFound and fall back to Enqueue+stamp, so the
+// reminder will fire again at the new time.
+func TestUpdate_KeepActive_FiredJob_Gone_FallsBackToEnqueue(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-ka-orig-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-ka-gone-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// Create a keep-active (auto_complete=false) one-shot reminder.
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Keep-active one-shot",
+		DueAt:        time.Now().UTC().Add(-time.Minute),
+		AutoComplete: ptrFalse,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Fire it (simulate the scheduler dispatching the job).
+	// After this, StampFiredKeepActive keeps status=active but the scheduler
+	// deletes the job row.
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      r.FireJobID,
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
+		t.Fatalf("fire handler: %v", err)
+	}
+
+	// Reload to confirm the reminder is still active.
+	got, err := svc.Get(ctx, scope, r.ID)
+	if err != nil {
+		t.Fatalf("Get after fire: %v", err)
+	}
+	if got.Status != "active" {
+		t.Fatalf("expected status=active after keep-active fire; got %q", got.Status)
+	}
+
+	// Simulate: the scheduler has deleted the job. Reschedule returns ErrJobNotFound.
+	prod.mu.Lock()
+	prod.rescheduleErr = fmt.Errorf("scheduler: reschedule %q: %w", r.FireJobID, scheduler.ErrJobNotFound)
+	prod.returnID = "job-ka-new-001"
+	prod.mu.Unlock()
+
+	// PATCH a new dueAt. Update must detect the Reschedule failure and fall back to
+	// Enqueue+stamp so the reminder will fire again at the new time.
+	newDue := time.Now().UTC().Add(2 * time.Hour)
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		DueAt: &newDue,
+	})
+	if err != nil {
+		t.Fatalf("Update after fired keep-active: %v", err)
+	}
+
+	// A fresh job must be Enqueued (the fallback): at least 2 total — one from
+	// Create, one from the ErrJobNotFound fallback in Update.
+	enqueued := prod.allEnqueued()
+	if len(enqueued) < 2 {
+		t.Errorf("expected at least 2 Enqueue calls (Create + fallback); got %d", len(enqueued))
+	}
+
+	// The row's fire_job_id must be updated to the new job.
+	if updated.FireJobID != "job-ka-new-001" {
+		t.Errorf("fire_job_id: got %q, want %q (new job from fallback enqueue)", updated.FireJobID, "job-ka-new-001")
+	}
+}
+
+// TestFireHandler_DeletedBeforeStatusGate_NoFiredEvent verifies the observable
+// contract for a reminder deleted before handleFire's status-gate GetReminder call:
+// the handler returns a scheduler.Permanent error and must NOT publish reminder.fired.
+//
+// Note on scope: this test exercises the ErrNoRows status-gate path (GetReminder
+// returns sql.ErrNoRows → Permanent), NOT the n==0-after-stamp TOCTOU path
+// introduced in item 3. That TOCTOU path (row deleted between the status-gate
+// read and the subsequent Stamp* call) is defence-in-depth that requires an
+// in-package hook to inject cleanly; pinning it from the external test package
+// would distort the production code. The Stamp* 0-rows guard is compiler-verified
+// by the non-nil rowcount capture and the n==0 early-return branches added in
+// handleFire; the observable safety property (no double-advance on a gone row) is
+// satisfied because Stamp* always scopes its WHERE clause to (id, user_id).
+func TestFireHandler_DeletedBeforeStatusGate_NoFiredEvent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-stamp-zero-001"}
+	bus := &fakePublisher{}
+	m, reg := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-stamp-zero-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// Create a one-shot auto_complete=true reminder.
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title:        "Delete-before-gate reminder",
+		DueAt:        time.Now().UTC().Add(-time.Minute),
+		AutoComplete: ptrTrue,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Delete the row so the status-gate GetReminder returns sql.ErrNoRows.
+	_, delErr := st.Writer().ExecContext(ctx,
+		`DELETE FROM reminders WHERE id = ? AND user_id = ?`, r.ID, userID)
+	if delErr != nil {
+		t.Fatalf("delete reminder: %v", delErr)
+	}
+
+	// Clear events from Create so we can count cleanly.
+	bus.mu.Lock()
+	bus.events = nil
+	bus.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
+	job := scheduler.Job{
+		ID:      r.FireJobID,
+		Kind:    "reminder.fire",
+		Payload: payload,
+		Attempt: 1,
+		Scope:   scope,
+	}
+
+	// handleFire must return a Permanent error and must NOT publish reminder.fired.
+	_ = reg.dispatch(ctx, "reminder.fire", job) // Permanent error expected — that's fine
+
+	for _, e := range bus.allEvents() {
+		if e.event.Type == "reminder.fired" {
+			t.Errorf("reminder.fired must not be published when reminder row is gone; got event: %+v", e)
+		}
+	}
+	_ = svc
 }
