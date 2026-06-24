@@ -29,7 +29,7 @@ func TestScopeGuard_RealQueries(t *testing.T) {
 	if len(violations) > 0 {
 		t.Errorf("scope guard found %d violation(s) in shipped queries — every SELECT/UPDATE/DELETE on a user-owned table must include a user_id predicate:", len(violations))
 		for _, v := range violations {
-			t.Errorf("  file=%s query=%s", v.File, v.QueryName)
+			t.Errorf("  file=%s query=%s reason=%s", v.File, v.QueryName, v.Reason)
 		}
 	}
 }
@@ -63,10 +63,11 @@ func TestScopeGuard_Fixtures(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		sql       string
-		wantViol  bool   // whether a violation is expected
-		wantQuery string // query name expected in violation (only checked when wantViol=true)
+		name           string
+		sql            string
+		wantViol       bool   // whether a violation is expected
+		wantQuery      string // query name expected in violation (only checked when wantViol=true)
+		wantReasonFill bool   // when true, the matched violation must have a non-empty Reason
 	}{
 		// ----------------------------------------------------------------
 		// Happy-path / allowlisted cases — must NOT produce violations.
@@ -348,6 +349,195 @@ SELECT i.id FROM items i JOIN audit a ON i.id = a.item_id WHERE a.user_id = ?;
 			wantViol:  true,
 			wantQuery: "JoinedItems",
 		},
+
+		// ----------------------------------------------------------------
+		// Finding 1: comma cross-join — must fail closed (target unscoped).
+		// ----------------------------------------------------------------
+		{
+			name: "select_comma_join_unscoped_target",
+			// Old-style comma cross-join: items,audit. Target (items) has no
+			// user_id predicate; the bare user_id resolves to audit.user_id.
+			// Guard must reject this just as it rejects a JOIN keyword.
+			sql: `-- name: CommaJoin :many
+SELECT id FROM items, audit WHERE user_id = ?;
+`,
+			wantViol:  true,
+			wantQuery: "CommaJoin",
+		},
+		{
+			name: "delete_comma_join_unscoped_target",
+			sql: `-- name: DeleteCommaJoin :exec
+DELETE FROM items WHERE id IN (SELECT id FROM items, perms WHERE user_id = ?);
+`,
+			wantViol:  true,
+			wantQuery: "DeleteCommaJoin",
+		},
+
+		// ----------------------------------------------------------------
+		// Finding 2: scalar subquery with newline after paren in UPDATE/DELETE.
+		// ----------------------------------------------------------------
+		{
+			name: "update_scalar_subquery_newline",
+			// UPDATE with "= (\n  SELECT …)" — hasSubquery must catch this.
+			// items is unscoped; user_id only appears in the subquery.
+			sql: `-- name: UpdateScalarSub :exec
+UPDATE items SET x = (
+  SELECT y FROM other WHERE user_id = ?) WHERE id = @id;
+`,
+			wantViol:  true,
+			wantQuery: "UpdateScalarSub",
+		},
+		{
+			name: "delete_scalar_subquery_newline",
+			sql: `-- name: DeleteScalarSub :exec
+DELETE FROM items WHERE id = (
+  SELECT id FROM perms WHERE user_id = ?);
+`,
+			wantViol:  true,
+			wantQuery: "DeleteScalarSub",
+		},
+
+		// ----------------------------------------------------------------
+		// Finding 3: top-level OR disjunction makes user_id non-constraining.
+		// ----------------------------------------------------------------
+		{
+			name: "select_top_level_or_with_user_id",
+			// WHERE id = @id OR user_id = @x — the OR means the predicate
+			// returns rows regardless of user ownership; must fail closed.
+			sql: `-- name: OrDisjunction :many
+SELECT id FROM items WHERE id = @id OR user_id = @user_id;
+`,
+			wantViol:  true,
+			wantQuery: "OrDisjunction",
+		},
+		{
+			name: "select_user_id_bare_token_in_expression",
+			// user_id inside COALESCE — not an equality predicate; must flag.
+			sql: `-- name: CoalesceUID :many
+SELECT id FROM items WHERE COALESCE(user_id, '') = '' AND id = @id;
+`,
+			wantViol:  true,
+			wantQuery: "CoalesceUID",
+		},
+		{
+			// Safe: OR is inside parentheses AND'd with the user_id predicate,
+			// so user_id is still required for every returned row.
+			name: "select_or_inside_parens_and_with_user_id",
+			sql: `-- name: ParenOr :many
+SELECT id FROM items
+WHERE user_id = @user_id
+  AND (status IS NULL OR status = @status);
+`,
+			wantViol: false,
+		},
+
+		// ----------------------------------------------------------------
+		// Finding 4: Reason field populated — violation must carry a non-empty
+		// Reason so the CI diagnostic is load-bearing, not dropped.
+		// ----------------------------------------------------------------
+		{
+			name: "violation_reason_populated",
+			// Any simple violation suffices; we check v.Reason is non-empty.
+			sql: `-- name: MissingUID :many
+SELECT id FROM items WHERE status = 'active';
+`,
+			wantViol:       true,
+			wantQuery:      "MissingUID",
+			wantReasonFill: true,
+		},
+
+		// ----------------------------------------------------------------
+		// Finding 6: allow-unscoped bypass — fully tested for correctness,
+		// off-by-one typo, and proof that the annotation suppressed the flag.
+		// ----------------------------------------------------------------
+		{
+			// (a) With valid annotation: must NOT produce a violation.
+			name: "allow_unscoped_annotation_suppresses_join",
+			sql: `-- name: ReviewedJoin :many
+-- scopeguard:allow-unscoped: reviewed — this JOIN is safe because both tables
+-- are independently user-scoped in the application layer.
+SELECT items.id FROM items JOIN audit ON items.id = audit.item_id WHERE audit.user_id = ?;
+`,
+			wantViol: false,
+		},
+		{
+			// (b) Same query WITHOUT annotation: must produce a violation,
+			// proving the annotation is what suppressed it.
+			name: "allow_unscoped_absent_still_flags_join",
+			sql: `-- name: UnannotatedJoin :many
+SELECT items.id FROM items JOIN audit ON items.id = audit.item_id WHERE audit.user_id = ?;
+`,
+			wantViol:  true,
+			wantQuery: "UnannotatedJoin",
+		},
+		{
+			// (c) Near-miss/typo annotation: must still flag the violation,
+			// locking match precision of the annotation string.
+			name: "allow_unscoped_typo_still_flags",
+			sql: `-- name: TypoAnnotation :many
+-- scopeguard:allow-unscope: typo is missing the trailing 'd'
+SELECT items.id FROM items JOIN audit ON items.id = audit.item_id WHERE audit.user_id = ?;
+`,
+			wantViol:  true,
+			wantQuery: "TypoAnnotation",
+		},
+
+		// ----------------------------------------------------------------
+		// Finding 7: INSERT … RETURNING must not trip the guard.
+		// ----------------------------------------------------------------
+		{
+			name: "insert_returning_no_violation",
+			sql: `-- name: CreateItemReturning :one
+INSERT INTO items (id, user_id) VALUES (?, ?) RETURNING id, user_id;
+`,
+			wantViol: false,
+		},
+
+		// ----------------------------------------------------------------
+		// Literal-masking exploits — string literals must not influence
+		// structural detection in hasTopLevelOR, hasCommaJoin, hasSubquery,
+		// extractTargetTable, or the user_id equality matcher.
+		// ----------------------------------------------------------------
+		{
+			// MUST-FIX: unbalanced '(' inside a string literal pushes paren
+			// depth to 1 so the genuine top-level OR is treated as nested.
+			// The query leaks every row with id>0 regardless of user_id.
+			name: "literal_paren_masks_top_level_or",
+			sql: `-- name: LiteralParenOR :many
+SELECT id FROM items WHERE label = '(' AND user_id = @u OR id > 0;
+`,
+			wantViol:  true,
+			wantQuery: "LiteralParenOR",
+		},
+		{
+			// MUST-FIX: 'user_id = 5' inside a string literal must not be
+			// accepted as the real user_id equality predicate.
+			name: "literal_user_id_accepted_as_predicate",
+			sql: `-- name: LiteralUID :many
+SELECT id FROM items WHERE note = 'x user_id = 5 y';
+`,
+			wantViol:  true,
+			wantQuery: "LiteralUID",
+		},
+		{
+			// SHOULD-FIX: 'from here' in the SELECT list — the word FROM
+			// inside a literal causes extractTargetTable to return 'here''
+			// instead of 'items', so the query passes without a user_id check.
+			name: "literal_from_in_projection_false_positive",
+			sql: `-- name: LiteralFrom :many
+SELECT 'from here', id FROM items WHERE user_id = @user_id;
+`,
+			wantViol: false,
+		},
+		{
+			// SHOULD-FIX: SELECT inside a string literal causes hasSubquery to
+			// see a "second SELECT" and wrongly flag a valid single-source UPDATE.
+			name: "literal_select_in_update_false_positive",
+			sql: `-- name: LiteralSelect :exec
+UPDATE items SET note = 'please SELECT one' WHERE user_id = @user_id AND id = @id;
+`,
+			wantViol: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -368,15 +558,17 @@ SELECT i.id FROM items i JOIN audit a ON i.id = a.item_id WHERE a.user_id = ?;
 					t.Errorf("expected a violation for query %q but got none", tt.wantQuery)
 					return
 				}
-				found := false
-				for _, v := range violations {
-					if v.QueryName == tt.wantQuery {
-						found = true
+				var matched *store.Violation
+				for i := range violations {
+					if violations[i].QueryName == tt.wantQuery {
+						matched = &violations[i]
 						break
 					}
 				}
-				if !found {
+				if matched == nil {
 					t.Errorf("expected violation for query %q; got violations: %v", tt.wantQuery, violations)
+				} else if tt.wantReasonFill && matched.Reason == "" {
+					t.Errorf("violation for query %q has empty Reason; want a non-empty diagnostic string", tt.wantQuery)
 				}
 			} else if len(violations) > 0 {
 				t.Errorf("expected no violations but got %d: %v", len(violations), violations)
