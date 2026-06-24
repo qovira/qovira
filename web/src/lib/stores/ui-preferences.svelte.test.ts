@@ -121,7 +121,9 @@ describe("setRailPinned()", () => {
     setRailPinned(true);
     const raw = storage.getItem("qovira-ui");
     expect(raw).not.toBeNull();
-    if (raw === null) throw new Error("raw should not be null");
+    if (raw === null) {
+      throw new Error("raw should not be null");
+    }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     expect(parsed.railPinned).toBe(true);
   });
@@ -130,7 +132,9 @@ describe("setRailPinned()", () => {
     setRailPinned(true);
     setRailPinned(false);
     const raw = storage.getItem("qovira-ui");
-    if (raw === null) throw new Error("raw should not be null");
+    if (raw === null) {
+      throw new Error("raw should not be null");
+    }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     expect(parsed.railPinned).toBe(false);
   });

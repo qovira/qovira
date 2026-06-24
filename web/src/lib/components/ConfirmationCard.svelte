@@ -70,7 +70,9 @@
     }
 
     secondsRemaining = computeSecondsRemaining();
-    if (secondsRemaining === 0) return; // already expired — no interval needed
+    if (secondsRemaining === 0) {
+      return;
+    } // already expired — no interval needed
 
     const id = setInterval(() => {
       const secs = computeSecondsRemaining();
@@ -101,7 +103,9 @@
   let resolving = $state(false);
 
   async function resolve(decision: "approve" | "deny"): Promise<void> {
-    if (buttonsDisabled || resolving) return;
+    if (buttonsDisabled || resolving) {
+      return;
+    }
     // At this point buttonsDisabled is false, which requires entry.state === "pending".
     // The cast is safe: the guard above ensures we only reach here when pending.
     const pending = entry as PendingConfirmation;
@@ -122,10 +126,14 @@
   // ---------------------------------------------------------------------------
 
   function argsSummary(args: unknown): string {
-    if (args === null || args === undefined) return "";
+    if (args === null || args === undefined) {
+      return "";
+    }
     try {
       const raw = JSON.stringify(args);
-      if (raw === "{}" || raw === "[]" || raw === "") return "";
+      if (raw === "{}" || raw === "[]" || raw === "") {
+        return "";
+      }
       // Trim long arg strings to avoid overwhelming the card.
       return raw.length > 120 ? raw.slice(0, 120) + "…" : raw;
     } catch {

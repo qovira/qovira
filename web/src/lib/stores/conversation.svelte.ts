@@ -42,7 +42,9 @@ const ACTIVE_CONVERSATION_STORAGE_KEY = "qovira:active-conversation";
 
 /** Best-effort read of the persisted active conversation id; null when absent or unavailable. */
 function readPersistedConversationId(): string | null {
-  if (typeof sessionStorage === "undefined") return null;
+  if (typeof sessionStorage === "undefined") {
+    return null;
+  }
   try {
     return sessionStorage.getItem(ACTIVE_CONVERSATION_STORAGE_KEY);
   } catch {
@@ -53,7 +55,9 @@ function readPersistedConversationId(): string | null {
 
 /** Best-effort mirror of the active conversation id into sessionStorage (null clears it). */
 function persistConversationId(id: string | null): void {
-  if (typeof sessionStorage === "undefined") return;
+  if (typeof sessionStorage === "undefined") {
+    return;
+  }
   try {
     if (id === null) {
       sessionStorage.removeItem(ACTIVE_CONVERSATION_STORAGE_KEY);
@@ -213,7 +217,9 @@ export function applyStreamingDelta(text: string): void {
  * narrated before calling the tool), so it never disturbs accumulated delta text.
  */
 export function ensureStreamingSlot(): void {
-  if (_history.some(isStreamingSlot)) return;
+  if (_history.some(isStreamingSlot)) {
+    return;
+  }
 
   _history.push({
     id: STREAMING_SENTINEL_ID,
@@ -266,7 +272,9 @@ export function finalizeStreamingMessage(messageId: string, content: string | un
  * @param code           - The error code from the SSE payload (e.g. "turn_error").
  */
 export function setTurnFailed(conversationId: string, code: string): void {
-  if (_conversationId === null || conversationId !== _conversationId) return;
+  if (_conversationId === null || conversationId !== _conversationId) {
+    return;
+  }
   _turnError = code;
 }
 

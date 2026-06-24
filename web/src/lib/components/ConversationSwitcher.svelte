@@ -67,7 +67,9 @@
   // triggered by a DOM/prop state change.
   // ---------------------------------------------------------------------------
   $effect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     // Reset and reload the list each time the panel opens so it reflects the
     // latest state (e.g. a new conversation that materialized since last open).
     conversations = [];
@@ -102,8 +104,7 @@
         loadError = true;
       } else {
         // Success — data is defined (non-error branch of the discriminated union).
-        conversations =
-          cursor === undefined ? result.data.data : [...conversations, ...result.data.data];
+        conversations = cursor === undefined ? result.data.data : [...conversations, ...result.data.data];
         nextCursor = result.data.pagination.nextCursor;
         hasMore = result.data.pagination.hasMore;
       }
@@ -117,7 +118,9 @@
   }
 
   async function handleLoadMore(): Promise<void> {
-    if (nextCursor === null || loadingMore) return;
+    if (nextCursor === null || loadingMore) {
+      return;
+    }
     await loadPage(nextCursor);
   }
 

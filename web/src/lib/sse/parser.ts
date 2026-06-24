@@ -45,7 +45,9 @@ export function parseFrames(text: string): SseFrame[] {
   const result: SseFrame[] = [];
 
   for (const rawFrame of completeFrames) {
-    if (rawFrame.trim() === "") continue;
+    if (rawFrame.trim() === "") {
+      continue;
+    }
 
     const frame: SseFrame = {};
     const dataParts: string[] = [];

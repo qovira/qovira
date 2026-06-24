@@ -22,9 +22,13 @@ const EXEMPT_EXACT = new Set(["/login", "/onboarding"]);
  * @param pathname - The current URL pathname (e.g. page.url.pathname)
  */
 export function isExemptRoute(pathname: string): boolean {
-  if (EXEMPT_EXACT.has(pathname)) return true;
+  if (EXEMPT_EXACT.has(pathname)) {
+    return true;
+  }
   // Boundary-safe sub-path check: /onboarding/ prefix only, not /onboarding-x.
-  if (pathname.startsWith("/onboarding/")) return true;
+  if (pathname.startsWith("/onboarding/")) {
+    return true;
+  }
   return false;
 }
 
@@ -35,6 +39,8 @@ export function isExemptRoute(pathname: string): boolean {
  * @param authenticated  - Whether the session store has an active session
  */
 export function shouldRedirectToLogin(pathname: string, authenticated: boolean): boolean {
-  if (authenticated) return false;
+  if (authenticated) {
+    return false;
+  }
   return !isExemptRoute(pathname);
 }

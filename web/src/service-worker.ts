@@ -107,16 +107,22 @@ self.addEventListener("fetch", (event) => {
       // document so deep links work offline without needing their own entry.
       if (request.mode === "navigate") {
         const cached = await caches.match(request);
-        if (cached !== undefined) return cached;
+        if (cached !== undefined) {
+          return cached;
+        }
         const shell = await caches.match(NAV_FALLBACK);
-        if (shell !== undefined) return shell;
+        if (shell !== undefined) {
+          return shell;
+        }
         // Network fallback if the shell isn't cached yet (first install race).
         return fetch(request);
       }
 
       // Non-navigation assets: exact cache-first, then network + runtime cache.
       const cached = await caches.match(request);
-      if (cached !== undefined) return cached;
+      if (cached !== undefined) {
+        return cached;
+      }
 
       // Not in cache yet (possible for assets added after install).
       // Fetch from network and cache the response for next time.

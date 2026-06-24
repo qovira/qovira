@@ -43,8 +43,11 @@ export async function performLogin(email: string, password: string): Promise<Log
       // Map field-level validation errors from JSON Pointer paths to field names.
       const fieldErrors: LoginFieldErrors = {};
       for (const fe of loginError.errors) {
-        if (fe.pointer === "/email") fieldErrors.email = fe.detail;
-        else if (fe.pointer === "/password") fieldErrors.password = fe.detail;
+        if (fe.pointer === "/email") {
+          fieldErrors.email = fe.detail;
+        } else if (fe.pointer === "/password") {
+          fieldErrors.password = fe.detail;
+        }
       }
       if (fieldErrors.email !== undefined || fieldErrors.password !== undefined) {
         return { ok: false, fieldErrors };

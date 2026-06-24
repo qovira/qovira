@@ -58,7 +58,9 @@ function stubFetch(routes: [string, () => Response][]): void {
     vi.fn((input: Request | string) => {
       const url = typeof input === "string" ? input : input.url;
       for (const [match, make] of routes) {
-        if (url.includes(match)) return Promise.resolve(make());
+        if (url.includes(match)) {
+          return Promise.resolve(make());
+        }
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
     }),

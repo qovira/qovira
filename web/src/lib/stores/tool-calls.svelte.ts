@@ -118,7 +118,9 @@ export function getToolCallsForMessage(assistantMessageId: string): ToolCallEntr
  * @param payload - The ToolStartedPayload from the SSE event.
  */
 export function toolCallStarted(payload: ToolStartedPayload): void {
-  if (findIndex(payload.callId) !== -1) return; // guard: no duplicate
+  if (findIndex(payload.callId) !== -1) {
+    return;
+  } // guard: no duplicate
   const entry: StartedToolCall = {
     state: "started",
     callId: payload.callId,
@@ -144,10 +146,14 @@ export function toolCallStarted(payload: ToolStartedPayload): void {
  */
 export function toolCallCompleted(conversationId: string, callId: string, result: unknown): void {
   const idx = findIndex(callId);
-  if (idx === -1) return; // no matching start — defensive no-op
+  if (idx === -1) {
+    return;
+  } // no matching start — defensive no-op
 
   const existing = _toolCalls[idx];
-  if (existing === undefined) return; // idx is valid — satisfies noUncheckedIndexedAccess
+  if (existing === undefined) {
+    return;
+  } // idx is valid — satisfies noUncheckedIndexedAccess
   const updated: CompletedToolCall = {
     state: "completed",
     callId: existing.callId,
@@ -173,10 +179,14 @@ export function toolCallCompleted(conversationId: string, callId: string, result
  */
 export function toolCallFailed(conversationId: string, callId: string, error: string): void {
   const idx = findIndex(callId);
-  if (idx === -1) return;
+  if (idx === -1) {
+    return;
+  }
 
   const existing = _toolCalls[idx];
-  if (existing === undefined) return; // idx is valid — satisfies noUncheckedIndexedAccess
+  if (existing === undefined) {
+    return;
+  } // idx is valid — satisfies noUncheckedIndexedAccess
   const updated: FailedToolCall = {
     state: "failed",
     callId: existing.callId,

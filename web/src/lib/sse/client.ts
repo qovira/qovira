@@ -69,7 +69,9 @@ export function makeHandlers(): RouterHandlers {
       // reminder.deleted carries only an id; all others carry a full Reminder object.
       if (eventName === "reminder.deleted") {
         const p = payload as Record<string, unknown>;
-        if (typeof p.id === "string") removeReminder(p.id);
+        if (typeof p.id === "string") {
+          removeReminder(p.id);
+        }
         return;
       }
       // reminder.fired carries FiredEventPayload (no full Reminder body).
@@ -91,19 +93,25 @@ export function makeHandlers(): RouterHandlers {
       }
       // reminder.created / reminder.updated / reminder.completed carry a full Reminder.
       const r = payload as ReminderItem;
-      if (typeof r.id === "string") upsertReminder(r);
+      if (typeof r.id === "string") {
+        upsertReminder(r);
+      }
     },
 
     onMessageDelta(conversationId: string, text: string): void {
       // Only apply if this event belongs to the currently-open conversation.
       // The server sends no messageId on deltas — only conversationId + text.
-      if (conversationId !== getActiveConversationId()) return;
+      if (conversationId !== getActiveConversationId()) {
+        return;
+      }
       applyStreamingDelta(text);
     },
 
     onMessageCompleted(conversationId: string, messageId: string, finishReason: string): void {
       // Only finalize for the currently-open conversation.
-      if (conversationId !== getActiveConversationId()) return;
+      if (conversationId !== getActiveConversationId()) {
+        return;
+      }
       // CompletedPayload carries messageId and finishReason; no authoritative content
       // field — the server does not re-send full content on completed. Keep delta text.
       finalizeStreamingMessage(messageId, undefined, finishReason);
@@ -125,23 +133,31 @@ export function makeHandlers(): RouterHandlers {
 
     onToolStarted(payload: ToolStartedPayload): void {
       // Guard: only apply to the currently-open conversation.
-      if (payload.conversationId !== getActiveConversationId()) return;
+      if (payload.conversationId !== getActiveConversationId()) {
+        return;
+      }
       toolCallStarted(payload);
     },
 
     onToolCompleted(conversationId: string, callId: string, result: unknown): void {
-      if (conversationId !== getActiveConversationId()) return;
+      if (conversationId !== getActiveConversationId()) {
+        return;
+      }
       toolCallCompleted(conversationId, callId, result);
     },
 
     onToolFailed(conversationId: string, callId: string, error: string): void {
-      if (conversationId !== getActiveConversationId()) return;
+      if (conversationId !== getActiveConversationId()) {
+        return;
+      }
       toolCallFailed(conversationId, callId, error);
     },
 
     onConfirmationRequired(payload): void {
       // Guard on active conversation so off-screen events are ignored.
-      if (payload.conversationId !== getActiveConversationId()) return;
+      if (payload.conversationId !== getActiveConversationId()) {
+        return;
+      }
       // A destructive tool can suspend a turn that streamed no preceding text, so
       // open an in-flight assistant slot if none exists — the card (tagged with
       // STREAMING_SENTINEL_ID) needs a rendered message to hang under.
@@ -150,7 +166,9 @@ export function makeHandlers(): RouterHandlers {
     },
 
     onConfirmationExpired(conversationId, callId): void {
-      if (conversationId !== getActiveConversationId()) return;
+      if (conversationId !== getActiveConversationId()) {
+        return;
+      }
       storeConfirmationExpired(callId);
     },
 
@@ -235,7 +253,9 @@ async function reconcile(): Promise<void> {
 
 async function reconcileConversationHistory(): Promise<void> {
   const convId = getActiveConversationId();
-  if (convId === null) return;
+  if (convId === null) {
+    return;
+  }
   try {
     const { data: convData } = await Api.GET("/conversations/{id}", { params: { path: { id: convId } } });
     if (convData?.messages !== undefined) {
@@ -353,12 +373,16 @@ async function connectionLoop(): Promise<void> {
     }
 
     // Stream closed or threw — back off and retry if still active.
-    if (!_active) return;
+    if (!_active) {
+      return;
+    }
 
     await sleep(backoffMs, signal);
     // closeSseConnection() may have cleared _active during the await above.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (!_active) return;
+    if (!_active) {
+      return;
+    }
 
     backoffMs = nextBackoff(backoffMs);
   }
@@ -394,7 +418,9 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * No-op if already open.
  */
 export function openSseConnection(): void {
-  if (_active) return;
+  if (_active) {
+    return;
+  }
   _active = true;
   // Run the loop in the background — do not await here; the caller is synchronous.
   void connectionLoop();

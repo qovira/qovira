@@ -32,9 +32,13 @@ export function setRailPinned(value: boolean): void {
 export function initPrefs(): void {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return;
+    if (raw === null) {
+      return;
+    }
     const parsed: unknown = JSON.parse(raw) as unknown;
-    if (typeof parsed !== "object" || parsed === null) return;
+    if (typeof parsed !== "object" || parsed === null) {
+      return;
+    }
     const prefs = parsed as Record<string, unknown>;
     if (typeof prefs.railPinned === "boolean") {
       railPinned = prefs.railPinned;

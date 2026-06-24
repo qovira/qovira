@@ -20,7 +20,9 @@
 export function shouldCache(url: string, method: string, selfOrigin?: string): boolean {
   // Rule 1 — only cache safe read-only methods.
   const upperMethod = method.toUpperCase();
-  if (upperMethod !== "GET" && upperMethod !== "HEAD") return false;
+  if (upperMethod !== "GET" && upperMethod !== "HEAD") {
+    return false;
+  }
 
   let parsed: URL;
   try {
@@ -35,13 +37,19 @@ export function shouldCache(url: string, method: string, selfOrigin?: string): b
   // own origin so purely local paths always pass (backwards-safe fallback
   // for environments without `self.location`).
   const origin = selfOrigin ?? parsed.origin;
-  if (parsed.origin !== origin) return false;
+  if (parsed.origin !== origin) {
+    return false;
+  }
 
   // Rule 3 — API paths carry live data with no offline replica.
-  if (parsed.pathname.startsWith("/api/")) return false;
+  if (parsed.pathname.startsWith("/api/")) {
+    return false;
+  }
 
   // Rule 4 — SSE event stream must always go to the network.
-  if (parsed.pathname === "/events" || parsed.pathname.startsWith("/events/")) return false;
+  if (parsed.pathname === "/events" || parsed.pathname.startsWith("/events/")) {
+    return false;
+  }
 
   // Rule 5 — cacheable app-shell asset.
   return true;

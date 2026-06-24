@@ -109,7 +109,9 @@ export function callUnauthorizedHandler(): void | Promise<void> {
 
 /** Read a cookie value by name from document.cookie. Returns null if absent. */
 function readCookie(name: string): string | null {
-  if (typeof document === "undefined") return null;
+  if (typeof document === "undefined") {
+    return null;
+  }
   const prefix = `${name}=`;
   for (const part of document.cookie.split(";")) {
     const trimmed = part.trimStart();
@@ -151,7 +153,9 @@ const qoviraMiddleware: Middleware = {
   },
 
   async onResponse({ response }) {
-    if (response.ok) return; // 2xx — nothing to do
+    if (response.ok) {
+      return;
+    } // 2xx — nothing to do
 
     // Detect problem+json by Content-Type.
     const ct = response.headers.get("Content-Type") ?? "";
@@ -183,7 +187,9 @@ const qoviraMiddleware: Middleware = {
 // ---------------------------------------------------------------------------
 
 function isProblemShape(v: unknown): v is RawProblem {
-  if (typeof v !== "object" || v === null) return false;
+  if (typeof v !== "object" || v === null) {
+    return false;
+  }
   const p = v as Record<string, unknown>;
   return (
     typeof p.type === "string" &&

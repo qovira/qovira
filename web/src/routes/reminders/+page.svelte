@@ -39,6 +39,7 @@
   } from "$lib/reminders/actions.svelte.js";
   import SlideOver from "$lib/components/SlideOver.svelte";
   import ReminderRow from "$lib/components/ReminderRow.svelte";
+  import ReminderBucketSection from "$lib/components/ReminderBucketSection.svelte";
   import {
     reminders_placeholder,
     reminders_bucket_overdue,
@@ -114,7 +115,9 @@
 
   async function openDone(): Promise<void> {
     doneOpen = true;
-    if (doneFetched || doneLoading) return;
+    if (doneFetched || doneLoading) {
+      return;
+    }
 
     doneLoading = true;
     doneError = null;
@@ -169,8 +172,12 @@
     e.preventDefault();
     const title = quickAddTitle.trim();
     const dueAtRfc = buildNextDueAt(quickAddDueAt);
-    if (!title || !dueAtRfc) return;
-    if (quickAddSubmitting) return;
+    if (!title || !dueAtRfc) {
+      return;
+    }
+    if (quickAddSubmitting) {
+      return;
+    }
 
     quickAddSubmitting = true;
 
@@ -222,7 +229,9 @@
 
   async function handleComplete(id: string): Promise<void> {
     const snapshot = applyOptimisticComplete(id);
-    if (snapshot === null) return; // reminder not in store — no-op
+    if (snapshot === null) {
+      return;
+    } // reminder not in store — no-op
 
     try {
       const result = await Api.PATCH("/reminders/{id}", {
@@ -278,10 +287,14 @@
   async function handleEditSave(e: SubmitEvent): Promise<void> {
     e.preventDefault();
     const r = editReminder;
-    if (r === null || editSaving) return;
+    if (r === null || editSaving) {
+      return;
+    }
 
     const dueAtRfc = buildNextDueAt(editDueAt);
-    if (!editTitle.trim() || !dueAtRfc) return;
+    if (!editTitle.trim() || !dueAtRfc) {
+      return;
+    }
 
     editSaving = true;
     editError = null;
@@ -382,58 +395,43 @@
   {:else}
     <!-- Overdue -->
     {#if overdue.length > 0}
-      <section class="reminders-bucket" aria-labelledby="bucket-overdue">
-        <h2 id="bucket-overdue" class="reminders-bucket__heading reminders-bucket__heading--overdue">
-          {reminders_bucket_overdue()}
-        </h2>
-        <ul class="reminders-list" role="list">
-          {#each overdue as reminder (reminder.id)}
-            <ReminderRow {reminder} oncomplete={(id: string) => void handleComplete(id)} onedit={openEdit} />
-          {/each}
-        </ul>
-      </section>
+      <ReminderBucketSection
+        label={reminders_bucket_overdue()}
+        headingId="bucket-overdue"
+        overdue={true}
+        items={overdue}
+      >
+        {#snippet row(reminder)}
+          <ReminderRow {reminder} oncomplete={(id: string) => void handleComplete(id)} onedit={openEdit} />
+        {/snippet}
+      </ReminderBucketSection>
     {/if}
 
     <!-- Today -->
     {#if today.length > 0}
-      <section class="reminders-bucket" aria-labelledby="bucket-today">
-        <h2 id="bucket-today" class="reminders-bucket__heading">
-          {reminders_bucket_today()}
-        </h2>
-        <ul class="reminders-list" role="list">
-          {#each today as reminder (reminder.id)}
-            <ReminderRow {reminder} oncomplete={(id: string) => void handleComplete(id)} onedit={openEdit} />
-          {/each}
-        </ul>
-      </section>
+      <ReminderBucketSection label={reminders_bucket_today()} headingId="bucket-today" items={today}>
+        {#snippet row(reminder)}
+          <ReminderRow {reminder} oncomplete={(id: string) => void handleComplete(id)} onedit={openEdit} />
+        {/snippet}
+      </ReminderBucketSection>
     {/if}
 
     <!-- This week -->
     {#if thisWeek.length > 0}
-      <section class="reminders-bucket" aria-labelledby="bucket-this-week">
-        <h2 id="bucket-this-week" class="reminders-bucket__heading">
-          {reminders_bucket_this_week()}
-        </h2>
-        <ul class="reminders-list" role="list">
-          {#each thisWeek as reminder (reminder.id)}
-            <ReminderRow {reminder} oncomplete={(id: string) => void handleComplete(id)} onedit={openEdit} />
-          {/each}
-        </ul>
-      </section>
+      <ReminderBucketSection label={reminders_bucket_this_week()} headingId="bucket-this-week" items={thisWeek}>
+        {#snippet row(reminder)}
+          <ReminderRow {reminder} oncomplete={(id: string) => void handleComplete(id)} onedit={openEdit} />
+        {/snippet}
+      </ReminderBucketSection>
     {/if}
 
     <!-- Later -->
     {#if later.length > 0}
-      <section class="reminders-bucket" aria-labelledby="bucket-later">
-        <h2 id="bucket-later" class="reminders-bucket__heading">
-          {reminders_bucket_later()}
-        </h2>
-        <ul class="reminders-list" role="list">
-          {#each later as reminder (reminder.id)}
-            <ReminderRow {reminder} oncomplete={(id: string) => void handleComplete(id)} onedit={openEdit} />
-          {/each}
-        </ul>
-      </section>
+      <ReminderBucketSection label={reminders_bucket_later()} headingId="bucket-later" items={later}>
+        {#snippet row(reminder)}
+          <ReminderRow {reminder} oncomplete={(id: string) => void handleComplete(id)} onedit={openEdit} />
+        {/snippet}
+      </ReminderBucketSection>
     {/if}
   {/if}
 
@@ -675,10 +673,6 @@
     border-bottom: 1px solid var(--color-border, oklch(0.9 0 0));
     margin-bottom: 0.125rem;
     pointer-events: none;
-  }
-
-  .reminders-bucket__heading--overdue {
-    color: var(--color-fg-error, #a8331f);
   }
 
   .reminders-done-count {

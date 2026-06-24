@@ -123,7 +123,9 @@ export function getConfirmationsForMessage(assistantMessageId: string): Confirma
  * @param payload - The ConfirmationRequiredPayload from the SSE event.
  */
 export function confirmationRequired(payload: ConfirmationRequiredPayload): void {
-  if (findIndex(payload.callId) !== -1) return; // guard: no duplicate
+  if (findIndex(payload.callId) !== -1) {
+    return;
+  } // guard: no duplicate
   const entry: PendingConfirmation = {
     state: "pending",
     callId: payload.callId,
@@ -148,11 +150,17 @@ export function confirmationRequired(payload: ConfirmationRequiredPayload): void
  */
 export function confirmationResolved(callId: string, decision: "approve" | "deny"): void {
   const idx = findIndex(callId);
-  if (idx === -1) return;
+  if (idx === -1) {
+    return;
+  }
 
   const existing = _confirmations[idx];
-  if (existing === undefined) return; // satisfies noUncheckedIndexedAccess
-  if (existing.state !== "pending") return; // already in terminal state
+  if (existing === undefined) {
+    return;
+  } // satisfies noUncheckedIndexedAccess
+  if (existing.state !== "pending") {
+    return;
+  } // already in terminal state
 
   const updated: ResolvedConfirmation = {
     state: "resolved",
@@ -178,10 +186,14 @@ export function confirmationResolved(callId: string, decision: "approve" | "deny
  */
 export function confirmationExpired(callId: string): void {
   const idx = findIndex(callId);
-  if (idx === -1) return;
+  if (idx === -1) {
+    return;
+  }
 
   const existing = _confirmations[idx];
-  if (existing === undefined) return; // satisfies noUncheckedIndexedAccess
+  if (existing === undefined) {
+    return;
+  } // satisfies noUncheckedIndexedAccess
 
   const updated: ExpiredConfirmation = {
     state: "expired",

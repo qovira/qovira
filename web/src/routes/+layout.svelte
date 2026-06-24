@@ -6,7 +6,13 @@
   import { Avatar, Container, IconButton, Separator, ToastProvider } from "@qovira/ui";
   import { getTheme, subscribe, toggleTheme } from "@qovira/theme/runtime";
   import type { Theme } from "@qovira/theme/runtime";
-  import { BellIcon, ChatsIcon, MoonIcon, PushPinIcon, PushPinSlashIcon, SunIcon } from "phosphor-svelte";
+  // deep-import to avoid barrel-import cost (~8 MB of all ~3,000 icons)
+  import BellIcon from "phosphor-svelte/lib/BellIcon";
+  import ChatsIcon from "phosphor-svelte/lib/ChatsIcon";
+  import MoonIcon from "phosphor-svelte/lib/MoonIcon";
+  import PushPinIcon from "phosphor-svelte/lib/PushPinIcon";
+  import PushPinSlashIcon from "phosphor-svelte/lib/PushPinSlashIcon";
+  import SunIcon from "phosphor-svelte/lib/SunIcon";
   import { onMount } from "svelte";
   import type { Snippet } from "svelte";
 
@@ -63,30 +69,42 @@
   const railOpen = $derived(getRailPinned() || expanded);
 
   function handleMouseEnter(): void {
-    if (!getRailPinned()) expanded = true;
+    if (!getRailPinned()) {
+      expanded = true;
+    }
   }
 
   function handleMouseLeave(): void {
-    if (!getRailPinned()) expanded = false;
+    if (!getRailPinned()) {
+      expanded = false;
+    }
   }
 
   function handleFocusIn(): void {
-    if (!getRailPinned()) expanded = true;
+    if (!getRailPinned()) {
+      expanded = true;
+    }
   }
 
   function handleFocusOut(event: FocusEvent): void {
-    if (getRailPinned()) return;
+    if (getRailPinned()) {
+      return;
+    }
     // Only collapse when focus leaves the rail entirely (relatedTarget not within the nav).
     const related = event.relatedTarget;
     const nav = event.currentTarget as HTMLElement | null;
-    if (nav && related instanceof Node && nav.contains(related)) return;
+    if (nav && related instanceof Node && nav.contains(related)) {
+      return;
+    }
     expanded = false;
   }
 
   function togglePin(): void {
     setRailPinned(!getRailPinned());
     // When pinning, lock open; when unpinning, collapse (peek may re-open on hover).
-    if (!getRailPinned()) expanded = false;
+    if (!getRailPinned()) {
+      expanded = false;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -113,7 +131,9 @@
   // Fix B: boundary-safe segment match so e.g. /reminders does not match
   // a future /reminders-archive.
   function isActive(href: string): boolean {
-    if (href === "/") return page.url.pathname === "/";
+    if (href === "/") {
+      return page.url.pathname === "/";
+    }
     return page.url.pathname === href || page.url.pathname.startsWith(href + "/");
   }
 

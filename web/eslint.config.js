@@ -53,6 +53,15 @@ export default tseslint.config(
       // is a false positive: {@render} is always a statement in Svelte markup,
       // never a sub-expression. Disable the rule for Svelte files only.
       "@typescript-eslint/no-confusing-void-expression": "off",
+      // House convention: always brace every if/else/for/while/do body, even one-liners.
+      curly: ["error", "all"],
+    },
+  },
+  {
+    // House convention: always brace every if/else/for/while/do body, even one-liners.
+    // Applies to all .ts and .js files not already covered by the svelte override.
+    rules: {
+      curly: ["error", "all"],
     },
   },
   {

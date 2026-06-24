@@ -41,7 +41,9 @@
       }
       emailError = result.fieldErrors?.email;
       passwordError = result.fieldErrors?.password;
-      if (result.message !== undefined) errorMessage = result.message;
+      if (result.message !== undefined) {
+        errorMessage = result.message;
+      }
     } catch {
       // Raw network/parse failure (not a ProblemError) — surface a generic message.
       errorMessage = login_error_unexpected();

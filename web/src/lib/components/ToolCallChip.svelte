@@ -61,9 +61,15 @@
   // ---------------------------------------------------------------------------
 
   const inProgressLabel = $derived.by((): string => {
-    if (entry.name === "delete_reminder") return tool_chip_deleting();
-    if (entry.name.startsWith("update_") || entry.name.startsWith("complete_")) return tool_chip_updating();
-    if (entry.name.startsWith("create_")) return tool_chip_creating();
+    if (entry.name === "delete_reminder") {
+      return tool_chip_deleting();
+    }
+    if (entry.name.startsWith("update_") || entry.name.startsWith("complete_")) {
+      return tool_chip_updating();
+    }
+    if (entry.name.startsWith("create_")) {
+      return tool_chip_creating();
+    }
     return tool_chip_working();
   });
 
@@ -73,9 +79,13 @@
   // ---------------------------------------------------------------------------
 
   function parseReminderResult(result: unknown): ReminderResult | null {
-    if (result === null || typeof result !== "object") return null;
+    if (result === null || typeof result !== "object") {
+      return null;
+    }
     const r = result as Record<string, unknown>;
-    if (typeof r.id !== "string" || typeof r.title !== "string") return null;
+    if (typeof r.id !== "string" || typeof r.title !== "string") {
+      return null;
+    }
     const dueAt = typeof r.dueAt === "string" ? r.dueAt : null;
     return { id: r.id, title: r.title, dueAt };
   }

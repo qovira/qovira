@@ -28,7 +28,9 @@ describe("parseFrames()", () => {
     expect(frames).toHaveLength(1);
     const frame = frames[0];
     expect(frame).toBeDefined();
-    if (frame === undefined) return;
+    if (frame === undefined) {
+      return;
+    }
     expect(frame.event).toBe("message.delta");
     expect(frame.id).toBe("1");
     expect(frame.data).toBe('{"text":"hello"}');

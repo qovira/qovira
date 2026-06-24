@@ -245,6 +245,8 @@ function tryParse(rawData: string): unknown {
 /** Parse rawData as a JSON object, returning undefined on parse error or non-object. */
 function tryParseObject(rawData: string): Record<string, unknown> | undefined {
   const v = tryParse(rawData);
-  if (typeof v !== "object" || v === null) return undefined;
+  if (typeof v !== "object" || v === null) {
+    return undefined;
+  }
   return v as Record<string, unknown>;
 }

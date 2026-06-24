@@ -91,7 +91,9 @@ export function revertCreate(tempId: string): void {
  */
 export function applyOptimisticComplete(id: string): ReminderItem | null {
   const current = getReminderById(id);
-  if (current === null) return null;
+  if (current === null) {
+    return null;
+  }
 
   // Snapshot before mutation (spread to clone — proxy-safe).
   const snapshot: ReminderItem = { ...current };
@@ -132,9 +134,13 @@ export function revertComplete(snapshot: ReminderItem): void {
  * Returns an empty string for empty input (caller validates before submit).
  */
 export function buildNextDueAt(datetimeLocal: string): string {
-  if (!datetimeLocal) return "";
+  if (!datetimeLocal) {
+    return "";
+  }
   const d = new Date(datetimeLocal);
-  if (Number.isNaN(d.getTime())) return "";
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
   return d.toISOString();
 }
 
@@ -165,9 +171,13 @@ export function defaultDueAtLocal(): string {
  * sheet input (local time, no seconds, no Z).
  */
 export function dueAtToLocal(dueAt: string): string {
-  if (!dueAt) return "";
+  if (!dueAt) {
+    return "";
+  }
   const d = new Date(dueAt);
-  if (Number.isNaN(d.getTime())) return "";
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
   const pad = (n: number): string => String(n).padStart(2, "0");
   const y = String(d.getFullYear());
   const mo = pad(d.getMonth() + 1);
@@ -182,10 +192,18 @@ export function dueAtToLocal(dueAt: string): string {
  * Known presets → their preset key. Unknown → "keep". Absent → "none".
  */
 export function rruleToPreset(rrule: string | undefined): RrulePreset {
-  if (rrule === undefined) return "none";
-  if (rrule === "FREQ=DAILY") return "daily";
-  if (rrule === "FREQ=WEEKLY") return "weekly";
-  if (rrule === "FREQ=MONTHLY") return "monthly";
+  if (rrule === undefined) {
+    return "none";
+  }
+  if (rrule === "FREQ=DAILY") {
+    return "daily";
+  }
+  if (rrule === "FREQ=WEEKLY") {
+    return "weekly";
+  }
+  if (rrule === "FREQ=MONTHLY") {
+    return "monthly";
+  }
   return "keep";
 }
 

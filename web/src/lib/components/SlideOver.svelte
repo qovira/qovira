@@ -15,6 +15,7 @@
   //   children    — panel body content (snippet).
 
   import type { Snippet } from "svelte";
+  import { slideover_close } from "$lib/paraglide/messages.js";
 
   interface Props {
     open?: boolean;
@@ -62,7 +63,9 @@
   // On the true→false edge (programmatic close), also restore focus so
   // keyboard users land back on the trigger rather than on <body>.
   $effect(() => {
-    if (dialogEl === null) return;
+    if (dialogEl === null) {
+      return;
+    }
     if (open) {
       // Capture the currently-focused element before the dialog steals focus.
       previouslyFocused = document.activeElement;
@@ -160,7 +163,7 @@
         class="text-fg-muted hover:text-fg rounded p-1
                focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
         onclick={handleClose}
-        aria-label="Close"
+        aria-label={slideover_close()}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256" aria-hidden="true">
           <path

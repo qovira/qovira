@@ -13,11 +13,15 @@
  * displayable.
  */
 export function formatDueAt(dueAt: string | null | undefined): string {
-  if (!dueAt) return "";
+  if (!dueAt) {
+    return "";
+  }
   try {
     const d = new Date(dueAt);
     // new Date() with an unparseable string yields NaN for getTime(); guard it.
-    if (Number.isNaN(d.getTime())) return dueAt;
+    if (Number.isNaN(d.getTime())) {
+      return dueAt;
+    }
     return new Intl.DateTimeFormat(undefined, {
       weekday: "short",
       month: "short",

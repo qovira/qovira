@@ -26,6 +26,7 @@
     reminders_done_empty,
   } from "$lib/paraglide/messages.js";
   import ReminderRow from "$lib/components/ReminderRow.svelte";
+  import ReminderBucketSection from "$lib/components/ReminderBucketSection.svelte";
 
   interface Props {
     /**
@@ -67,58 +68,43 @@
   {:else}
     <!-- Overdue -->
     {#if overdue.length > 0}
-      <section class="reminders-bucket" aria-labelledby="bucket-overdue">
-        <h2 id="bucket-overdue" class="reminders-bucket__heading reminders-bucket__heading--overdue">
-          {reminders_bucket_overdue()}
-        </h2>
-        <ul class="reminders-list" role="list">
-          {#each overdue as reminder (reminder.id)}
-            <ReminderRow {reminder} />
-          {/each}
-        </ul>
-      </section>
+      <ReminderBucketSection
+        label={reminders_bucket_overdue()}
+        headingId="bucket-overdue"
+        overdue={true}
+        items={overdue}
+      >
+        {#snippet row(reminder)}
+          <ReminderRow {reminder} />
+        {/snippet}
+      </ReminderBucketSection>
     {/if}
 
     <!-- Today -->
     {#if today.length > 0}
-      <section class="reminders-bucket" aria-labelledby="bucket-today">
-        <h2 id="bucket-today" class="reminders-bucket__heading">
-          {reminders_bucket_today()}
-        </h2>
-        <ul class="reminders-list" role="list">
-          {#each today as reminder (reminder.id)}
-            <ReminderRow {reminder} />
-          {/each}
-        </ul>
-      </section>
+      <ReminderBucketSection label={reminders_bucket_today()} headingId="bucket-today" items={today}>
+        {#snippet row(reminder)}
+          <ReminderRow {reminder} />
+        {/snippet}
+      </ReminderBucketSection>
     {/if}
 
     <!-- This week -->
     {#if thisWeek.length > 0}
-      <section class="reminders-bucket" aria-labelledby="bucket-this-week">
-        <h2 id="bucket-this-week" class="reminders-bucket__heading">
-          {reminders_bucket_this_week()}
-        </h2>
-        <ul class="reminders-list" role="list">
-          {#each thisWeek as reminder (reminder.id)}
-            <ReminderRow {reminder} />
-          {/each}
-        </ul>
-      </section>
+      <ReminderBucketSection label={reminders_bucket_this_week()} headingId="bucket-this-week" items={thisWeek}>
+        {#snippet row(reminder)}
+          <ReminderRow {reminder} />
+        {/snippet}
+      </ReminderBucketSection>
     {/if}
 
     <!-- Later -->
     {#if later.length > 0}
-      <section class="reminders-bucket" aria-labelledby="bucket-later">
-        <h2 id="bucket-later" class="reminders-bucket__heading">
-          {reminders_bucket_later()}
-        </h2>
-        <ul class="reminders-list" role="list">
-          {#each later as reminder (reminder.id)}
-            <ReminderRow {reminder} />
-          {/each}
-        </ul>
-      </section>
+      <ReminderBucketSection label={reminders_bucket_later()} headingId="bucket-later" items={later}>
+        {#snippet row(reminder)}
+          <ReminderRow {reminder} />
+        {/snippet}
+      </ReminderBucketSection>
     {/if}
   {/if}
 
@@ -173,6 +159,11 @@
     gap: 1.5rem;
   }
 
+  /* .reminders-bucket and .reminders-bucket__heading are also defined in
+     ReminderBucketSection.svelte for the active-bucket sections. They are kept
+     here too because the Done section's <section class="reminders-bucket"> and
+     the .reminders-done-toggle .reminders-bucket__heading compound selector are
+     inline in this component and rely on these scoped styles. */
   .reminders-bucket {
     display: flex;
     flex-direction: column;
@@ -192,10 +183,6 @@
     border-bottom: 1px solid var(--color-border, oklch(0.9 0 0));
     margin-bottom: 0.125rem;
     pointer-events: none;
-  }
-
-  .reminders-bucket__heading--overdue {
-    color: var(--color-fg-error, #a8331f);
   }
 
   .reminders-done-count {

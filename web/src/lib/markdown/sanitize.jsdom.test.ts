@@ -152,7 +152,7 @@ describe("renderSafeMarkdown()", () => {
     });
 
     it("strips <select> elements", () => {
-      const payload = "<select><option value=\"evil\">option</option></select>";
+      const payload = '<select><option value="evil">option</option></select>';
       const result = renderSafeMarkdown(payload);
       expect(result).not.toContain("<select");
     });
@@ -177,7 +177,7 @@ describe("renderSafeMarkdown()", () => {
     });
 
     it("strips style attribute from arbitrary inline elements", () => {
-      const payload = "**bold** <span style=\"color:red;font-size:200%\">styled</span>";
+      const payload = '**bold** <span style="color:red;font-size:200%">styled</span>';
       const result = renderSafeMarkdown(payload);
       expect(result).not.toContain("style=");
     });

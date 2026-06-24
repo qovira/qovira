@@ -98,12 +98,18 @@ function _cancelPreExpiry(): void {
 
 function _schedulePreExpiry(warningMs: number): void {
   _cancelPreExpiry();
-  if (_preExpiryCallback === null || _session === null) return;
+  if (_preExpiryCallback === null || _session === null) {
+    return;
+  }
   // No known expiry (e.g. seeded from the /me boot probe) — nothing to schedule.
-  if (_session.expiresAt === null) return;
+  if (_session.expiresAt === null) {
+    return;
+  }
   const expiresMs = new Date(_session.expiresAt).getTime();
   const triggerMs = expiresMs - warningMs - Date.now();
-  if (triggerMs <= 0) return; // already within warning window or expired
+  if (triggerMs <= 0) {
+    return;
+  } // already within warning window or expired
   const cb = _preExpiryCallback;
   _preExpiryTimerId = setTimeout(() => {
     _preExpiryTimerId = null;
