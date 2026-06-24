@@ -4,9 +4,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newAdminCmd constructs the "admin" group command. It prints help when called
-// without a subcommand and owns the persistent --config flag so all subcommands
-// inherit it (mirroring the migrate group pattern).
+// newAdminCmd constructs the "admin" group command. It prints help when called without a subcommand and owns the
+// persistent --config flag so all subcommands inherit it (mirroring the migrate group pattern).
 func newAdminCmd() *cobra.Command {
 	admin := &cobra.Command{
 		Use:   "admin",

@@ -1,7 +1,7 @@
 package harness_test
 
-// Tool-call multi-round tests (AC-1 through AC-6 from the harness tool-call issue).
-// Each test is independently verifiable; fakes are used for all collaborators.
+// Tool-call multi-round tests (AC-1 through AC-6 from the harness tool-call issue). Each test is independently
+// verifiable; fakes are used for all collaborators.
 
 import (
 	"context"
@@ -21,9 +21,8 @@ import (
 
 // ── multi-round fake chatter ──────────────────────────────────────────────────
 
-// queuedChatter returns a different set of chunks per call to Chat, in queue
-// order. Each element is the full chunk sequence for one round. When the queue
-// is exhausted it wraps (modulo) — useful for "always tool call" scenarios.
+// queuedChatter returns a different set of chunks per call to Chat, in queue order. Each element is the full chunk
+// sequence for one round. When the queue is exhausted it wraps (modulo) — useful for "always tool call" scenarios.
 type queuedChatter struct {
 	mu     sync.Mutex
 	rounds [][]gateway.Chunk
@@ -77,8 +76,7 @@ func (c *callCapture) snapshot() []string {
 	return out
 }
 
-// makeEchoTool builds a RiskRead tool that records the call_id argument in
-// tracker and returns {"echo": <call_id>}.
+// makeEchoTool builds a RiskRead tool that records the call_id argument in tracker and returns {"echo": <call_id>}.
 func makeEchoTool(name string, tracker *callCapture) capability.Tool {
 	type args struct {
 		CallID string `json:"call_id"`
@@ -116,12 +114,10 @@ func buildHarnessWithTools(
 	return harness.New(reg, gw, s, bus, cfg, harness.NewDiscardLogger())
 }
 
-// startTurnAndWait fires a turn by inserting a user message and calling StartTurn,
-// then blocks until the bus carries a "message.completed" event and at least
-// minToolStarted "tool.started" events. Waiting for the terminal event (rather
-// than a raw event count) prevents the helper from returning mid-turn before
-// message.completed fires, which caused flaky completedCount assertions under
-// -race.
+// startTurnAndWait fires a turn by inserting a user message and calling StartTurn, then blocks until the bus
+// carries a "message.completed" event and at least minToolStarted "tool.started" events. Waiting for the terminal
+// event (rather than a raw event count) prevents the helper from returning mid-turn before message.completed
+// fires, which caused flaky completedCount assertions under -race.
 func startTurnAndWait(
 	t *testing.T,
 	h *harness.Harness,
@@ -251,9 +247,8 @@ func TestToolCall_AC1_PersistsAndLoops(t *testing.T) {
 
 // ── AC-2: multi-round terminates on final no-tool-call reply ─────────────────
 
-// TestToolCall_AC2_MultiRoundTerminates verifies a 2-tool-call-round turn feeds
-// results back and terminates on a final no-tool-call reply with exactly one
-// message.completed.
+// TestToolCall_AC2_MultiRoundTerminates verifies a 2-tool-call-round turn feeds results back and terminates on a
+// final no-tool-call reply with exactly one message.completed.
 func TestToolCall_AC2_MultiRoundTerminates(t *testing.T) {
 	t.Parallel()
 
@@ -302,8 +297,8 @@ func TestToolCall_AC2_MultiRoundTerminates(t *testing.T) {
 
 // ── AC-3: tool.started then tool.completed per call with correct payloads ─────
 
-// TestToolCall_AC3_ToolEvents verifies that tool.started is emitted before
-// tool.completed for each call, and the payloads carry callId, name, and risk.
+// TestToolCall_AC3_ToolEvents verifies that tool.started is emitted before tool.completed for each call, and the
+// payloads carry callId, name, and risk.
 func TestToolCall_AC3_ToolEvents(t *testing.T) {
 	t.Parallel()
 
@@ -380,9 +375,8 @@ func TestToolCall_AC3_ToolEvents(t *testing.T) {
 
 // ── AC-4: step cap ends the turn gracefully ───────────────────────────────────
 
-// TestToolCall_AC4_StepCap verifies that a gateway that always returns a tool
-// call terminates after stepCap rounds with a graceful assistant message and
-// exactly one message.completed, never exceeding the cap.
+// TestToolCall_AC4_StepCap verifies that a gateway that always returns a tool call terminates after stepCap rounds
+// with a graceful assistant message and exactly one message.completed, never exceeding the cap.
 func TestToolCall_AC4_StepCap(t *testing.T) {
 	t.Parallel()
 
@@ -456,9 +450,8 @@ func TestToolCall_AC4_StepCap(t *testing.T) {
 
 // ── AC-5: tool calls within a round execute in order ─────────────────────────
 
-// TestToolCall_AC5_InOrderExecution verifies that two tool calls in a single
-// round execute in the order the model emitted them, and each produces exactly
-// one persisted tool-result message.
+// TestToolCall_AC5_InOrderExecution verifies that two tool calls in a single round execute in the order the model
+// emitted them, and each produces exactly one persisted tool-result message.
 func TestToolCall_AC5_InOrderExecution(t *testing.T) {
 	t.Parallel()
 
@@ -520,9 +513,8 @@ func TestToolCall_AC5_InOrderExecution(t *testing.T) {
 
 // ── AC-6: race-clean multi-round ──────────────────────────────────────────────
 
-// TestToolCall_AC6_RaceClean exercises the multi-round loop under the race
-// detector with all fakes (bus, gateway, registry). Running with -race is
-// sufficient to detect data races in the turn goroutine.
+// TestToolCall_AC6_RaceClean exercises the multi-round loop under the race detector with all fakes (bus, gateway,
+// registry). Running with -race is sufficient to detect data races in the turn goroutine.
 func TestToolCall_AC6_RaceClean(t *testing.T) {
 	t.Parallel()
 
@@ -560,9 +552,8 @@ func TestToolCall_AC6_RaceClean(t *testing.T) {
 
 // ── unknown tool graceful handling ───────────────────────────────────────────
 
-// TestToolCall_UnknownTool_GracefulContinue verifies that when the model names
-// a tool not in the catalog, a tool-result message is persisted noting the
-// unknown tool, and the turn continues to the next round.
+// TestToolCall_UnknownTool_GracefulContinue verifies that when the model names a tool not in the catalog, a
+// tool-result message is persisted noting the unknown tool, and the turn continues to the next round.
 func TestToolCall_UnknownTool_GracefulContinue(t *testing.T) {
 	t.Parallel()
 
@@ -613,8 +604,8 @@ func TestToolCall_UnknownTool_GracefulContinue(t *testing.T) {
 
 // ── default step cap ──────────────────────────────────────────────────────────
 
-// TestToolCall_DefaultStepCap verifies that Config{} (zero value) applies the
-// default step cap of 8 rather than spinning indefinitely.
+// TestToolCall_DefaultStepCap verifies that Config{} (zero value) applies the default step cap of 8 rather than
+// spinning indefinitely.
 func TestToolCall_DefaultStepCap(t *testing.T) {
 	t.Parallel()
 

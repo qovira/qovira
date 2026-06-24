@@ -9,8 +9,8 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// openMigratedStore opens a store at a temp path, runs migrations, and
-// registers cleanup. Used by scoped-query integration tests.
+// openMigratedStore opens a store at a temp path, runs migrations, and registers cleanup. Used by scoped-query
+// integration tests.
 func openMigratedStore(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
@@ -26,13 +26,11 @@ func openMigratedStore(t *testing.T) *store.Store {
 	return s
 }
 
-// TestForUser_UserIsolation is the primary AC1 test. It writes rows for two
-// distinct users through their respective Scopes and then asserts that each
-// user's list query returns only their own rows — not the other's.
+// TestForUser_UserIsolation is the primary AC1 test. It writes rows for two distinct users through their respective
+// Scopes and then asserts that each user's list query returns only their own rows — not the other's.
 //
-// Critically, there is no way to pass user B's ID to user A's Scope: the
-// ScopedQueries method signatures accept no user-identity argument. The
-// isolation is structural.
+// Critically, there is no way to pass user B's ID to user A's Scope: the ScopedQueries method signatures accept no
+// user-identity argument. The isolation is structural.
 func TestForUser_UserIsolation(t *testing.T) {
 	t.Parallel()
 
@@ -85,9 +83,8 @@ func TestForUser_UserIsolation(t *testing.T) {
 	}
 }
 
-// TestForUser_GetUserData_CrossUserBlocked verifies that GetUserData with user
-// A's scope cannot retrieve user B's row, even if it supplies B's row ID.
-// It returns sql.ErrNoRows, not a cross-user result.
+// TestForUser_GetUserData_CrossUserBlocked verifies that GetUserData with user A's scope cannot retrieve user B's row,
+// even if it supplies B's row ID. It returns sql.ErrNoRows, not a cross-user result.
 func TestForUser_GetUserData_CrossUserBlocked(t *testing.T) {
 	t.Parallel()
 
@@ -106,12 +103,11 @@ func TestForUser_GetUserData_CrossUserBlocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("GetUserData with user-a scope on user-b's row must return an error (no rows), but it succeeded")
 	}
-	// Must be a "no rows" error, not a permission error — the predicate simply
-	// finds nothing.
+	// Must be a "no rows" error, not a permission error — the predicate simply finds nothing.
 }
 
-// TestForUser_SystemScope_GetInstance verifies AC3: a system scope can reach
-// system-owned tables (GetInstance) without a user_id predicate.
+// TestForUser_SystemScope_GetInstance verifies AC3: a system scope can reach system-owned tables (GetInstance) without
+// a user_id predicate.
 func TestForUser_SystemScope_GetInstance(t *testing.T) {
 	t.Parallel()
 
@@ -129,9 +125,8 @@ func TestForUser_SystemScope_GetInstance(t *testing.T) {
 	}
 }
 
-// TestForUser_SystemScope_UserMethodRejected verifies AC3: calling a
-// user-scoped method (InsertUserData) with a system scope returns a clear
-// error — it does not silently execute an unscoped query.
+// TestForUser_SystemScope_UserMethodRejected verifies AC3: calling a user-scoped method (InsertUserData) with a system
+// scope returns a clear error — it does not silently execute an unscoped query.
 func TestForUser_SystemScope_UserMethodRejected(t *testing.T) {
 	t.Parallel()
 
@@ -147,8 +142,8 @@ func TestForUser_SystemScope_UserMethodRejected(t *testing.T) {
 	t.Logf("SystemScope user-method error (expected): %v", err)
 }
 
-// TestForUser_UserScope_SystemMethodRejected verifies AC3: calling the system
-// method (GetInstance) with a user scope returns a clear error.
+// TestForUser_UserScope_SystemMethodRejected verifies AC3: calling the system method (GetInstance) with a user scope
+// returns a clear error.
 func TestForUser_UserScope_SystemMethodRejected(t *testing.T) {
 	t.Parallel()
 
@@ -164,8 +159,8 @@ func TestForUser_UserScope_SystemMethodRejected(t *testing.T) {
 	t.Logf("UserScope system-method error (expected): %v", err)
 }
 
-// TestForUser_EmptyUserID_Rejected verifies that a UserScope constructed from
-// a Principal with an empty UserID is rejected at query time with a clear error.
+// TestForUser_EmptyUserID_Rejected verifies that a UserScope constructed from a Principal with an empty UserID is
+// rejected at query time with a clear error.
 func TestForUser_EmptyUserID_Rejected(t *testing.T) {
 	t.Parallel()
 
@@ -184,8 +179,8 @@ func TestForUser_EmptyUserID_Rejected(t *testing.T) {
 	}
 }
 
-// TestForUser_DeleteUserData_Scoped verifies that Delete only removes the
-// scoped user's row, leaving the other user's row intact.
+// TestForUser_DeleteUserData_Scoped verifies that Delete only removes the scoped user's row, leaving the other user's
+// row intact.
 func TestForUser_DeleteUserData_Scoped(t *testing.T) {
 	t.Parallel()
 

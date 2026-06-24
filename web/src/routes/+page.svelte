@@ -1,8 +1,7 @@
 <script lang="ts">
   // Home page — chat interface.
   //
-  // Renders the active conversation history (from the conversation store) and
-  // provides a composer to send new messages.
+  // Renders the active conversation history (from the conversation store) and provides a composer to send new messages.
   //
   // Message flow:
   //   1. User types and presses Enter / clicks Send.
@@ -10,20 +9,17 @@
   //   3. The persisted user message is appended to the history store.
   //   4. The assistant reply streams in via SSE (message.delta → applyStreamingDelta,
   //      message.completed → finalizeStreamingMessage) — no polling here.
-  //   5. Tool calls emit tool.started → chip; tool.completed → entity card;
-  //      tool.failed → soft error. Chips render inline below the streaming slot.
-  //   6. On turn.failed, the store's getTurnError() becomes non-null and the UI
-  //      shows a calm generic error line.
+  //   5. Tool calls emit tool.started → chip; tool.completed → entity card; tool.failed → soft error.
+  //      Chips render inline below the streaming slot.
+  //   6. On turn.failed, the store's getTurnError() becomes non-null and the UI shows a calm generic error line.
   //
-  // Security: ALL assistant/tool text flows through renderSafeMarkdown()
-  // (marked → DOMPurify) before {@html}. User messages are rendered as escaped
-  // text (plain {content}), never {@html}.
+  // Security: ALL assistant/tool text flows through renderSafeMarkdown() (marked → DOMPurify) before {@html}. User
+  // messages are rendered as escaped text (plain {content}), never {@html}.
   //
-  // Tool-call / reload-dedup note: tool chips are live-only (SSE events). On a
-  // page reload the history returns with role:"tool" messages and a toolCalls
-  // field on assistant messages — those are NOT yet rendered as chips (the
-  // getToolCalls() store is empty after a reload). Dedup of live vs loaded tool
-  // calls is a follow-up; the live path is clean and keyed by callId.
+  // Tool-call / reload-dedup note: tool chips are live-only (SSE events). On a page reload the history returns with
+  // role:"tool" messages and a toolCalls field on assistant messages — those are NOT yet rendered as chips (the
+  // getToolCalls() store is empty after a reload). Dedup of live vs loaded tool calls is a follow-up; the live path
+  // is clean and keyed by callId.
 
   import { Api } from "$lib/api/index.js";
   import {
@@ -67,8 +63,8 @@
   // Send message
   // ---------------------------------------------------------------------------
 
-  // Narrow postFn adapter — translates the full Api.POST signature for this
-  // endpoint to the PostMessageFn shape expected by sendChatMessage.
+  // Narrow postFn adapter — translates the full Api.POST signature for this endpoint to the PostMessageFn shape
+  // expected by sendChatMessage.
   const postMessageFn: PostMessageFn = async (conversationId, text) =>
     Api.POST("/conversations/{id}/messages", {
       params: { path: { id: conversationId } },
@@ -89,8 +85,8 @@
     sending = true;
     composerText = "";
 
-    // sendChatMessage handles POST + success (append) + error (setTurnFailed).
-    // Returns the text to restore on any error path, null on success.
+    // sendChatMessage handles POST + success (append) + error (setTurnFailed). Returns the text to restore on any
+    // error path, null on success.
     const restoreText = await sendChatMessage(postMessageFn, conversationId, text);
     if (restoreText !== null) {
       composerText = restoreText;

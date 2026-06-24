@@ -1,10 +1,10 @@
 package harness_test
 
-// conversations_test.go — handler tests for GET /api/v1/conversations and
-// GET /api/v1/conversations/{id} (read-only conversation endpoints).
+// conversations_test.go — handler tests for GET /api/v1/conversations and GET /api/v1/conversations/{id} (read-only
+// conversation endpoints).
 //
-// TDD: these tests are written before the handlers exist. They assert the
-// acceptance criteria from the conversation read API issue.
+// TDD: these tests are written before the handlers exist. They assert the acceptance criteria from the conversation
+// read API issue.
 
 import (
 	"context"
@@ -24,8 +24,8 @@ import (
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// seedConversation creates a conversation for the given user with one user message
-// and one assistant message, and returns the conversation ID.
+// seedConversation creates a conversation for the given user with one user message and one assistant message, and
+// returns the conversation ID.
 func seedConversation(t *testing.T, s *store.Store, p store.Principal, userContent string) string {
 	t.Helper()
 	convID := id.New()
@@ -46,8 +46,7 @@ func seedConversation(t *testing.T, s *store.Store, p store.Principal, userConte
 	return convID
 }
 
-// seedConversationWithMessages creates a conversation with multiple messages and
-// returns the conversation ID.
+// seedConversationWithMessages creates a conversation with multiple messages and returns the conversation ID.
 func seedConversationWithMessages(t *testing.T, s *store.Store, p store.Principal) string {
 	t.Helper()
 	convID := id.New()
@@ -103,8 +102,7 @@ func getConversationHistory(h *harness.Harness, p store.Principal, convID string
 
 // ── Part 1: GET /api/v1/conversations ────────────────────────────────────────
 
-// TestListConversations_401_Unauthenticated verifies that unauthenticated
-// requests receive 401.
+// TestListConversations_401_Unauthenticated verifies that unauthenticated requests receive 401.
 func TestListConversations_401_Unauthenticated(t *testing.T) {
 	t.Parallel()
 
@@ -124,8 +122,8 @@ func TestListConversations_401_Unauthenticated(t *testing.T) {
 	}
 }
 
-// TestListConversations_UnknownQueryParam_400 verifies that unknown query
-// parameters are rejected with 400 unknown_query_param.
+// TestListConversations_UnknownQueryParam_400 verifies that unknown query parameters are rejected with 400
+// unknown_query_param.
 func TestListConversations_UnknownQueryParam_400(t *testing.T) {
 	t.Parallel()
 
@@ -150,8 +148,7 @@ func TestListConversations_UnknownQueryParam_400(t *testing.T) {
 	}
 }
 
-// TestListConversations_OnlyCallerConversations verifies that each user only
-// sees their own conversations.
+// TestListConversations_OnlyCallerConversations verifies that each user only sees their own conversations.
 func TestListConversations_OnlyCallerConversations(t *testing.T) {
 	t.Parallel()
 
@@ -193,8 +190,8 @@ func TestListConversations_OnlyCallerConversations(t *testing.T) {
 	}
 }
 
-// TestListConversations_OrderMostRecentFirst verifies that the list is ordered
-// by most-recently-active first (updated_at DESC, id DESC).
+// TestListConversations_OrderMostRecentFirst verifies that the list is ordered by most-recently-active first
+// (updated_at DESC, id DESC).
 func TestListConversations_OrderMostRecentFirst(t *testing.T) {
 	t.Parallel()
 
@@ -326,8 +323,8 @@ func TestListConversations_Pagination(t *testing.T) {
 	}
 }
 
-// TestListConversations_PreviewIsFirstUserMessage verifies that the preview
-// field is the first user message content (truncated if long).
+// TestListConversations_PreviewIsFirstUserMessage verifies that the preview field is the first user message content
+// (truncated if long).
 func TestListConversations_PreviewIsFirstUserMessage(t *testing.T) {
 	t.Parallel()
 
@@ -382,8 +379,7 @@ func TestListConversations_PreviewIsFirstUserMessage(t *testing.T) {
 	}
 }
 
-// TestListConversations_PreviewTruncated verifies that long first messages
-// are truncated with ellipsis.
+// TestListConversations_PreviewTruncated verifies that long first messages are truncated with ellipsis.
 func TestListConversations_PreviewTruncated(t *testing.T) {
 	t.Parallel()
 
@@ -419,8 +415,7 @@ func TestListConversations_PreviewTruncated(t *testing.T) {
 	}
 }
 
-// TestListConversations_EmptyPreview verifies that preview is empty when
-// no user message exists yet.
+// TestListConversations_EmptyPreview verifies that preview is empty when no user message exists yet.
 func TestListConversations_EmptyPreview(t *testing.T) {
 	t.Parallel()
 
@@ -466,9 +461,8 @@ func TestListConversations_EmptyPreview(t *testing.T) {
 	}
 }
 
-// TestListConversations_InvalidCursor_400 verifies that a malformed cursor is
-// rejected with 400 invalid_cursor (not a 500) so a corrupted/forged cursor is a
-// clean client error, never an internal failure.
+// TestListConversations_InvalidCursor_400 verifies that a malformed cursor is rejected with 400 invalid_cursor (not a
+// 500) so a corrupted/forged cursor is a clean client error, never an internal failure.
 func TestListConversations_InvalidCursor_400(t *testing.T) {
 	t.Parallel()
 
@@ -514,8 +508,7 @@ func TestGetConversationHistory_401_Unauthenticated(t *testing.T) {
 	}
 }
 
-// TestGetConversationHistory_404_OtherUser verifies 404 when the conversation
-// belongs to another user.
+// TestGetConversationHistory_404_OtherUser verifies 404 when the conversation belongs to another user.
 func TestGetConversationHistory_404_OtherUser(t *testing.T) {
 	t.Parallel()
 
@@ -544,8 +537,8 @@ func TestGetConversationHistory_404_OtherUser(t *testing.T) {
 	}
 }
 
-// TestGetConversationHistory_FullHistory verifies the full chronological history
-// with correct shape (id, role, content, createdAt, abandoned).
+// TestGetConversationHistory_FullHistory verifies the full chronological history with correct shape (id, role,
+// content, createdAt, abandoned).
 func TestGetConversationHistory_FullHistory(t *testing.T) {
 	t.Parallel()
 
@@ -606,8 +599,8 @@ func TestGetConversationHistory_FullHistory(t *testing.T) {
 	}
 }
 
-// TestGetConversationHistory_ToolCallsShape verifies that tool_calls, toolCallId,
-// and finishReason appear correctly in the response.
+// TestGetConversationHistory_ToolCallsShape verifies that tool_calls, toolCallId, and finishReason appear correctly in
+// the response.
 func TestGetConversationHistory_ToolCallsShape(t *testing.T) {
 	t.Parallel()
 
@@ -701,8 +694,7 @@ func TestGetConversationHistory_ToolCallsShape(t *testing.T) {
 
 // ── Part 3: conversationId on every chat event ────────────────────────────────
 
-// TestChatEvents_CompletedPayload_HasConversationID verifies that message.completed
-// carries conversationId.
+// TestChatEvents_CompletedPayload_HasConversationID verifies that message.completed carries conversationId.
 func TestChatEvents_CompletedPayload_HasConversationID(t *testing.T) {
 	t.Parallel()
 
@@ -747,8 +739,7 @@ func TestChatEvents_CompletedPayload_HasConversationID(t *testing.T) {
 	}
 }
 
-// TestChatEvents_TurnFailedPayload_HasConversationID verifies that turn.failed
-// carries conversationId.
+// TestChatEvents_TurnFailedPayload_HasConversationID verifies that turn.failed carries conversationId.
 func TestChatEvents_TurnFailedPayload_HasConversationID(t *testing.T) {
 	t.Parallel()
 

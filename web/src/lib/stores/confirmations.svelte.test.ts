@@ -1,16 +1,16 @@
 // Tests for confirmation store rune logic.
 //
-// Rune environment: node + Svelte compiler (vitest project "runes").
-// Uses flushSync to drain $derived updates synchronously.
+// Rune environment: node + Svelte compiler (vitest project "runes"). Uses flushSync to drain $derived updates
+// synchronously.
 //
 // Tests the following acceptance criteria:
 //   AC1 — confirmation.required adds an entry with pending state.
 //   AC2 — resolving (approve/deny) transitions to a resolved state.
 //   AC3 — confirmation.expired transitions to an expired state.
-//   AC4 — card persists under its assistant turn after the turn finalizes
-//          (sentinel → real messageId retag via finalizeConfirmationsForMessage).
-//   AC5 — resolveConfirmation() does NOT record a decision when the server
-//          returns a problem+json error (e.g. 409 already-resolved/expired).
+//   AC4 — card persists under its assistant turn after the turn finalizes (sentinel → real messageId retag via
+//          finalizeConfirmationsForMessage).
+//   AC5 — resolveConfirmation() does NOT record a decision when the server returns a problem+json error (e.g. 409
+//          already-resolved/expired).
 //   AC6 — resolveConfirmation() does NOT record a decision on a network throw.
 import { flushSync } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -28,8 +28,8 @@ import {
   type ResolvedConfirmation,
   type ExpiredConfirmation,
 } from "./confirmations.svelte.js";
-// Confirmations anchor to the shared in-flight streaming-slot sentinel (the same
-// id streaming text and tool chips use), so the card renders under that slot.
+// Confirmations anchor to the shared in-flight streaming-slot sentinel (the same id streaming text and tool chips
+// use), so the card renders under that slot.
 import { STREAMING_SENTINEL_ID } from "./conversation.svelte.js";
 
 // ---------------------------------------------------------------------------
@@ -204,8 +204,8 @@ describe("confirmationResolved()", () => {
   });
 
   it("terminal-state guard: does NOT transition a resolved entry back to pending or overwrite decision", () => {
-    // A confirmation that has already been resolved must not be overwritten by a
-    // second call (e.g. a duplicate SSE event or a race condition).
+    // A confirmation that has already been resolved must not be overwritten by a second call (e.g. a duplicate SSE
+    // event or a race condition).
     confirmationRequired({
       conversationId: "c1",
       callId: "call-guard",
@@ -530,10 +530,9 @@ describe("resetConfirmations()", () => {
 // resolveConfirmation() — AC5: server error must NOT record the decision
 // ---------------------------------------------------------------------------
 //
-// The Api wrapper returns { error: ProblemError } on problem+json responses
-// instead of throwing — the component's original bare `catch` never fired on
-// 409/404/422. resolveConfirmation() must check the returned error and leave
-// the entry in "pending" state (and clear `resolving`) on server errors.
+// The Api wrapper returns { error: ProblemError } on problem+json responses instead of throwing — the component's
+// original bare `catch` never fired on 409/404/422. resolveConfirmation() must check the returned error and leave the
+// entry in "pending" state (and clear `resolving`) on server errors.
 
 vi.mock("$lib/api/index.js", () => {
   const ProblemError = class extends Error {
@@ -702,8 +701,8 @@ describe("resolveConfirmation() — AC5: server returns problem+json error", () 
     });
     flushSync();
 
-    // resolveConfirmation must return without leaving the caller hung.
-    // We verify this by confirming it resolves (no hanging promise) and state is still pending.
+    // resolveConfirmation must return without leaving the caller hung. We verify this by confirming it resolves (no
+    // hanging promise) and state is still pending.
     const result = resolveConfirmation(entry, "approve");
     await expect(result).resolves.toBeUndefined();
     flushSync();

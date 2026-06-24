@@ -1,13 +1,13 @@
 -- +goose Up
 -- +goose StatementBegin
--- jobs is the durable job queue for the scheduler. It is privately owned by internal/scheduler;
--- no other package may read or write this table directly. Producers reach it only via Enqueue;
--- the scheduler engine owns the claim, execution, and deletion paths.
+-- jobs is the durable job queue for the scheduler. It is privately owned by internal/scheduler; no other package may
+-- read or write this table directly. Producers reach it only via Enqueue; the scheduler engine owns the claim,
+-- execution, and deletion paths.
 --
 -- Design notes:
 --   - id: ULID (TEXT) primary key — lexicographically sortable, unique, opaque.
---   - key: optional idempotency handle. When set, ON CONFLICT(key) DO NOTHING on INSERT
---     ensures a given logical job is never enqueued twice.
+--   - key: optional idempotency handle. When set, ON CONFLICT(key) DO NOTHING on INSERT ensures a given logical job is
+--     never enqueued twice.
 --   - kind: the dispatch selector — maps to a registered Handler.
 --   - payload: opaque JSON text; the scheduler passes it through to the handler unchanged.
 --   - user_id: nullable. NULL = system scope; non-null = user-scoped job.
@@ -38,23 +38,22 @@ CREATE TABLE jobs (
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Unique index on key: enforces the idempotency / singleton-handle contract.
--- Partial index (WHERE key IS NOT NULL) so that multiple NULL-key (fire-and-forget) rows are allowed.
+-- Unique index on key: enforces the idempotency / singleton-handle contract. Partial index (WHERE key IS NOT NULL) so
+-- that multiple NULL-key (fire-and-forget) rows are allowed.
 CREATE UNIQUE INDEX jobs_key_unique ON jobs (key) WHERE key IS NOT NULL;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Index on (status, run_at): the claim query drives this index to find due pending jobs
--- (WHERE status='pending' AND run_at <= @now ORDER BY run_at LIMIT @batch).
--- Note: this index does NOT cover the reclaim path — see jobs_running_locked_at below.
+-- Index on (status, run_at): the claim query drives this index to find due pending jobs (WHERE status='pending' AND
+-- run_at <= @now ORDER BY run_at LIMIT @batch). Note: this index does NOT cover the reclaim path — see
+-- jobs_running_locked_at below.
 CREATE INDEX jobs_status_run_at ON jobs (status, run_at);
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Partial index on locked_at for the reclaim sweep: ReclaimStaleJobs runs on every poll tick
--- (WHERE status='running' AND locked_at IS NOT NULL AND locked_at < @threshold).
--- Without this index the threshold comparison is a per-row scan of all running rows.
--- The partial predicate (WHERE status = 'running') keeps the index small and focused.
+-- Partial index on locked_at for the reclaim sweep: ReclaimStaleJobs runs on every poll tick (WHERE status='running'
+-- AND locked_at IS NOT NULL AND locked_at < @threshold). Without this index the threshold comparison is a per-row scan
+-- of all running rows. The partial predicate (WHERE status = 'running') keeps the index small and focused.
 CREATE INDEX jobs_running_locked_at ON jobs (locked_at) WHERE status = 'running';
 -- +goose StatementEnd
 

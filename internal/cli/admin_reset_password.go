@@ -51,9 +51,8 @@ so the user must log in again with the new password.`,
 
 			// ── wire auth components ─────────────────────────────────────
 			hasher := auth.NewHasher(auth.DefaultParams)
-			// Policy is passed to NewService for future callers that go through
-			// the service; on this command path policy is enforced explicitly in
-			// execResetPassword before hashing, so the service field is unused here.
+			// Policy is passed to NewService for future callers that go through the service; on this command path
+			// policy is enforced explicitly in execResetPassword before hashing, so the service field is unused here.
 			svc := auth.NewService(s, hasher, auth.DefaultPolicy)
 			sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
 
@@ -79,9 +78,8 @@ so the user must log in again with the new password.`,
 	return cmd
 }
 
-// resolvePassword reads the new password from --password, --password-file, or
-// an interactive double-prompt, in that order of precedence. Setting both
-// --password and --password-file is an error, mirroring the config _FILE rule.
+// resolvePassword reads the new password from --password, --password-file, or an interactive double-prompt, in that
+// order of precedence. Setting both --password and --password-file is an error, mirroring the config _FILE rule.
 func resolvePassword(cmd *cobra.Command) (string, error) {
 	pwFlag, _ := cmd.Flags().GetString("password")
 	pwFileFlag, _ := cmd.Flags().GetString("password-file")
@@ -101,9 +99,8 @@ func resolvePassword(cmd *cobra.Command) (string, error) {
 	}
 }
 
-// readPasswordFile reads the file at path, trims trailing '\n' and '\r'
-// characters (as produced by shell echo or Docker secrets), and returns the
-// result. Mirrors the exact trim behaviour of the unexported readSecretFile in
+// readPasswordFile reads the file at path, trims trailing '\n' and '\r' characters (as produced by shell echo or
+// Docker secrets), and returns the result. Mirrors the exact trim behaviour of the unexported readSecretFile in
 // internal/config.
 func readPasswordFile(path string) (string, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // operator-provided path; intentional
@@ -113,9 +110,8 @@ func readPasswordFile(path string) (string, error) {
 	return strings.TrimRight(string(data), "\n\r"), nil
 }
 
-// promptPassword reads the new password interactively (no echo) and confirms
-// it by prompting a second time. Returns an error when the two entries do not
-// match.
+// promptPassword reads the new password interactively (no echo) and confirms it by prompting a second time. Returns an
+// error when the two entries do not match.
 func promptPassword() (string, error) {
 	fmt.Fprint(os.Stderr, "New password: ")
 	first, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -137,9 +133,8 @@ func promptPassword() (string, error) {
 	return string(first), nil
 }
 
-// execResetPassword orchestrates the lookup → policy check → hash → store →
-// revoke sequence. Keeping it separate from the cobra RunE makes it testable
-// without a real TTY.
+// execResetPassword orchestrates the lookup → policy check → hash → store → revoke sequence. Keeping it separate from
+// the cobra RunE makes it testable without a real TTY.
 func execResetPassword(
 	cmd *cobra.Command,
 	svc *auth.Service,
@@ -158,9 +153,8 @@ func execResetPassword(
 		return fmt.Errorf("look up user: %w", err)
 	}
 
-	// Enforce password policy before touching the DB. The policy field on the
-	// Service is not used on this path — we validate explicitly so the error
-	// message is user-facing and the DB is never touched on a policy violation.
+	// Enforce password policy before touching the DB. The policy field on the Service is not used on this path — we
+	// validate explicitly so the error message is user-facing and the DB is never touched on a policy violation.
 	if err = auth.DefaultPolicy.ValidatePassword(newPwd); err != nil {
 		return fmt.Errorf("password policy: %w", err)
 	}

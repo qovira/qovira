@@ -102,12 +102,10 @@ func (sq *ScopedQueries) GetInstance(ctx context.Context) (db.Instance, error) {
 // errUserScopeForSystemMethod is returned when a system-only method is called with a user scope.
 var errUserScopeForSystemMethod = errors.New("store: system-only method called with a user scope")
 
-// GetProfile retrieves the profile fields for the bound user from the users table.
-// users is system-owned (exempt from the scope guard), but this method is
-// user-scoped by design: it selects WHERE id = <bound user id> so only the
-// authenticated user's own row is returned. It does not call checkUserScope
-// because the users table has no user_id column; instead, it asserts a non-empty
-// user ID directly.
+// GetProfile retrieves the profile fields for the bound user from the users table. users is system-owned (exempt from
+// the scope guard), but this method is user-scoped by design: it selects WHERE id = <bound user id> so only the
+// authenticated user's own row is returned. It does not call checkUserScope because the users table has no user_id
+// column; instead, it asserts a non-empty user ID directly.
 func (sq *ScopedQueries) GetProfile(ctx context.Context) (db.User, error) {
 	if sq.scope.IsSystem() {
 		return db.User{}, fmt.Errorf("GetProfile: %w", errUserScopeForSystemMethod)

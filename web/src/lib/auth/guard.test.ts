@@ -16,8 +16,8 @@ import { describe, expect, it } from "vitest";
 import { isExemptRoute, shouldRedirectToLogin } from "./guard.js";
 
 // ---------------------------------------------------------------------------
-// isExemptRoute — routes reachable without a session (used by the layout to
-// render immediately, without waiting on the boot probe)
+// isExemptRoute — routes reachable without a session (used by the layout to render immediately, without waiting on the
+// boot probe)
 // ---------------------------------------------------------------------------
 
 describe("isExemptRoute", () => {

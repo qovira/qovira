@@ -1,16 +1,14 @@
 /**
- * i18n catalog guard — asserts that the compiled Paraglide message module is
- * present and that every shell message key resolves to a non-empty English
- * string.
+ * i18n catalog guard — asserts that the compiled Paraglide message module is present and that every
+ * shell message key resolves to a non-empty English string.
  *
- * This test runs in the `node` vitest project (no DOM, no Vite) and imports
- * from the compiled `src/lib/paraglide/messages.js` output directly. If the
- * generated directory is missing, the import fails with a clear error.
+ * This test runs in the `node` vitest project (no DOM, no Vite) and imports from the compiled
+ * `src/lib/paraglide/messages.js` output directly. If the generated directory is missing, the
+ * import fails with a clear error.
  *
- * Purpose: a build-time guard that the catalog is wired and complete for the
- * current v0.1 shell surfaces (rail / layout / login / settings / placeholders).
- * It does NOT snapshot the whole catalog — only the keys that map to current
- * shell surfaces.
+ * Purpose: a build-time guard that the catalog is wired and complete for the current v0.1 shell
+ * surfaces (rail / layout / login / settings / placeholders). It does NOT snapshot the whole
+ * catalog — only the keys that map to current shell surfaces.
  */
 
 import { describe, expect, it } from "vitest";
@@ -43,8 +41,8 @@ import {
   chat_turn_failed,
 } from "../lib/paraglide/messages.js";
 
-// All shell message functions expected to resolve to non-empty English strings.
-// This map covers every key catalogued for the v0.1 shell.
+// All shell message functions expected to resolve to non-empty English strings. This map covers
+// every key catalogued for the v0.1 shell.
 const shellMessages: Record<string, () => string> = {
   nav_aria_label,
   nav_loading,

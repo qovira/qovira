@@ -1,6 +1,6 @@
 -- Queries for the messages table.
--- Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
--- belongs to the bound Scope. Parameters use sqlc named params (@name).
+-- Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always belongs to the bound Scope.
+-- Parameters use sqlc named params (@name).
 
 -- name: InsertMessage :one
 INSERT INTO messages (id, conversation_id, user_id, role, content, tool_calls, tool_call_id, finish_reason)

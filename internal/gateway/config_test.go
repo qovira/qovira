@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// fakeSettings is a pure in-memory settingsReader for use in tests.
-// It is safe for concurrent use (protected by a mutex so -race is clean).
+// fakeSettings is a pure in-memory settingsReader for use in tests. It is safe for concurrent use (protected by a mutex
+// so -race is clean).
 type fakeSettings struct {
 	mu   sync.RWMutex
 	data map[string]string
@@ -40,17 +40,15 @@ func (fs *fakeSettings) set(key, value string) {
 	fs.data[key] = value
 }
 
-// newGatewayWithFake constructs a Gateway backed by the provided fakeSettings.
-// It bypasses New (which requires a *store.SettingsStore) so that tests stay
-// CGO-free. The gateway uses the resilience defaults (which include real sleep)
-// unless overridden with withTestResilienceConfig.
+// newGatewayWithFake constructs a Gateway backed by the provided fakeSettings. It bypasses New (which requires a
+// *store.SettingsStore) so that tests stay CGO-free. The gateway uses the resilience defaults (which include real
+// sleep) unless overridden with withTestResilienceConfig.
 func newGatewayWithFake(fs settingsReader) *Gateway {
 	return &Gateway{settings: fs, httpClient: newHTTPClient(), resilienceCfg: defaultResilienceConfig()}
 }
 
-// testResilienceConfig returns a ResilienceConfig suitable for unit tests:
-// tiny timeouts and a no-op sleep function so retries are deterministic and
-// complete in microseconds rather than seconds.
+// testResilienceConfig returns a ResilienceConfig suitable for unit tests: tiny timeouts and a no-op sleep function so
+// retries are deterministic and complete in microseconds rather than seconds.
 func testResilienceConfig() ResilienceConfig {
 	noSleep := func(time.Duration) {}
 	return ResilienceConfig{
@@ -70,8 +68,7 @@ func newTestGateway(t *testing.T, fs settingsReader) *Gateway {
 	return gw
 }
 
-// fullPrimary returns the fake settings keys that represent a fully-configured
-// primary endpoint.
+// fullPrimary returns the fake settings keys that represent a fully-configured primary endpoint.
 func fullPrimary(baseURL, apiKey, model string) []string {
 	return []string{
 		"primary.baseURL", baseURL,

@@ -1,7 +1,6 @@
-// Package authhttp implements the HTTP transport layer for authentication and
-// self-service account management.  Domain logic lives in [auth.Service] and
-// [auth.Sessions]; this package only handles JSON encoding, cookie management,
-// and route registration.
+// Package authhttp implements the HTTP transport layer for authentication and self-service account management.  Domain
+// logic lives in [auth.Service] and [auth.Sessions]; this package only handles JSON encoding, cookie management, and
+// route registration.
 //
 // The auth endpoints live under /api/v1/auth:
 //
@@ -32,8 +31,8 @@ import (
 
 // ── Module ────────────────────────────────────────────────────────────────────
 
-// Module is the auth HTTP feature slice.  It satisfies [app.Module] and mounts
-// the three auth endpoints onto the shared [httpx.Router].
+// Module is the auth HTTP feature slice.  It satisfies [app.Module] and mounts the three auth endpoints onto the shared
+// [httpx.Router].
 //
 // Construct via [New]; the zero value is not valid.
 type Module struct {
@@ -44,9 +43,8 @@ type Module struct {
 	logger   *slog.Logger
 }
 
-// New constructs a [Module] backed by the provided service, sessions, config,
-// clock function, and logger.  Pass [time.Now] as now in production; inject a
-// synthetic clock in tests for deterministic expiry assertions.  If logger is
+// New constructs a [Module] backed by the provided service, sessions, config, clock function, and logger.  Pass
+// [time.Now] as now in production; inject a synthetic clock in tests for deterministic expiry assertions.  If logger is
 // nil, [slog.Default] is used.
 func New(
 	svc *auth.Service,
@@ -82,8 +80,8 @@ func (m *Module) Routes(r *httpx.Router) {
 
 // ── Handlers (exported for direct testing) ────────────────────────────────────
 
-// LoginHandler returns the handler for POST /api/v1/auth/login.
-// It is exported so package-level tests can call it without starting a real server.
+// LoginHandler returns the handler for POST /api/v1/auth/login. It is exported so package-level tests can call it
+// without starting a real server.
 func (m *Module) LoginHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -126,15 +124,13 @@ func (m *Module) LoginHandler() http.HandlerFunc {
 
 		maxAge := int(m.cfg.AbsoluteTTL.Seconds())
 
-		// __Host- prefix mandates: Secure=true, Path="/", no Domain attribute.
-		// HttpOnly prevents JavaScript from reading the session token.
-		// authCookie bakes in Secure/SameSite=Strict/Path so both set and clear
-		// paths use identical attributes and the browser finds the same jar entry.
+		// __Host- prefix mandates: Secure=true, Path="/", no Domain attribute. HttpOnly prevents JavaScript from
+		// reading the session token. authCookie bakes in Secure/SameSite=Strict/Path so both set and clear paths use
+		// identical attributes and the browser finds the same jar entry.
 		http.SetCookie(w, authCookie(httpx.SessionCookieName, token, true, maxAge))
 
-		// The CSRF cookie must be readable by JavaScript (no HttpOnly) so the
-		// SPA can echo it as the CSRF-Token request header on unsafe methods.
-		// G124: HttpOnly=false is intentional for the CSRF double-submit pattern.
+		// The CSRF cookie must be readable by JavaScript (no HttpOnly) so the SPA can echo it as the CSRF-Token
+		// request header on unsafe methods. G124: HttpOnly=false is intentional for the CSRF double-submit pattern.
 		http.SetCookie(w, authCookie(httpx.CSRFCookieName, csrfToken, false, maxAge)) //nolint:gosec // G124: HttpOnly=false intentional for CSRF double-submit
 
 		resp := loginResponseBody{
@@ -148,9 +144,8 @@ func (m *Module) LoginHandler() http.HandlerFunc {
 	}
 }
 
-// LogoutOneHandler returns the handler for DELETE /api/v1/auth/session.
-// It deletes the current session (identified via cookie or Bearer header) and
-// clears both cookies.
+// LogoutOneHandler returns the handler for DELETE /api/v1/auth/session. It deletes the current session (identified via
+// cookie or Bearer header) and clears both cookies.
 func (m *Module) LogoutOneHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token, _ := httpx.SessionTokenFromRequest(r)
@@ -163,9 +158,8 @@ func (m *Module) LogoutOneHandler() http.HandlerFunc {
 	}
 }
 
-// LogoutAllHandler returns the handler for DELETE /api/v1/auth/sessions.
-// It deletes all sessions for the authenticated user (from context) and clears
-// both cookies.
+// LogoutAllHandler returns the handler for DELETE /api/v1/auth/sessions. It deletes all sessions for the authenticated
+// user (from context) and clears both cookies.
 func (m *Module) LogoutAllHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := httpx.PrincipalFromContext(r.Context())
@@ -177,16 +171,14 @@ func (m *Module) LogoutAllHandler() http.HandlerFunc {
 	}
 }
 
-// MeHandler returns the handler for GET /api/v1/me.
-// It returns the current authenticated user's record as {"user": {...}}.
-// The user ID is always taken from the Principal in context — never from the
-// request body or path.
+// MeHandler returns the handler for GET /api/v1/me. It returns the current authenticated user's record as
+// {"user": {...}}. The user ID is always taken from the Principal in context — never from the request body or path.
 func (m *Module) MeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := httpx.PrincipalFromContext(r.Context())
 		if !ok {
-			// This route is never reached unauthenticated (middleware guarantees it),
-			// so a missing principal is an internal wiring error.
+			// This route is never reached unauthenticated (middleware guarantees it), so a missing principal is an
+			// internal wiring error.
 			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "get_me_principal_missing", "principal missing from context on protected route"))
 			return
 		}
@@ -204,11 +196,9 @@ func (m *Module) MeHandler() http.HandlerFunc {
 	}
 }
 
-// UpdateMeHandler returns the handler for PATCH /api/v1/me.
-// It applies merge semantics: only fields present in the body are changed;
-// omitted fields retain their current values.  The role and email fields cannot
-// be changed via this endpoint — unknown keys (including "role" and "email") are
-// silently ignored by encoding/json.
+// UpdateMeHandler returns the handler for PATCH /api/v1/me. It applies merge semantics: only fields present in the body
+// are changed; omitted fields retain their current values.  The role and email fields cannot be changed via this
+// endpoint — unknown keys (including "role" and "email") are silently ignored by encoding/json.
 func (m *Module) UpdateMeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := httpx.PrincipalFromContext(r.Context())
@@ -272,10 +262,9 @@ func (m *Module) UpdateMeHandler() http.HandlerFunc {
 	}
 }
 
-// ChangePasswordHandler returns the handler for POST /api/v1/me/password.
-// It verifies the current password, validates and stores the new one, and then
-// revokes every OTHER session for the user while keeping the caller's current
-// session alive.  Returns 204 on success.
+// ChangePasswordHandler returns the handler for POST /api/v1/me/password. It verifies the current password, validates
+// and stores the new one, and then revokes every OTHER session for the user while keeping the caller's current session
+// alive.  Returns 204 on success.
 func (m *Module) ChangePasswordHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := httpx.PrincipalFromContext(r.Context())
@@ -297,9 +286,8 @@ func (m *Module) ChangePasswordHandler() http.HandlerFunc {
 		if err != nil {
 			if errors.Is(err, auth.ErrInvalidCredentials) {
 				// Finding 2: use "validation_error" for cross-endpoint consistency.
-				// Finding 4: problem-level detail is a general message; the specific
-				// "incorrect" detail lives only on the field error (mirrors the
-				// weak-new-password branch shape).
+				// Finding 4: problem-level detail is a general message; the specific "incorrect" detail lives
+				// only on the field error (mirrors the weak-new-password branch shape).
 				httpx.WriteProblem(w, r, httpx.ValidationProblem(
 					"validation_error",
 					"Request validation failed.",
@@ -327,15 +315,14 @@ func (m *Module) ChangePasswordHandler() http.HandlerFunc {
 		}
 		sess, err := m.sessions.Lookup(r.Context(), token)
 		if err != nil {
-			// The password is already changed here; without the current session ID we
-			// cannot scope the revocation, so other sessions may survive. Log it as a
-			// security-relevant event so an operator can react.
+			// The password is already changed here; without the current session ID we cannot scope the revocation,
+			// so other sessions may survive. Log it as a security-relevant event so an operator can react.
 			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "password_changed_session_lookup_failed", "password changed but current session lookup failed; other sessions were not revoked and may remain valid: "+err.Error()))
 			return
 		}
 		if err := m.sessions.DeleteAllOtherForUser(r.Context(), principal.UserID, sess.ID); err != nil {
-			// Same security-relevant state: the new hash is persisted but stale sessions
-			// may still resolve. Surface enough detail server-side to alert an operator.
+			// Same security-relevant state: the new hash is persisted but stale sessions may still resolve. Surface
+			// enough detail server-side to alert an operator.
 			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "password_changed_revocation_failed", "password changed but revoking other sessions failed; stale sessions may remain valid: "+err.Error()))
 			return
 		}
@@ -346,21 +333,20 @@ func (m *Module) ChangePasswordHandler() http.HandlerFunc {
 
 // ── Response types ────────────────────────────────────────────────────────────
 
-// loginResponseBody is the JSON shape returned on a successful login.
-// Fields are camelCase per the HTTP house guide.
+// loginResponseBody is the JSON shape returned on a successful login. Fields are camelCase per the HTTP house guide.
 type loginResponseBody struct {
 	ExpiresAt string   `json:"expiresAt"`
 	User      userJSON `json:"user"`
 }
 
-// meResponseBody is the JSON shape returned by GET /api/v1/me and PATCH /api/v1/me.
-// A single resource is returned bare (no collection wrapper) per the HTTP house guide.
+// meResponseBody is the JSON shape returned by GET /api/v1/me and PATCH /api/v1/me. A single resource is returned bare
+// (no collection wrapper) per the HTTP house guide.
 type meResponseBody struct {
 	User userJSON `json:"user"`
 }
 
-// userJSON is the safe user sub-object in the login response.  It deliberately
-// omits PasswordHash; it mirrors the public fields of [auth.User].
+// userJSON is the safe user sub-object in the login response.  It deliberately omits PasswordHash; it mirrors the
+// public fields of [auth.User].
 type userJSON struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
@@ -386,15 +372,12 @@ func userBody(u auth.User) userJSON {
 
 // ── Cookie helpers ────────────────────────────────────────────────────────────
 
-// authCookie builds a cookie for the auth layer, baking in the shared security
-// attributes (Secure, SameSite, Path) that must be identical on both the set
-// and clear paths. Using a single factory prevents the browser from treating a
-// mismatched clear cookie as a different jar entry, which would silently leave
-// the original cookie intact after logout.
+// authCookie builds a cookie for the auth layer, baking in the shared security attributes (Secure, SameSite, Path)
+// that must be identical on both the set and clear paths. Using a single factory prevents the browser from treating a
+// mismatched clear cookie as a different jar entry, which would silently leave the original cookie intact after logout.
 //
-// SameSite=Strict: Qovira is a single-user self-hosted SPA with no legitimate
-// cross-site top-level entry flow; Strict is a tighter default than Lax and
-// adds defense-in-depth on top of the existing double-submit CSRF check.
+// SameSite=Strict: Qovira is a single-user self-hosted SPA with no legitimate cross-site top-level entry flow; Strict
+// is a tighter default than Lax and adds defense-in-depth on top of the existing double-submit CSRF check.
 func authCookie(name, value string, httpOnly bool, maxAge int) *http.Cookie {
 	return &http.Cookie{ //nolint:gosec // G124: HttpOnly is parameterised; callers that pass false (CSRF cookie) carry their own nolint at the call site
 		Name:     name,
@@ -407,21 +390,20 @@ func authCookie(name, value string, httpOnly bool, maxAge int) *http.Cookie {
 	}
 }
 
-// clearAuthCookies emits expired Set-Cookie headers for both the session and
-// CSRF cookies.  MaxAge=-1 causes Go's http package to render Max-Age=0 on the
-// wire, which instructs browsers to delete the cookie immediately.
+// clearAuthCookies emits expired Set-Cookie headers for both the session and CSRF cookies.  MaxAge=-1 causes Go's http
+// package to render Max-Age=0 on the wire, which instructs browsers to delete the cookie immediately.
 //
-// The attributes (Secure, SameSite, Path, HttpOnly) must mirror the login set
-// path exactly; authCookie enforces that single source of truth.
+// The attributes (Secure, SameSite, Path, HttpOnly) must mirror the login set path exactly; authCookie enforces that
+// single source of truth.
 func clearAuthCookies(w http.ResponseWriter) {
 	http.SetCookie(w, authCookie(httpx.SessionCookieName, "", true, -1))
-	// G124: HttpOnly=false intentional — mirrors the login cookie so the browser
-	// deletes the correct jar entry (HttpOnly and non-HttpOnly are separate entries).
+	// G124: HttpOnly=false intentional — mirrors the login cookie so the browser deletes the correct jar entry
+	// (HttpOnly and non-HttpOnly are separate entries).
 	http.SetCookie(w, authCookie(httpx.CSRFCookieName, "", false, -1)) //nolint:gosec // G124: HttpOnly=false intentional for CSRF double-submit pattern
 }
 
-// generateCSRFToken returns a 32-byte random value encoded as base64url (no
-// padding).  It uses [crypto/rand] exclusively.
+// generateCSRFToken returns a 32-byte random value encoded as base64url (no padding).  It uses [crypto/rand]
+// exclusively.
 func generateCSRFToken() (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {

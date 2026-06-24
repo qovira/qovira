@@ -2,9 +2,9 @@ package harness
 
 // policy.go — trust-gating policy for the AI turn executor.
 //
-// The policy function is a pure, table-driven function mapping (RiskTier, TrustLevel)
-// to a Decision. It is the single source of truth for what the harness does with a
-// tool call; the execute step and catalog filter both consult it.
+// The policy function is a pure, table-driven function mapping (RiskTier, TrustLevel) to a Decision. It is the
+// single source of truth for what the harness does with a tool call; the execute step and catalog filter both
+// consult it.
 //
 // Policy matrix:
 //
@@ -15,9 +15,9 @@ package harness
 //	RiskExternal    | Confirm | Confirm
 //	RiskDestructive | Confirm | Block
 //
-// In v0.1 only the Trusted column is reachable via ResolveOrigin; the Untrusted
-// column is built, tested, and enforced, but no live origin resolves to Untrusted.
-// v0.2 changes only the resolver — policy and the execute switch are stable.
+// In v0.1 only the Trusted column is reachable via ResolveOrigin; the Untrusted column is built, tested, and
+// enforced, but no live origin resolves to Untrusted. v0.2 changes only the resolver — policy and the execute
+// switch are stable.
 
 import "github.com/qovira/qovira/internal/capability"
 
@@ -27,21 +27,21 @@ type Decision int
 const (
 	// Auto means the tool call should be executed immediately, without confirmation.
 	Auto Decision = iota
-	// Confirm means the tool call requires explicit confirmation before execution.
-	// In this slice the seam suspends the turn; the next slice (confirmation-suspend-resume)
-	// will persist pending_confirmations, emit confirmation.required, and enable Resolve.
+	// Confirm means the tool call requires explicit confirmation before execution. In this slice the seam suspends
+	// the turn; the next slice (confirmation-suspend-resume) will persist pending_confirmations, emit
+	// confirmation.required, and enable Resolve.
 	Confirm
-	// Block means the tool call must not be executed and should be refused with a
-	// model-visible "not permitted from this source" result so the model can adapt.
+	// Block means the tool call must not be executed and should be refused with a model-visible "not permitted from
+	// this source" result so the model can adapt.
 	Block
 )
 
-// policy returns the execution Decision for a tool call based on the tool's
-// RiskTier and the caller's TrustLevel. It is a pure function: no I/O, no side effects.
+// policy returns the execution Decision for a tool call based on the tool's RiskTier and the caller's TrustLevel.
+// It is a pure function: no I/O, no side effects.
 //
-// The full 4×2 matrix is encoded directly so the exhaustive linter stays happy and
-// the logic is readable at a glance. The inner TrustLevel switch must be exhaustive
-// over all TrustLevel values; the outer RiskTier default catches future unknown tiers.
+// The full 4×2 matrix is encoded directly so the exhaustive linter stays happy and the logic is readable at a
+// glance. The inner TrustLevel switch must be exhaustive over all TrustLevel values; the outer RiskTier default
+// catches future unknown tiers.
 func policy(risk capability.RiskTier, trust TrustLevel) Decision {
 	switch risk {
 	case capability.RiskRead:
@@ -73,11 +73,10 @@ func policy(risk capability.RiskTier, trust TrustLevel) Decision {
 	return Confirm
 }
 
-// filterCatalogForTrust returns the subset of tools that should be offered to the
-// model given the caller's trust level. This is the advisory catalog filter (Layer 1):
-// it omits tools whose policy(tool.Risk, trust) == Block so the model is not tempted
-// to call them. The execution gate (Layer 2) enforces Block even if the model ignores
-// the filtered catalog.
+// filterCatalogForTrust returns the subset of tools that should be offered to the model given the caller's trust
+// level. This is the advisory catalog filter (Layer 1): it omits tools whose policy(tool.Risk, trust) == Block so
+// the model is not tempted to call them. The execution gate (Layer 2) enforces Block even if the model ignores the
+// filtered catalog.
 func filterCatalogForTrust(tools []capability.Tool, trust TrustLevel) []capability.Tool {
 	out := make([]capability.Tool, 0, len(tools))
 	for _, t := range tools {

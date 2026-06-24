@@ -1,8 +1,8 @@
 package harness_test
 
-// harness_errors_test.go — integration tests for error classification behavior.
-// These test the observable outcomes (events, persisted data) for each fault class.
-// Satisfies AC-1, AC-2, AC-4, and AC-5 from the error-classification issue.
+// harness_errors_test.go — integration tests for error classification behavior. These test the observable
+// outcomes (events, persisted data) for each fault class. Satisfies AC-1, AC-2, AC-4, and AC-5 from the
+// error-classification issue.
 
 import (
 	"context"
@@ -23,8 +23,8 @@ import (
 
 // ── helpers for error classification tests ────────────────────────────────────
 
-// waitForTurnFailed blocks until a "turn.failed" event is present on the bus,
-// or the timeout expires. Returns the full event snapshot.
+// waitForTurnFailed blocks until a "turn.failed" event is present on the bus, or the timeout expires. Returns the
+// full event snapshot.
 func waitForTurnFailed(t *testing.T, b *fakeBus, timeout time.Duration) []fakeEvent {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -40,9 +40,8 @@ func waitForTurnFailed(t *testing.T, b *fakeBus, timeout time.Duration) []fakeEv
 	return b.snapshot()
 }
 
-// startTurnForErrors fires a turn by inserting a user message and calling StartTurn.
-// Unlike startTurnAndWait it does not wait for message.completed because error
-// paths may never emit that event.
+// startTurnForErrors fires a turn by inserting a user message and calling StartTurn. Unlike startTurnAndWait it
+// does not wait for message.completed because error paths may never emit that event.
 func startTurnForErrors(
 	t *testing.T,
 	h *harness.Harness,
@@ -140,8 +139,7 @@ func (s *streamErrorChatter) Chat(_ context.Context, _ gateway.ChatRequest) (ite
 
 // ── AC-1: ToolError continues the loop ───────────────────────────────────────
 
-// TestErrorClass_ToolError_ContinuesLoop verifies that a tool returning
-// *capability.ToolError:
+// TestErrorClass_ToolError_ContinuesLoop verifies that a tool returning *capability.ToolError:
 //   - Emits tool.failed with the model-safe message.
 //   - Persists the tool result with the model-safe message as content.
 //   - Continues the loop so a second round runs and message.completed is emitted.
@@ -249,8 +247,7 @@ func TestErrorClass_ToolError_ContinuesLoop(t *testing.T) {
 
 // ── AC-2: infrastructure error aborts the turn ───────────────────────────────
 
-// TestErrorClass_InfraError_AbortsWithTurnFailed verifies that a generic
-// infrastructure error from the gateway:
+// TestErrorClass_InfraError_AbortsWithTurnFailed verifies that a generic infrastructure error from the gateway:
 //   - Emits turn.failed with a stable code (no raw error text).
 //   - Does NOT emit message.completed.
 //   - The raw error is NOT in any persisted message.
@@ -308,8 +305,8 @@ func TestErrorClass_InfraError_GatewaySetup_AbortsWithTurnFailed(t *testing.T) {
 	}
 }
 
-// TestErrorClass_InfraError_StreamError_AbortsWithTurnFailed verifies that a
-// generic infra error delivered mid-stream also aborts the turn.
+// TestErrorClass_InfraError_StreamError_AbortsWithTurnFailed verifies that a generic infra error delivered
+// mid-stream also aborts the turn.
 func TestErrorClass_InfraError_StreamError_AbortsWithTurnFailed(t *testing.T) {
 	t.Parallel()
 
@@ -350,8 +347,8 @@ func TestErrorClass_InfraError_StreamError_AbortsWithTurnFailed(t *testing.T) {
 	}
 }
 
-// TestErrorClass_GatewayErrAuth_AbortsWithTurnFailed verifies that gateway
-// ErrAuth (a typed gateway error) causes turn.failed, not a loop.
+// TestErrorClass_GatewayErrAuth_AbortsWithTurnFailed verifies that gateway ErrAuth (a typed gateway error) causes
+// turn.failed, not a loop.
 func TestErrorClass_GatewayErrAuth_AbortsWithTurnFailed(t *testing.T) {
 	t.Parallel()
 
@@ -382,8 +379,8 @@ func TestErrorClass_GatewayErrAuth_AbortsWithTurnFailed(t *testing.T) {
 	}
 }
 
-// TestErrorClass_InfraError_NotFedToModel verifies that the raw infra error
-// text does not appear in any persisted message (would be sent to the model).
+// TestErrorClass_InfraError_NotFedToModel verifies that the raw infra error text does not appear in any persisted
+// message (would be sent to the model).
 func TestErrorClass_InfraError_NotFedToModel(t *testing.T) {
 	t.Parallel()
 
@@ -419,8 +416,8 @@ func TestErrorClass_InfraError_NotFedToModel(t *testing.T) {
 
 // ── AC-5: panic recovery emits turn.failed ────────────────────────────────────
 
-// TestErrorClass_Panic_EmitsTurnFailed verifies that a panic in the gateway
-// is caught, does not crash the goroutine, and emits turn.failed.
+// TestErrorClass_Panic_EmitsTurnFailed verifies that a panic in the gateway is caught, does not crash the
+// goroutine, and emits turn.failed.
 func TestErrorClass_Panic_EmitsTurnFailed(t *testing.T) {
 	t.Parallel()
 
@@ -435,8 +432,7 @@ func TestErrorClass_Panic_EmitsTurnFailed(t *testing.T) {
 	convID := id.New()
 	startTurnForErrors(t, h, s, p, convID)
 
-	// If panic is not recovered, the goroutine crashes and turn.failed never fires —
-	// the test will timeout.
+	// If panic is not recovered, the goroutine crashes and turn.failed never fires — the test will timeout.
 	evs := waitForTurnFailed(t, bus, 5*time.Second)
 
 	var hasTurnFailed bool
@@ -453,8 +449,8 @@ func TestErrorClass_Panic_EmitsTurnFailed(t *testing.T) {
 	}
 }
 
-// TestErrorClass_ToolPanic_EmitsTurnFailed verifies that a panic in a tool's
-// Execute function is caught and emits turn.failed (panics in tools are infra).
+// TestErrorClass_ToolPanic_EmitsTurnFailed verifies that a panic in a tool's Execute function is caught and emits
+// turn.failed (panics in tools are infra).
 func TestErrorClass_ToolPanic_EmitsTurnFailed(t *testing.T) {
 	t.Parallel()
 
@@ -504,8 +500,8 @@ func TestErrorClass_ToolPanic_EmitsTurnFailed(t *testing.T) {
 
 // ── AC-1 supplement: unknown tool uses tool.failed path ──────────────────────
 
-// TestErrorClass_UnknownTool_EmitsToolFailed verifies that an unknown tool
-// name now goes through the tool.failed + continue path (not raw error stub).
+// TestErrorClass_UnknownTool_EmitsToolFailed verifies that an unknown tool name now goes through the tool.failed +
+// continue path (not raw error stub).
 func TestErrorClass_UnknownTool_EmitsToolFailed(t *testing.T) {
 	t.Parallel()
 
@@ -561,9 +557,8 @@ func TestErrorClass_UnknownTool_EmitsToolFailed(t *testing.T) {
 
 // ── ErrContextLength routing ──────────────────────────────────────────────────
 
-// TestErrorClass_ErrContextLength_RoutesToSeam verifies that ErrContextLength
-// routes to the context-length seam and emits exactly ONE terminal event:
-// message.completed with finishReason "context_length". It must NOT emit
+// TestErrorClass_ErrContextLength_RoutesToSeam verifies that ErrContextLength routes to the context-length seam
+// and emits exactly ONE terminal event: message.completed with finishReason "context_length". It must NOT emit
 // turn.failed — that would be a contradictory double-terminal on the same turn.
 func TestErrorClass_ErrContextLength_RoutesToSeam(t *testing.T) {
 	t.Parallel()
@@ -622,8 +617,8 @@ done:
 		t.Errorf("message.completed finishReason = %q, want %q", completedEvts[0].FinishReason, "context_length")
 	}
 
-	// Zero turn.failed events — a client treats message.completed and turn.failed
-	// as mutually exclusive terminal events; emitting both is a protocol violation.
+	// Zero turn.failed events — a client treats message.completed and turn.failed as mutually exclusive terminal
+	// events; emitting both is a protocol violation.
 	if len(turnFailedEvts) != 0 {
 		t.Errorf("turn.failed count = %d, want 0 — context_length must not emit turn.failed alongside message.completed", len(turnFailedEvts))
 	}
@@ -631,8 +626,8 @@ done:
 
 // ── AC-4 supplement: tool.failed carries ONLY model-safe message ──────────────
 
-// TestErrorClass_ToolFailed_ModelSafeMessageOnly verifies AC-4: the tool.failed
-// event carries exactly the *ToolError.Message and nothing from the wrapped error.
+// TestErrorClass_ToolFailed_ModelSafeMessageOnly verifies AC-4: the tool.failed event carries exactly the
+// *ToolError.Message and nothing from the wrapped error.
 func TestErrorClass_ToolFailed_ModelSafeMessageOnly(t *testing.T) {
 	t.Parallel()
 
@@ -652,8 +647,8 @@ func TestErrorClass_ToolFailed_ModelSafeMessageOnly(t *testing.T) {
 		[]byte(`{"type":"object","properties":{}}`),
 		capability.RiskRead,
 		func(_ context.Context, _ store.Scope, _ args) (capability.Result, error) {
-			// The tool returns only the model-safe ToolError; the internal
-			// detail is deliberately not in ToolError.Message.
+			// The tool returns only the model-safe ToolError; the internal detail is deliberately not in
+			// ToolError.Message.
 			return nil, &capability.ToolError{
 				Code:    "invalid_date",
 				Message: modelSafeMessage,
@@ -694,6 +689,6 @@ func TestErrorClass_ToolFailed_ModelSafeMessageOnly(t *testing.T) {
 	}
 }
 
-// fakeSource is defined in harness_tools_test.go (same package); used directly above.
-// The events import is used via events.Publisher in the type assertion below.
+// fakeSource is defined in harness_tools_test.go (same package); used directly above. The events import is used
+// via events.Publisher in the type assertion below.
 var _ events.Publisher = (*fakeBus)(nil)

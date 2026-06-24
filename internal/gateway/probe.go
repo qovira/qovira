@@ -9,31 +9,27 @@ import (
 
 // ProbeResult carries the outcome of a [Gateway.Probe] call.
 //
-// Each boolean field is independent and records what the probe actually
-// observed — they are never inferred from model names or heuristic tables.
+// Each boolean field is independent and records what the probe actually observed — they are never inferred
+// from model names or heuristic tables.
 type ProbeResult struct {
-	// Reachable is true when the endpoint responded to the /v1/models GET
-	// request (even with a non-2xx status code other than a dial/transport error).
+	// Reachable is true when the endpoint responded to the /v1/models GET request (even with a non-2xx status
+	// code other than a dial/transport error).
 	Reachable bool
-	// ModelServed is true when the configured model name appears in the
-	// /v1/models response list.
+	// ModelServed is true when the configured model name appears in the /v1/models response list.
 	ModelServed bool
-	// ToolCalling is true (chat role only) when a minimal streamed
-	// chat/completions request with a forced dummy tool call produced a
-	// tool_call chunk in the response stream.
+	// ToolCalling is true (chat role only) when a minimal streamed chat/completions request with a forced dummy
+	// tool call produced a tool_call chunk in the response stream.
 	ToolCalling bool
-	// Streaming is true (chat role only) when the chat/completions request was
-	// accepted over text/event-stream and the SSE stream could be parsed,
-	// regardless of whether a tool call was present.
+	// Streaming is true (chat role only) when the chat/completions request was accepted over text/event-stream
+	// and the SSE stream could be parsed, regardless of whether a tool call was present.
 	Streaming bool
-	// Err is the first error encountered during the probe, or nil on full
-	// success. Auth failures, unreachable endpoints, and configuration errors
-	// are all reported here.
+	// Err is the first error encountered during the probe, or nil on full success. Auth failures, unreachable
+	// endpoints, and configuration errors are all reported here.
 	Err error
 }
 
-// modelsResponseWire is the minimal OpenAI-compatible shape of the
-// GET /v1/models response — only the model IDs are needed for the probe.
+// modelsResponseWire is the minimal OpenAI-compatible shape of the GET /v1/models response — only the model IDs
+// are needed for the probe.
 type modelsResponseWire struct {
 	Data []modelEntryWire `json:"data"`
 }
@@ -42,17 +38,16 @@ type modelEntryWire struct {
 	ID string `json:"id"`
 }
 
-// dummyTool is the single tool schema used in the step-2 probe request.
-// Its parameters schema is an empty object so the model can produce a valid
-// (though semantically empty) tool call with no arguments.
+// dummyTool is the single tool schema used in the step-2 probe request. Its parameters schema is an empty object
+// so the model can produce a valid (though semantically empty) tool call with no arguments.
 var dummyTool = ToolSchema{
 	Name:        "_probe",
 	Description: "Probe tool — not for real use.",
 	Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 }
 
-// Probe empirically checks the configured endpoint for the given role and
-// returns a [ProbeResult] describing what the probe observed.
+// Probe empirically checks the configured endpoint for the given role and returns a [ProbeResult] describing what
+// the probe observed.
 //
 // For [RoleChat] the probe is two steps:
 //  1. GET {baseURL}/v1/models — confirms reachability, authentication, and
@@ -60,8 +55,7 @@ var dummyTool = ToolSchema{
 //  2. A minimal streamed POST to /v1/chat/completions with a single dummy tool
 //     and tool_choice "required" — confirms native tool calling and streaming.
 //
-// For any other role only step 1 is executed; ToolCalling and Streaming remain
-// false.
+// For any other role only step 1 is executed; ToolCalling and Streaming remain false.
 //
 // The probe stops early (without running step 2) when:
 //   - the endpoint is unreachable (dial/transport error),

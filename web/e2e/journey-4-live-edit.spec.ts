@@ -1,10 +1,9 @@
 /**
  * Journey 4 — Create/complete/edit live in both surfaces.
  *
- * Sends "remind me to call mom tonight" → create_reminder via chat.
- * Asserts the reminder appears live in /reminders (no reload).
- * Then completes the reminder via the UI (Mark as complete → Done section).
- * Then edits a reminder's title via the Edit sheet and confirms the change.
+ * Sends "remind me to call mom tonight" → create_reminder via chat. Asserts the reminder appears live in /reminders
+ * (no reload). Then completes the reminder via the UI (Mark as complete → Done section). Then edits a
+ * reminder's title via the Edit sheet and confirms the change.
  */
 
 import { test, expect } from "@playwright/test";
@@ -35,26 +34,23 @@ test("chat create → live in reminders → complete → edit", async ({ page })
   await expect(callMomText).toBeVisible({ timeout: 10_000 });
 
   // ── Complete the reminder ─────────────────────────────────────────────────
-  // ReminderRow renders "Mark as complete" for each active row. Use the
-  // check-circle button sibling to the row title. Since there may be multiple
-  // active reminders we filter the list item that contains "Call mom".
+  // ReminderRow renders "Mark as complete" for each active row. Use the check-circle button sibling to the row
+  // title. Since there may be multiple active reminders we filter the list item that contains "Call mom".
   const callMomRow = page.locator("li").filter({ hasText: "Call mom" });
   await callMomRow.getByRole("button", { name: "Mark as complete" }).click();
 
-  // After completing, "Call mom" should move out of active buckets.
-  // Open the Done section to verify it is there.
+  // After completing, "Call mom" should move out of active buckets. Open the Done section to verify it is there.
   const doneToggle = page.getByRole("button", { name: "Show completed reminders" });
   await expect(doneToggle).toBeVisible();
   await doneToggle.click();
   await expect(page.getByText("Call mom")).toBeVisible({ timeout: 10_000 });
 
   // ── Edit a reminder's title ───────────────────────────────────────────────
-  // Use the Buy milk reminder from journey 2 if present, or add a quick-add
-  // reminder to edit. We add via quick-add so this journey is self-contained.
+  // Use the Buy milk reminder from journey 2 if present, or add a quick-add reminder to edit. We add via
+  // quick-add so this journey is self-contained.
   const quickAddTitle = page.getByRole("textbox", { name: "Title" });
   await quickAddTitle.fill("Call sister");
-  // The datetime-local input uses aria-label "Due".
-  // Set a due date 1 hour from now so validation passes.
+  // The datetime-local input uses aria-label "Due". Set a due date 1 hour from now so validation passes.
   const oneHourFromNow = new Date(Date.now() + 60 * 60 * 1000);
   const pad = (n: number): string => String(n).padStart(2, "0");
   const dueLocal = `${String(oneHourFromNow.getFullYear())}-${pad(oneHourFromNow.getMonth() + 1)}-${pad(oneHourFromNow.getDate())}T${pad(oneHourFromNow.getHours())}:${pad(oneHourFromNow.getMinutes())}`;
@@ -66,9 +62,8 @@ test("chat create → live in reminders → complete → edit", async ({ page })
   const callSisterRow = page.locator("li").filter({ hasText: "Call sister" });
   await callSisterRow.getByRole("button", { name: "Edit reminder" }).click();
 
-  // Scope all edit interactions to the slide-over dialog: the quick-add form
-  // above also carries a "Title"-labelled input, so an unscoped getByLabel would
-  // match two elements once the sheet is open.
+  // Scope all edit interactions to the slide-over dialog: the quick-add form above also carries a
+  // "Title"-labelled input, so an unscoped getByLabel would match two elements once the sheet is open.
   const editSheet = page.getByRole("dialog");
   await expect(editSheet.getByRole("heading", { name: "Edit reminder" })).toBeVisible();
 
@@ -81,7 +76,7 @@ test("chat create → live in reminders → complete → edit", async ({ page })
 
   // The slide-over closes and the updated title appears in the reminders list.
   await expect(page.getByText("Call sister updated")).toBeVisible({ timeout: 10_000 });
-  // Exact match: "Call sister" is a substring of "Call sister updated", so a
-  // default (substring) matcher would still find the renamed row and wrongly fail.
+  // Exact match: "Call sister" is a substring of "Call sister updated", so a default (substring) matcher would
+  // still find the renamed row and wrongly fail.
   await expect(page.getByText("Call sister", { exact: true })).not.toBeVisible();
 });

@@ -1,22 +1,20 @@
 <script lang="ts">
   // ConfirmationCard — inline card for a pending tool-call confirmation.
   //
-  // Renders inline in the assistant turn, never as a modal. Shows approve/deny
-  // buttons that post to the confirmations endpoint and record the decision in
-  // the store. Counts down to expiresAt; greys out and disables buttons on
-  // expiry (local clock) or on a confirmation.expired SSE event (state change).
+  // Renders inline in the assistant turn, never as a modal. Shows approve/deny buttons that post to the
+  // confirmations endpoint and record the decision in the store. Counts down to expiresAt; greys out and
+  // disables buttons on expiry (local clock) or on a confirmation.expired SSE event (state change).
   //
   // Tone:
   //   destructive / external risk tiers → error/clay surface (red-tinted tint)
   //   routine write tiers               → honey-bordered result style
   //
-  // Security: entry.name is escaped interpolation (not {@html}). entry.args is
-  // opaque unknown and rendered as a compact JSON string via plain interpolation —
-  // never via {@html}. All text is safe through normal Svelte escaping.
+  // Security: entry.name is escaped interpolation (not {@html}). entry.args is opaque unknown and rendered as
+  // a compact JSON string via plain interpolation — never via {@html}. All text is safe through normal Svelte
+  // escaping.
   //
-  // Accessibility: buttons are focusable/operable by keyboard. The card does NOT
-  // steal focus on render (inline, not a modal). When expired, buttons carry
-  // disabled and aria-disabled attributes.
+  // Accessibility: buttons are focusable/operable by keyboard. The card does NOT steal focus on render
+  // (inline, not a modal). When expired, buttons carry disabled and aria-disabled attributes.
 
   import { resolveConfirmation, confirmationExpired } from "$lib/stores/confirmations.svelte.js";
   import type { ConfirmationEntry, PendingConfirmation } from "$lib/stores/confirmations.svelte.js";
@@ -90,8 +88,8 @@
   });
 
   // ---------------------------------------------------------------------------
-  // Disable condition: expired or resolved state, or local timer hit zero.
-  // $derived keeps this in sync without a separate $effect.
+  // Disable condition: expired or resolved state, or local timer hit zero. $derived keeps this in sync
+  // without a separate $effect.
   // ---------------------------------------------------------------------------
 
   const buttonsDisabled = $derived(entry.state !== "pending" || secondsRemaining === 0);
@@ -106,15 +104,14 @@
     if (buttonsDisabled || resolving) {
       return;
     }
-    // At this point buttonsDisabled is false, which requires entry.state === "pending".
-    // The cast is safe: the guard above ensures we only reach here when pending.
+    // At this point buttonsDisabled is false, which requires entry.state === "pending". The cast is safe: the
+    // guard above ensures we only reach here when pending.
     const pending = entry as PendingConfirmation;
 
     resolving = true;
     try {
-      // resolveConfirmation posts to the server and guards the error before
-      // recording the decision. A problem+json error (409/404/422) or network
-      // throw leaves the card pending so the user can retry.
+      // resolveConfirmation posts to the server and guards the error before recording the decision. A
+      // problem+json error (409/404/422) or network throw leaves the card pending so the user can retry.
       await resolveConfirmation(pending, decision);
     } finally {
       resolving = false;

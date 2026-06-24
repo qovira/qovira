@@ -5,9 +5,8 @@ import (
 	"slices"
 )
 
-// Middleware is a function that wraps an http.Handler to add behaviour
-// (logging, auth, tracing, etc.) before or after calling the next handler.
-// Middleware functions are composed via Chain.
+// Middleware is a function that wraps an http.Handler to add behaviour (logging, auth, tracing, etc.) before or after
+// calling the next handler. Middleware functions are composed via Chain.
 type Middleware func(http.Handler) http.Handler
 
 // Chain wraps h in each middleware from left to right, making the first middleware the outermost wrapper (first to run
@@ -40,21 +39,20 @@ func NewRouter() *Router {
 	return &Router{mux: http.NewServeMux()}
 }
 
-// Handle registers the handler for the given pattern on the underlying mux.
-// Pattern syntax follows [net/http.ServeMux].
+// Handle registers the handler for the given pattern on the underlying mux. Pattern syntax follows [net/http.ServeMux].
 func (r *Router) Handle(pattern string, h http.Handler) {
 	r.mux.Handle(pattern, h)
 }
 
-// HandleFunc registers the handler function for the given pattern on the
-// underlying mux. Pattern syntax follows [net/http.ServeMux].
+// HandleFunc registers the handler function for the given pattern on the underlying mux. Pattern syntax follows
+// [net/http.ServeMux].
 func (r *Router) HandleFunc(pattern string, h http.HandlerFunc) {
 	r.mux.HandleFunc(pattern, h)
 }
 
-// ServeHTTP satisfies [http.Handler], delegating directly to the underlying
-// mux. Tests can pass *Router to [net/http/httptest] without unwrapping the mux;
-// production code uses NewServer, which wraps the mux with middleware via Chain.
+// ServeHTTP satisfies [http.Handler], delegating directly to the underlying mux. Tests can pass *Router to
+// [net/http/httptest] without unwrapping the mux; production code uses NewServer, which wraps the mux with middleware
+// via Chain.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }

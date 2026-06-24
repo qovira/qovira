@@ -1,8 +1,7 @@
 package httpx
 
-// White-box tests for eventsHandler. They live in package httpx (not httpx_test)
-// so they can call the unexported eventsHandler constructor directly and reach
-// the unexported writeSSEEvent / writeSSEPing helpers.
+// White-box tests for eventsHandler. They live in package httpx (not httpx_test) so they can call the unexported
+// eventsHandler constructor directly and reach the unexported writeSSEEvent / writeSSEPing helpers.
 
 import (
 	"context"
@@ -36,8 +35,8 @@ func newGETWithCtx(ctx context.Context, t *testing.T) *http.Request {
 
 // ---- writeSSEEvent / writeSSEPing unit tests --------------------------------
 
-// TestWriteSSEEvent_Format verifies that writeSSEEvent emits the three required
-// SSE fields (event, id, data) with correct values and the blank-line terminator.
+// TestWriteSSEEvent_Format verifies that writeSSEEvent emits the three required SSE fields (event, id, data) with
+// correct values and the blank-line terminator.
 func TestWriteSSEEvent_Format(t *testing.T) {
 	t.Parallel()
 
@@ -64,8 +63,7 @@ func TestWriteSSEEvent_Format(t *testing.T) {
 	}
 }
 
-// TestWriteSSEEvent_IDMonotonic verifies that successive calls increment the
-// event id as a monotonic sequence number.
+// TestWriteSSEEvent_IDMonotonic verifies that successive calls increment the event id as a monotonic sequence number.
 func TestWriteSSEEvent_IDMonotonic(t *testing.T) {
 	t.Parallel()
 
@@ -104,11 +102,9 @@ func TestWriteSSEPing_Format(t *testing.T) {
 	}
 }
 
-// TestWriteSSEEvent_MarshalSkip verifies that when the event payload cannot be
-// marshaled to JSON, writeSSEEvent skips the event (writes nothing to the
-// ResponseWriter) and returns nil rather than an error, so the stream continues.
-// A channel value is used as the payload because encoding/json cannot marshal
-// channels and returns an error for them.
+// TestWriteSSEEvent_MarshalSkip verifies that when the event payload cannot be marshaled to JSON, writeSSEEvent skips
+// the event (writes nothing to the ResponseWriter) and returns nil rather than an error, so the stream continues. A
+// channel value is used as the payload because encoding/json cannot marshal channels and returns an error for them.
 func TestWriteSSEEvent_MarshalSkip(t *testing.T) {
 	t.Parallel()
 
@@ -129,13 +125,12 @@ func TestWriteSSEEvent_MarshalSkip(t *testing.T) {
 	}
 }
 
-// TestWriteSSEPing_HeartbeatFrame verifies that writeSSEPing emits the exact
-// SSE ping frame documented in the function comment:
+// TestWriteSSEPing_HeartbeatFrame verifies that writeSSEPing emits the exact SSE ping frame documented in the function
+// comment:
 //
 //	event: ping\ndata: \n\n
 //
-// The ping keeps proxies and load-balancers from closing idle connections and
-// must not carry any event id.
+// The ping keeps proxies and load-balancers from closing idle connections and must not carry any event id.
 func TestWriteSSEPing_HeartbeatFrame(t *testing.T) {
 	t.Parallel()
 
@@ -166,14 +161,12 @@ func TestWriteSSEPing_HeartbeatFrame(t *testing.T) {
 
 // ---- eventsHandler integration tests ----------------------------------------
 
-// readyWriter wraps httptest.ResponseRecorder and sends a token on flushCh for
-// every Flush call. eventsHandler flushes after the initial status line (flush 1 =
-// readiness) and again after writing each event (flush 2 = event written). Tests
-// can wait for specific flush counts to synchronise deterministically without
-// sleeping.
+// readyWriter wraps httptest.ResponseRecorder and sends a token on flushCh for every Flush call. eventsHandler flushes
+// after the initial status line (flush 1 = readiness) and again after writing each event (flush 2 = event written).
+// Tests can wait for specific flush counts to synchronise deterministically without sleeping.
 //
-// flushCh is buffered to 16 so that a Flush never blocks the handler goroutine
-// even if the test goroutine is slow to drain it.
+// flushCh is buffered to 16 so that a Flush never blocks the handler goroutine even if the test goroutine is slow to
+// drain it.
 type readyWriter struct {
 	*httptest.ResponseRecorder
 	flushCh chan struct{} // one token per Flush call; buffered
@@ -186,15 +179,14 @@ func newReadyWriter() *readyWriter {
 	}
 }
 
-// Flush forwards to the embedded recorder and sends a token on flushCh so
-// tests can count and sequence on flush events.
+// Flush forwards to the embedded recorder and sends a token on flushCh so tests can count and sequence on flush events.
 func (rw *readyWriter) Flush() {
 	rw.ResponseRecorder.Flush()
 	rw.flushCh <- struct{}{}
 }
 
-// waitFlush waits for the n-th Flush call (1-based) or until the timeout
-// fires, failing the test if the deadline is exceeded.
+// waitFlush waits for the n-th Flush call (1-based) or until the timeout fires, failing the test if the deadline is
+// exceeded.
 func (rw *readyWriter) waitFlush(t *testing.T, n int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
@@ -207,8 +199,8 @@ func (rw *readyWriter) waitFlush(t *testing.T, n int, timeout time.Duration) {
 	}
 }
 
-// TestEventsHandler_StreamsEvent verifies that a published event reaches the
-// response writer as a complete SSE frame with event:, id:, and data: fields.
+// TestEventsHandler_StreamsEvent verifies that a published event reaches the response writer as a complete SSE frame
+// with event:, id:, and data: fields.
 //
 // Synchronisation is flush-based:
 //   - Flush 1: initial-flush guard — handler is subscribed and in the select loop.
@@ -266,8 +258,8 @@ func TestEventsHandler_StreamsEvent(t *testing.T) {
 	}
 }
 
-// TestEventsHandler_401WithoutPrincipal verifies that a request with no
-// principal in context receives a 401 problem+json response and no stream.
+// TestEventsHandler_401WithoutPrincipal verifies that a request with no principal in context receives a 401
+// problem+json response and no stream.
 func TestEventsHandler_401WithoutPrincipal(t *testing.T) {
 	t.Parallel()
 
@@ -294,8 +286,7 @@ func TestEventsHandler_401WithoutPrincipal(t *testing.T) {
 	}
 }
 
-// TestEventsHandler_401EmptyUserID verifies that a principal with an empty
-// UserID is treated as unauthenticated (401).
+// TestEventsHandler_401EmptyUserID verifies that a principal with an empty UserID is treated as unauthenticated (401).
 func TestEventsHandler_401EmptyUserID(t *testing.T) {
 	t.Parallel()
 
@@ -313,8 +304,8 @@ func TestEventsHandler_401EmptyUserID(t *testing.T) {
 	}
 }
 
-// TestEventsHandler_405NonGET verifies that non-GET methods receive a 405
-// problem+json response with an Allow: GET header.
+// TestEventsHandler_405NonGET verifies that non-GET methods receive a 405 problem+json response with an Allow: GET
+// header.
 func TestEventsHandler_405NonGET(t *testing.T) {
 	t.Parallel()
 
@@ -345,11 +336,9 @@ func TestEventsHandler_405NonGET(t *testing.T) {
 	}
 }
 
-// TestEventsHandler_ContextCancelUnsubscribes verifies that cancelling the
-// request context causes the handler to exit and the bus subscription to be
-// released. A subsequent Publish must not panic. The test uses -race to confirm
-// there are no data races.
-// Readiness is determined by the first Flush call, not by a fixed sleep.
+// TestEventsHandler_ContextCancelUnsubscribes verifies that cancelling the request context causes the handler to exit
+// and the bus subscription to be released. A subsequent Publish must not panic. The test uses -race to confirm there
+// are no data races. Readiness is determined by the first Flush call, not by a fixed sleep.
 func TestEventsHandler_ContextCancelUnsubscribes(t *testing.T) {
 	t.Parallel()
 
@@ -384,11 +373,10 @@ func TestEventsHandler_ContextCancelUnsubscribes(t *testing.T) {
 	bus.Publish("u2", events.Event{Type: "noop", Data: nil})
 }
 
-// TestEventsHandler_ClearsWriteDeadline verifies that the handler calls
-// SetWriteDeadline with the zero time before entering the select loop. This is
-// the regression guard for the bug where the server's global WriteTimeout (60 s)
-// would force-close every SSE stream after ~60 s.
-// Readiness is determined by the first Flush call, not by a fixed sleep.
+// TestEventsHandler_ClearsWriteDeadline verifies that the handler calls SetWriteDeadline with the zero time before
+// entering the select loop. This is the regression guard for the bug where the server's global
+// WriteTimeout (60 s) would force-close every SSE stream after ~60 s. Readiness is determined by the first Flush call,
+// not by a fixed sleep.
 func TestEventsHandler_ClearsWriteDeadline(t *testing.T) {
 	t.Parallel()
 
@@ -408,9 +396,8 @@ func TestEventsHandler_ClearsWriteDeadline(t *testing.T) {
 		handler.ServeHTTP(w, r)
 	}()
 
-	// Wait for the handler's initial flush — the deterministic readiness signal.
-	// SetWriteDeadline is called immediately after the initial flush, before the
-	// select loop, so at this point we know the deadline has already been cleared.
+	// Wait for the handler's initial flush — the deterministic readiness signal. SetWriteDeadline is called immediately
+	// after the initial flush, before the select loop, so at this point we know the deadline has already been cleared.
 	select {
 	case <-w.readyCh:
 	case <-time.After(2 * time.Second):
@@ -425,8 +412,8 @@ func TestEventsHandler_ClearsWriteDeadline(t *testing.T) {
 		t.Fatal("handler did not return after context cancel")
 	}
 
-	// The handler must have called SetWriteDeadline exactly once, with the
-	// zero time, to disable the server-level write deadline on this stream.
+	// The handler must have called SetWriteDeadline exactly once, with the zero time, to disable the server-level
+	// write deadline on this stream.
 	if len(w.deadlines) != 1 {
 		t.Fatalf("SetWriteDeadline called %d times, want exactly 1", len(w.deadlines))
 	}
@@ -435,9 +422,8 @@ func TestEventsHandler_ClearsWriteDeadline(t *testing.T) {
 	}
 }
 
-// TestEventsHandler_FlushUnsupportedWriter verifies that a ResponseWriter whose
-// Flush returns errors.ErrUnsupported causes the handler to exit gracefully
-// without panicking.
+// TestEventsHandler_FlushUnsupportedWriter verifies that a ResponseWriter whose Flush returns errors.ErrUnsupported
+// causes the handler to exit gracefully without panicking.
 func TestEventsHandler_FlushUnsupportedWriter(t *testing.T) {
 	t.Parallel()
 
@@ -447,9 +433,8 @@ func TestEventsHandler_FlushUnsupportedWriter(t *testing.T) {
 	ctx := principalCtx(context.Background(), store.Principal{UserID: "u3"})
 	r := newGETWithCtx(ctx, t)
 
-	// bareWriter only implements the http.ResponseWriter interface and nothing
-	// else — no http.Flusher, no Unwrap. http.NewResponseController(w).Flush()
-	// will therefore return errors.ErrUnsupported, exercising the graceful-exit
+	// bareWriter only implements the http.ResponseWriter interface and nothing else — no http.Flusher, no Unwrap.
+	// http.NewResponseController(w).Flush() will therefore return errors.ErrUnsupported, exercising the graceful-exit
 	// path in eventsHandler.
 	w := &bareWriter{header: make(http.Header)}
 
@@ -467,9 +452,8 @@ func TestEventsHandler_FlushUnsupportedWriter(t *testing.T) {
 	}
 }
 
-// bareWriter is a minimal http.ResponseWriter with no http.Flusher, no Unwrap,
-// and no other extension interfaces. http.NewResponseController sees only the
-// plain ResponseWriter, so Flush() returns errors.ErrUnsupported.
+// bareWriter is a minimal http.ResponseWriter with no http.Flusher, no Unwrap, and no other extension interfaces.
+// http.NewResponseController sees only the plain ResponseWriter, so Flush() returns errors.ErrUnsupported.
 type bareWriter struct {
 	header http.Header
 	status int
@@ -480,11 +464,9 @@ func (b *bareWriter) Header() http.Header         { return b.header }
 func (b *bareWriter) WriteHeader(code int)        { b.status = code }
 func (b *bareWriter) Write(p []byte) (int, error) { return b.body.Write(p) }
 
-// deadlineRecorder is a ResponseWriter that supports Flush and SetWriteDeadline.
-// It records every SetWriteDeadline call so tests can assert the handler cleared
-// the deadline before entering the select loop. readyCh is closed on the first
-// Flush call so tests can wait for the handler's initial-flush guard without a
-// fixed sleep.
+// deadlineRecorder is a ResponseWriter that supports Flush and SetWriteDeadline. It records every SetWriteDeadline call
+// so tests can assert the handler cleared the deadline before entering the select loop. readyCh is closed on the first
+// Flush call so tests can wait for the handler's initial-flush guard without a fixed sleep.
 type deadlineRecorder struct {
 	header    http.Header
 	status    int
@@ -505,15 +487,14 @@ func (d *deadlineRecorder) Header() http.Header         { return d.header }
 func (d *deadlineRecorder) WriteHeader(code int)        { d.status = code }
 func (d *deadlineRecorder) Write(p []byte) (int, error) { return d.body.Write(p) }
 
-// Flush satisfies http.Flusher so that http.NewResponseController.Flush()
-// succeeds and the handler proceeds past the initial-flush guard. It signals
-// readyCh on the first call.
+// Flush satisfies http.Flusher so that http.NewResponseController.Flush() succeeds and the handler proceeds past the
+// initial-flush guard. It signals readyCh on the first call.
 func (d *deadlineRecorder) Flush() {
 	d.flushOnce.Do(func() { close(d.readyCh) })
 }
 
-// SetWriteDeadline satisfies the interface that http.NewResponseController
-// looks for. It records the supplied deadline and returns nil.
+// SetWriteDeadline satisfies the interface that http.NewResponseController looks for. It records the supplied deadline
+// and returns nil.
 func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 	d.deadlines = append(d.deadlines, t)
 	return nil

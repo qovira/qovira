@@ -1,17 +1,16 @@
 <script lang="ts">
   // Deferred OS-notification permission prompt.
   //
-  // Rendered by the root layout when isPendingPermissionPrompt() is true (i.e.
-  // the first `reminder.fired` SSE event arrived while Notification.permission
-  // is "default"). The prompt is:
-  //   - Dismissible — clicking "Maybe later" calls dismissNotificationPrompt()
-  //     and will not show again this session.
-  //   - Actionable — clicking "Turn on notifications" calls
-  //     requestOsNotificationPermission() then closes the prompt.
+  // Rendered by the root layout when isPendingPermissionPrompt() is true (i.e. the first `reminder.fired` SSE
+  // event arrived while Notification.permission is "default"). The prompt is:
+  //   - Dismissible — clicking "Maybe later" calls dismissNotificationPrompt() and will not show again this
+  //     session.
+  //   - Actionable — clicking "Turn on notifications" calls requestOsNotificationPermission() then closes the
+  //     prompt.
   //   - Keyboard-reachable — focus-trapped inside the banner via semantic buttons.
   //   - Branded — calm, unintrusive tone; no alarm or urgency.
-  //   - Accessible — role="status" / aria-live="polite" so screen readers
-  //     announce it without interrupting ongoing activity.
+  //   - Accessible — role="status" / aria-live="polite" so screen readers announce it without interrupting
+  //     ongoing activity.
 
   import { Button } from "@qovira/ui";
   import {
@@ -35,9 +34,9 @@
 </script>
 
 <!--
-  Calm, unintrusive permission banner — fixed to the bottom of the viewport so
-  it does not displace page content. role="status" + aria-live="polite" lets
-  assistive technology surface it without interrupting any ongoing announcement.
+  Calm, unintrusive permission banner — fixed to the bottom of the viewport so it does not displace page
+  content. role="status" + aria-live="polite" lets assistive technology surface it without interrupting any
+  ongoing announcement.
 -->
 <div
   role="status"

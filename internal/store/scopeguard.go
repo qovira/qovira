@@ -15,15 +15,13 @@ import (
 // per-user data). User-owned tables must carry a user_id predicate in every SELECT/UPDATE/DELETE query; the guard is
 // the backstop, not the DB.
 //
-// Reviewed exemption mechanism: if a query is intentionally complex (e.g.
-// a JOIN or subquery that the heuristic cannot verify) and has been reviewed
-// for cross-user safety, add the annotation
+// Reviewed exemption mechanism: if a query is intentionally complex (e.g. a JOIN or subquery that the heuristic cannot
+// verify) and has been reviewed for cross-user safety, add the annotation
 //
 //	-- scopeguard:allow-unscoped: <reason>
 //
-// to the query block. The guard will skip that block without flagging it. This
-// is the only reviewed exception path — do not add complex queries to
-// systemTables.
+// to the query block. The guard will skip that block without flagging it. This is the only reviewed exception path — do
+// not add complex queries to systemTables.
 var systemTables = map[string]bool{
 	"instance":         true,
 	"goose_db_version": true,
@@ -44,9 +42,8 @@ type Violation struct {
 	QueryName string
 	// Statement is the SQL text of the offending query block.
 	Statement string
-	// Reason is the diagnostic message from the scope guard explaining why this
-	// query was flagged (e.g. "no WHERE clause", "JOIN queries must be simplified
-	// or exempted"). It is always non-empty for a real violation.
+	// Reason is the diagnostic message from the scope guard explaining why this query was flagged (e.g. "no WHERE
+	// clause", "JOIN queries must be simplified or exempted"). It is always non-empty for a real violation.
 	Reason string
 }
 
@@ -102,7 +99,8 @@ func scanFile(filename, content string) []Violation {
 	var violations []Violation
 
 	blocks := strings.Split(content, marker)
-	// blocks[0] is everything before the first "-- name: " (file-level comments, blank lines). We only process blocks[1:].
+	// blocks[0] is everything before the first "-- name: " (file-level comments, blank lines). We only process
+	// blocks[1:].
 	for _, block := range blocks[1:] {
 		name := extractQueryName(block)
 		stmt := extractStatementType(block)
@@ -218,30 +216,25 @@ func extractTargetTable(block, stmt string) string {
 // reLineComment matches a SQL line comment and everything after it on the line.
 var reLineComment = regexp.MustCompile(`--[^\n]*`)
 
-// stripLineComments removes SQL line comments (-- ...) from s. The regex [^\n]*
-// deliberately excludes the newline character, so the newline that terminates
-// each comment line is left in place untouched — line structure is preserved
+// stripLineComments removes SQL line comments (-- ...) from s. The regex [^\n]* deliberately excludes the newline
+// character, so the newline that terminates each comment line is left in place untouched — line structure is preserved
 // without any placeholder.
 func stripLineComments(s string) string {
 	return reLineComment.ReplaceAllString(s, "")
 }
 
-// stripStringLiterals replaces the content of every single-quoted SQL string
-// literal in s with spaces, so that structural keywords (FROM, SELECT, OR, …),
-// punctuation ('(', ','), and predicates (user_id =) inside a literal value
+// stripStringLiterals replaces the content of every single-quoted SQL string literal in s with spaces, so that
+// structural keywords (FROM, SELECT, OR, …), punctuation ('(', ','), and predicates (user_id =) inside a literal value
 // cannot influence the guard's pattern-matching heuristics.
 //
-// The ” (two consecutive single-quotes) SQL escape for a literal single-quote
-// is handled correctly — it is consumed as an in-literal escape rather than
-// treated as the end of the literal.
+// The ” (two consecutive single-quotes) SQL escape for a literal single-quote is handled correctly — it is consumed as
+// an in-literal escape rather than treated as the end of the literal.
 //
-// This must be applied after stripLineComments so that an unclosed literal
-// started inside a -- comment (e.g. `-- don't`) does not consume real SQL
-// that follows on subsequent lines.
+// This must be applied after stripLineComments so that an unclosed literal started inside a -- comment (e.g.
+// `-- don't`) does not consume real SQL that follows on subsequent lines.
 //
-// Length is not preserved; only the characters inside the quotes are replaced.
-// The surrounding quote characters are kept so that quote-counting remains
-// consistent for any caller that inspects them.
+// Length is not preserved; only the characters inside the quotes are replaced. The surrounding quote characters are
+// kept so that quote-counting remains consistent for any caller that inspects them.
 func stripStringLiterals(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -283,13 +276,12 @@ func stripStringLiterals(s string) string {
 // Fail-closed rules (in order):
 //  1. WITH/CTE at the statement level → flag (cannot verify target).
 //  2. UNION in the stripped body → flag.
-//  3. JOIN keyword in the stripped body → flag (user_id could be on the joined
-//     table).
+//  3. JOIN keyword in the stripped body → flag (user_id could be on the joined table).
 //  4. Subquery in the WHERE clause (IN (SELECT …)) → flag.
 //  5. No WHERE clause → flag.
 //  6. Examine the WHERE clause (after stripping comments):
-//     Accept only a bare "user_id" match or one qualified to the target
-//     table/alias. A "user_id" that is qualified to any other identifier → flag.
+//     Accept only a bare "user_id" match or one qualified to the target table/alias. A "user_id" that is qualified to
+//     any other identifier → flag.
 func verifyUserIDScoping(block, target string) (string, bool) {
 	// Rule 1: WITH/CTE.
 	body := block
@@ -302,12 +294,10 @@ func verifyUserIDScoping(block, target string) (string, bool) {
 			"; WITH/CTE queries must be simplified or exempted", false
 	}
 
-	// Strip line comments then string literals before all remaining checks.
-	// Comment stripping first ensures that an unclosed quote inside a -- comment
-	// (e.g. `-- don't`) does not consume real SQL on subsequent lines.
-	// Literal stripping then ensures that structural keywords and punctuation
-	// inside a quoted value (parentheses, commas, OR, SELECT, FROM, user_id =)
-	// cannot influence pattern detection.
+	// Strip line comments then string literals before all remaining checks. Comment stripping first ensures that an
+	// unclosed quote inside a -- comment (e.g. `-- don't`) does not consume real SQL on subsequent lines. Literal
+	// stripping then ensures that structural keywords and punctuation inside a quoted value (parentheses, commas, OR,
+	// SELECT, FROM, user_id =) cannot influence pattern detection.
 	stripped := stripStringLiterals(stripLineComments(block))
 	upperStripped := strings.ToUpper(stripped)
 
@@ -369,14 +359,12 @@ func isIdentChar(r rune) bool {
 		(r >= '0' && r <= '9') || r == '_'
 }
 
-// hasSubquery reports whether stripped contains a subquery — detected by the
-// patterns IN(SELECT, IN (SELECT, EXISTS(SELECT, EXISTS (SELECT, =(SELECT, or
-// = (SELECT (and their newline-after-paren variants), which are the ways a
+// hasSubquery reports whether stripped contains a subquery — detected by the patterns IN(SELECT, IN (SELECT,
+// EXISTS(SELECT, EXISTS (SELECT, =(SELECT, or = (SELECT (and their newline-after-paren variants), which are the ways a
 // subquery appears in Qovira's query style.
 //
-// For SELECT statements a second SELECT also signals a subquery (e.g.
-// "SELECT ... FROM (SELECT ...)"). For UPDATE/DELETE statements there is no
-// leading SELECT, so any SELECT found anywhere in the body is by definition a
+// For SELECT statements a second SELECT also signals a subquery (e.g. "SELECT ... FROM (SELECT ...)"). For
+// UPDATE/DELETE statements there is no leading SELECT, so any SELECT found anywhere in the body is by definition a
 // nested subquery and is caught the same way.
 func hasSubquery(stripped string) bool {
 	upper := strings.ToUpper(stripped)
@@ -438,9 +426,8 @@ func isWhitespaceOrPunct(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '(' || r == ')'
 }
 
-// reUserIDEquality matches a user_id equality predicate in the WHERE clause text.
-// The predicate must be of the form "user_id =" or "<qualifier>.user_id =",
-// ensuring it is an equality constraint and not a bare token inside a function
+// reUserIDEquality matches a user_id equality predicate in the WHERE clause text. The predicate must be of the form
+// "user_id =" or "<qualifier>.user_id =", ensuring it is an equality constraint and not a bare token inside a function
 // call or other expression.
 //
 // Groups:
@@ -449,17 +436,15 @@ func isWhitespaceOrPunct(r rune) bool {
 //	[2] "user_id" itself
 var reUserIDEquality = regexp.MustCompile(`(?i)(?:([a-zA-Z_][a-zA-Z0-9_]*)\.)?(\buser_id\b)\s*=`)
 
-// checkUserIDInWhere examines the WHERE clause text (still with original case,
-// comments already stripped) for a user_id equality predicate on the target
-// table. It fails closed on two additional structural properties:
+// checkUserIDInWhere examines the WHERE clause text (still with original case, comments already stripped) for a user_id
+// equality predicate on the target table. It fails closed on two additional structural properties:
 //
-//  1. Top-level OR — an OR at paren-depth 0 in the WHERE clause makes the
-//     predicate non-constraining (rows are returned regardless of user_id),
-//     so we fail closed. OR inside parentheses, e.g. "AND (x IS NULL OR x =
-//     @y)", is safe because the outer AND still requires user_id.
+//  1. Top-level OR — an OR at paren-depth 0 in the WHERE clause makes the predicate non-constraining (rows are
+//     returned regardless of user_id), so we fail closed. OR inside parentheses, e.g. "AND (x IS NULL OR x = @y)", is
+//     safe because the outer AND still requires user_id.
 //
-//  2. Equality form — the match must be "user_id =" not a bare "user_id"
-//     appearing inside COALESCE(...) or any other non-constraining expression.
+//  2. Equality form — the match must be "user_id =" not a bare "user_id" appearing inside COALESCE(...) or any other
+//     non-constraining expression.
 //
 // Accepts:
 //   - "user_id = ..." (bare equality, no qualifier) → target is single-source
@@ -500,10 +485,9 @@ func checkUserIDInWhere(whereClause, target string) (string, bool) {
 	return "user_id predicate is scoped to a non-target table in WHERE clause; target " + target + " is unscoped", false
 }
 
-// hasTopLevelOR reports whether the WHERE clause text contains an OR keyword
-// at paren-depth 0 (i.e. not nested inside parentheses). An OR at depth 0
-// means the predicate can return rows without the user_id constraint being
-// satisfied, so the guard fails closed when one is present.
+// hasTopLevelOR reports whether the WHERE clause text contains an OR keyword at paren-depth 0 (i.e. not nested inside
+// parentheses). An OR at depth 0 means the predicate can return rows without the user_id constraint being satisfied, so
+// the guard fails closed when one is present.
 func hasTopLevelOR(whereClause string) bool {
 	upper := strings.ToUpper(whereClause)
 	depth := 0
@@ -536,10 +520,9 @@ func hasTopLevelOR(whereClause string) bool {
 	return false
 }
 
-// firstWord returns the first whitespace-delimited token from s, with any
-// trailing SQL punctuation (comma, semicolon, closing paren) stripped. This
-// ensures that a token like "items," from "FROM items, audit" does not defeat
-// a systemTables lookup.
+// firstWord returns the first whitespace-delimited token from s, with any trailing SQL punctuation (comma, semicolon,
+// closing paren) stripped. This ensures that a token like "items," from "FROM items, audit" does not defeat a
+// systemTables lookup.
 func firstWord(s string) string {
 	s = strings.TrimSpace(s)
 	if i := strings.IndexAny(s, " \t\n\r("); i >= 0 {
@@ -548,11 +531,9 @@ func firstWord(s string) string {
 	return strings.TrimRight(s, ",;)")
 }
 
-// hasCommaJoin reports whether the uppercased stripped query text contains an
-// old-style comma cross-join — a top-level comma that appears between the FROM
-// clause and the WHERE clause (or end of statement). A comma inside
-// parentheses (e.g. a function call or subquery) is not a join comma, so we
-// track paren depth and only flag commas at depth zero.
+// hasCommaJoin reports whether the uppercased stripped query text contains an old-style comma cross-join — a top-level
+// comma that appears between the FROM clause and the WHERE clause (or end of statement). A comma inside parentheses
+// (e.g. a function call or subquery) is not a join comma, so we track paren depth and only flag commas at depth zero.
 func hasCommaJoin(upper string) bool {
 	// Locate the FROM keyword (whole-word).
 	fromIdx := -1

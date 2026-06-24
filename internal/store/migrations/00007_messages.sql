@@ -1,9 +1,8 @@
 -- +goose Up
 -- +goose StatementBegin
--- messages stores the OpenAI-shaped message history for each conversation.
--- Each row is owned by a user and belongs to one conversation.
--- tool_calls is a JSON array (nullable); tool_call_id and finish_reason are
--- nullable text fields used for tool-result and assistant rows respectively.
+-- messages stores the OpenAI-shaped message history for each conversation. Each row is owned by a user and belongs to
+-- one conversation. tool_calls is a JSON array (nullable); tool_call_id and finish_reason are nullable text fields used
+-- for tool-result and assistant rows respectively.
 CREATE TABLE messages (
     id              TEXT NOT NULL PRIMARY KEY,  -- ULID TEXT(26)
     conversation_id TEXT NOT NULL,              -- references conversations(id)

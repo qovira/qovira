@@ -9,15 +9,14 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// TestScopeGuard_RealQueries runs the scope guard against the shipped query
-// files and asserts zero violations. A future query that omits a user_id
-// predicate on a user-owned target table will cause this test to fail, making
-// the violation a build failure rather than a silent cross-user data leak.
+// TestScopeGuard_RealQueries runs the scope guard against the shipped query files and asserts zero violations. A future
+// query that omits a user_id predicate on a user-owned target table will cause this test to fail, making the violation
+// a build failure rather than a silent cross-user data leak.
 func TestScopeGuard_RealQueries(t *testing.T) {
 	t.Parallel()
 
-	// Resolve the queries directory relative to this test file's location.
-	// os.DirFS is the simplest fs.FS implementation for a real directory.
+	// Resolve the queries directory relative to this test file's location. os.DirFS is the simplest fs.FS
+	// implementation for a real directory.
 	queriesDir := filepath.Join(repoRoot(t), "internal", "store", "queries")
 	fsys := os.DirFS(queriesDir)
 
@@ -34,8 +33,7 @@ func TestScopeGuard_RealQueries(t *testing.T) {
 	}
 }
 
-// repoRoot returns the repository root by walking up from the test binary's
-// working directory until it finds go.mod.
+// repoRoot returns the repository root by walking up from the test binary's working directory until it finds go.mod.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -55,10 +53,9 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// TestScopeGuard_Fixtures tests the guard logic with synthetic query content.
-// It covers simple happy-path cases, allowlisted system tables, and adversarial
-// shapes that must fail closed (JOIN-scoped targets, subqueries, UNION, WITH/CTE,
-// missing WHERE, user_id only in SELECT list, user_id only in a comment).
+// TestScopeGuard_Fixtures tests the guard logic with synthetic query content. It covers simple happy-path cases,
+// allowlisted system tables, and adversarial shapes that must fail closed (JOIN-scoped targets, subqueries, UNION,
+// WITH/CTE, missing WHERE, user_id only in SELECT list, user_id only in a comment).
 func TestScopeGuard_Fixtures(t *testing.T) {
 	t.Parallel()
 
@@ -355,9 +352,8 @@ SELECT i.id FROM items i JOIN audit a ON i.id = a.item_id WHERE a.user_id = ?;
 		// ----------------------------------------------------------------
 		{
 			name: "select_comma_join_unscoped_target",
-			// Old-style comma cross-join: items,audit. Target (items) has no
-			// user_id predicate; the bare user_id resolves to audit.user_id.
-			// Guard must reject this just as it rejects a JOIN keyword.
+			// Old-style comma cross-join: items,audit. Target (items) has no user_id predicate; the bare user_id
+			// resolves to audit.user_id. Guard must reject this just as it rejects a JOIN keyword.
 			sql: `-- name: CommaJoin :many
 SELECT id FROM items, audit WHERE user_id = ?;
 `,
@@ -378,8 +374,8 @@ DELETE FROM items WHERE id IN (SELECT id FROM items, perms WHERE user_id = ?);
 		// ----------------------------------------------------------------
 		{
 			name: "update_scalar_subquery_newline",
-			// UPDATE with "= (\n  SELECT …)" — hasSubquery must catch this.
-			// items is unscoped; user_id only appears in the subquery.
+			// UPDATE with "= (\n  SELECT …)" — hasSubquery must catch this. items is unscoped; user_id only appears in
+			// the subquery.
 			sql: `-- name: UpdateScalarSub :exec
 UPDATE items SET x = (
   SELECT y FROM other WHERE user_id = ?) WHERE id = @id;
@@ -402,8 +398,8 @@ DELETE FROM items WHERE id = (
 		// ----------------------------------------------------------------
 		{
 			name: "select_top_level_or_with_user_id",
-			// WHERE id = @id OR user_id = @x — the OR means the predicate
-			// returns rows regardless of user ownership; must fail closed.
+			// WHERE id = @id OR user_id = @x — the OR means the predicate returns rows regardless of user ownership;
+			// must fail closed.
 			sql: `-- name: OrDisjunction :many
 SELECT id FROM items WHERE id = @id OR user_id = @user_id;
 `,
@@ -420,8 +416,8 @@ SELECT id FROM items WHERE COALESCE(user_id, '') = '' AND id = @id;
 			wantQuery: "CoalesceUID",
 		},
 		{
-			// Safe: OR is inside parentheses AND'd with the user_id predicate,
-			// so user_id is still required for every returned row.
+			// Safe: OR is inside parentheses AND'd with the user_id predicate, so user_id is still required for every
+			// returned row.
 			name: "select_or_inside_parens_and_with_user_id",
 			sql: `-- name: ParenOr :many
 SELECT id FROM items
@@ -461,8 +457,8 @@ SELECT items.id FROM items JOIN audit ON items.id = audit.item_id WHERE audit.us
 			wantViol: false,
 		},
 		{
-			// (b) Same query WITHOUT annotation: must produce a violation,
-			// proving the annotation is what suppressed it.
+			// (b) Same query WITHOUT annotation: must produce a violation, proving the annotation is what suppressed
+			// it.
 			name: "allow_unscoped_absent_still_flags_join",
 			sql: `-- name: UnannotatedJoin :many
 SELECT items.id FROM items JOIN audit ON items.id = audit.item_id WHERE audit.user_id = ?;
@@ -471,8 +467,8 @@ SELECT items.id FROM items JOIN audit ON items.id = audit.item_id WHERE audit.us
 			wantQuery: "UnannotatedJoin",
 		},
 		{
-			// (c) Near-miss/typo annotation: must still flag the violation,
-			// locking match precision of the annotation string.
+			// (c) Near-miss/typo annotation: must still flag the violation, locking match precision of the annotation
+			// string.
 			name: "allow_unscoped_typo_still_flags",
 			sql: `-- name: TypoAnnotation :many
 -- scopeguard:allow-unscope: typo is missing the trailing 'd'
@@ -499,9 +495,8 @@ INSERT INTO items (id, user_id) VALUES (?, ?) RETURNING id, user_id;
 		// extractTargetTable, or the user_id equality matcher.
 		// ----------------------------------------------------------------
 		{
-			// MUST-FIX: unbalanced '(' inside a string literal pushes paren
-			// depth to 1 so the genuine top-level OR is treated as nested.
-			// The query leaks every row with id>0 regardless of user_id.
+			// MUST-FIX: unbalanced '(' inside a string literal pushes paren depth to 1 so the genuine top-level OR is
+			// treated as nested. The query leaks every row with id>0 regardless of user_id.
 			name: "literal_paren_masks_top_level_or",
 			sql: `-- name: LiteralParenOR :many
 SELECT id FROM items WHERE label = '(' AND user_id = @u OR id > 0;
@@ -510,8 +505,8 @@ SELECT id FROM items WHERE label = '(' AND user_id = @u OR id > 0;
 			wantQuery: "LiteralParenOR",
 		},
 		{
-			// MUST-FIX: 'user_id = 5' inside a string literal must not be
-			// accepted as the real user_id equality predicate.
+			// MUST-FIX: 'user_id = 5' inside a string literal must not be accepted as the real user_id equality
+			// predicate.
 			name: "literal_user_id_accepted_as_predicate",
 			sql: `-- name: LiteralUID :many
 SELECT id FROM items WHERE note = 'x user_id = 5 y';
@@ -520,9 +515,8 @@ SELECT id FROM items WHERE note = 'x user_id = 5 y';
 			wantQuery: "LiteralUID",
 		},
 		{
-			// SHOULD-FIX: 'from here' in the SELECT list — the word FROM
-			// inside a literal causes extractTargetTable to return 'here''
-			// instead of 'items', so the query passes without a user_id check.
+			// SHOULD-FIX: 'from here' in the SELECT list — the word FROM inside a literal causes extractTargetTable to
+			// return 'here'' instead of 'items', so the query passes without a user_id check.
 			name: "literal_from_in_projection_false_positive",
 			sql: `-- name: LiteralFrom :many
 SELECT 'from here', id FROM items WHERE user_id = @user_id;
@@ -530,8 +524,8 @@ SELECT 'from here', id FROM items WHERE user_id = @user_id;
 			wantViol: false,
 		},
 		{
-			// SHOULD-FIX: SELECT inside a string literal causes hasSubquery to
-			// see a "second SELECT" and wrongly flag a valid single-source UPDATE.
+			// SHOULD-FIX: SELECT inside a string literal causes hasSubquery to see a "second SELECT" and wrongly flag a
+			// valid single-source UPDATE.
 			name: "literal_select_in_update_false_positive",
 			sql: `-- name: LiteralSelect :exec
 UPDATE items SET note = 'please SELECT one' WHERE user_id = @user_id AND id = @id;

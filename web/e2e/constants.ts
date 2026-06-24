@@ -1,7 +1,6 @@
 /**
- * Shared constants for the E2E suite. Kept in a non-test file so journey
- * specs can import from here without Playwright complaining about importing
- * from a test file (*.setup.ts is considered a test file by Playwright).
+ * Shared constants for the E2E suite. Kept in a non-test file so journey specs can import from here without
+ * Playwright complaining about importing from a test file (*.setup.ts is considered a test file by Playwright).
  */
 
 import path from "path";

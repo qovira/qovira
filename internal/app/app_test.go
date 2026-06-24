@@ -23,8 +23,8 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// discardLogger returns a slog.Logger that discards all output below Error.
-// Used in tests that do not need to inspect log lines.
+// discardLogger returns a slog.Logger that discards all output below Error. Used in tests that do not need to inspect
+// log lines.
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
@@ -49,8 +49,8 @@ func (denyAllValidator) ValidateToken(_ context.Context, _ string) (store.Princi
 	return store.Principal{}, errors.New("token validation not yet implemented")
 }
 
-// denyAllCtor is a newValidator constructor that always returns a denyAllValidator.
-// Use it in tests that exercise app.New without needing real token resolution.
+// denyAllCtor is a newValidator constructor that always returns a denyAllValidator. Use it in tests that exercise
+// app.New without needing real token resolution.
 func denyAllCtor(_ *store.Store) httpx.TokenValidator { return denyAllValidator{} }
 
 // cleanupApp shuts down a in its cleanup hook without leaking goroutines.
@@ -64,8 +64,8 @@ func cleanupApp(t *testing.T, a *app.App) {
 	})
 }
 
-// TestNew_FailFast_EmptyKey verifies that app.New returns a non-nil error and
-// leaks no open store when the master key is empty (store.Open will fail).
+// TestNew_FailFast_EmptyKey verifies that app.New returns a non-nil error and leaks no open store when the master key
+// is empty (store.Open will fail).
 func TestNew_FailFast_EmptyKey(t *testing.T) {
 	t.Parallel()
 
@@ -87,8 +87,8 @@ func TestNew_FailFast_EmptyKey(t *testing.T) {
 	}
 }
 
-// TestNew_Success_AutoMigrateTrue verifies that app.New succeeds with a valid
-// config and AutoMigrate=true, returning a non-nil *App with a wired server.
+// TestNew_Success_AutoMigrateTrue verifies that app.New succeeds with a valid config and AutoMigrate=true, returning a
+// non-nil *App with a wired server.
 func TestNew_Success_AutoMigrateTrue(t *testing.T) {
 	t.Parallel()
 
@@ -106,10 +106,9 @@ func TestNew_Success_AutoMigrateTrue(t *testing.T) {
 	}
 }
 
-// TestNew_Healthz_Returns200AndVersion verifies that after a successful New,
-// a GET /healthz returns 200 and that the version string passed to New is
-// threaded through to the response body. This proves the single-source-of-truth
-// wiring: no separate package-level var, just the parameter.
+// TestNew_Healthz_Returns200AndVersion verifies that after a successful New, a GET /healthz returns 200 and that the
+// version string passed to New is threaded through to the response body. This proves the single-source-of-truth wiring:
+// no separate package-level var, just the parameter.
 func TestNew_Healthz_Returns200AndVersion(t *testing.T) {
 	t.Parallel()
 
@@ -147,9 +146,8 @@ func TestNew_Healthz_Returns200AndVersion(t *testing.T) {
 	}
 }
 
-// TestNew_ProtectedRoute_NoToken_Returns401 verifies that a protected API
-// route with no Authorization header returns 401 (auth middleware live with
-// deny-all validator).
+// TestNew_ProtectedRoute_NoToken_Returns401 verifies that a protected API route with no Authorization header returns
+// 401 (auth middleware live with deny-all validator).
 func TestNew_ProtectedRoute_NoToken_Returns401(t *testing.T) {
 	t.Parallel()
 
@@ -176,8 +174,8 @@ func TestNew_ProtectedRoute_NoToken_Returns401(t *testing.T) {
 	}
 }
 
-// TestNew_ProtectedRoute_WithBearerToken_Returns401 verifies that a Bearer
-// token is rejected by the deny-all validator, yielding 401.
+// TestNew_ProtectedRoute_WithBearerToken_Returns401 verifies that a Bearer token is rejected by the deny-all validator,
+// yielding 401.
 func TestNew_ProtectedRoute_WithBearerToken_Returns401(t *testing.T) {
 	t.Parallel()
 
@@ -200,13 +198,11 @@ func TestNew_ProtectedRoute_WithBearerToken_Returns401(t *testing.T) {
 	}
 }
 
-// shutdownTimeout mirrors the constant in package app so the test's wait
-// margin is meaningful.
+// shutdownTimeout mirrors the constant in package app so the test's wait margin is meaningful.
 const shutdownTimeout = 15 * time.Second
 
-// waitReady polls the TCP address addr until a connection succeeds or ctx is
-// cancelled. It returns true when the server is accepting connections, false
-// when ctx expires first.
+// waitReady polls the TCP address addr until a connection succeeds or ctx is cancelled. It returns true when the server
+// is accepting connections, false when ctx expires first.
 func waitReady(ctx context.Context, addr string) bool {
 	for {
 		conn, err := net.DialTimeout("tcp", addr, 10*time.Millisecond)
@@ -223,8 +219,8 @@ func waitReady(ctx context.Context, addr string) bool {
 	}
 }
 
-// TestRun_GracefulShutdown verifies that cancelling ctx makes Run return
-// within the bounded shutdown timeout and the store is closed afterward.
+// TestRun_GracefulShutdown verifies that cancelling ctx makes Run return within the bounded shutdown timeout and the
+// store is closed afterward.
 func TestRun_GracefulShutdown(t *testing.T) {
 	t.Parallel()
 
@@ -244,9 +240,8 @@ func TestRun_GracefulShutdown(t *testing.T) {
 		runDone <- a.Run(ctx)
 	}()
 
-	// Wait for the server to bind its ephemeral port rather than sleeping a
-	// fixed duration. ListenAddr blocks until BaseContext fires (i.e. the
-	// socket is open), then we dial once to confirm reachability.
+	// Wait for the server to bind its ephemeral port rather than sleeping a fixed duration. ListenAddr blocks until
+	// BaseContext fires (i.e. the socket is open), then we dial once to confirm reachability.
 	readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer readyCancel()
 
@@ -272,8 +267,8 @@ func TestRun_GracefulShutdown(t *testing.T) {
 		t.Fatal("app.Run did not return within expected shutdown window")
 	}
 
-	// After shutdown, the store should be closed. Attempting a query against the
-	// write pool should fail with "sql: database is closed".
+	// After shutdown, the store should be closed. Attempting a query against the write pool should fail with
+	// "sql: database is closed".
 	var n int
 	queryErr := a.Store().Writer().QueryRow("SELECT 1").Scan(&n)
 	if queryErr == nil {
@@ -281,8 +276,7 @@ func TestRun_GracefulShutdown(t *testing.T) {
 	}
 }
 
-// fakeModule is a test double for app.Module that mounts a route and returns
-// one tool.
+// fakeModule is a test double for app.Module that mounts a route and returns one tool.
 type fakeModule struct{}
 
 func (fakeModule) Name() string { return "fake" }
@@ -301,13 +295,12 @@ func (fakeModule) Tools() []capability.Tool {
 	}
 }
 
-// fakeModuleCtor is a module-constructor form of fakeModule for use with the
-// updated app.New signature that accepts func(*store.Store) app.Module.
+// fakeModuleCtor is a module-constructor form of fakeModule for use with the updated app.New signature that accepts
+// func(*store.Store) app.Module.
 func fakeModuleCtor(_ *store.Store) app.Module { return fakeModule{} }
 
-// TestNew_ModuleSeam_RouteAndAuth verifies that a Module passed to New mounts
-// its route on the shared mux and that auth is live on that route (deny-all
-// validator → 401 with no token, instead of 404 from the catch-all).
+// TestNew_ModuleSeam_RouteAndAuth verifies that a Module passed to New mounts its route on the shared mux and that auth
+// is live on that route (deny-all validator → 401 with no token, instead of 404 from the catch-all).
 func TestNew_ModuleSeam_RouteAndAuth(t *testing.T) {
 	t.Parallel()
 
@@ -320,11 +313,9 @@ func TestNew_ModuleSeam_RouteAndAuth(t *testing.T) {
 	}
 	cleanupApp(t, a)
 
-	// No auth token → 401 (auth middleware intercepts before the handler).
-	// This proves the route is mounted (both catch-all and the module route
-	// go through auth middleware, so 401 vs 404 does not distinguish them here —
-	// but combined with TestNew_ModuleSeam_DirectRouterMount below it covers
-	// the seam completely).
+	// No auth token → 401 (auth middleware intercepts before the handler). This proves the route is mounted (both
+	// catch-all and the module route go through auth middleware, so 401 vs 404 does not distinguish them here — but
+	// combined with TestNew_ModuleSeam_DirectRouterMount below it covers the seam completely).
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/fake", nil)
 	rr := httptest.NewRecorder()
 	a.Server().Handler.ServeHTTP(rr, r)
@@ -334,20 +325,18 @@ func TestNew_ModuleSeam_RouteAndAuth(t *testing.T) {
 	}
 }
 
-// TestNew_ModuleSeam_DirectRouterMount confirms the Module.Routes seam by
-// mounting a fakeModule onto a router passed to NewServer (no auth middleware)
-// and verifying the route returns 200. NewServer registers the catch-all
-// /api/v1/{path...} after the module's specific "GET /api/v1/fake" pattern, so
-// the specific pattern takes precedence and the module handler is invoked.
+// TestNew_ModuleSeam_DirectRouterMount confirms the Module.Routes seam by mounting a fakeModule onto a router passed to
+// NewServer (no auth middleware) and verifying the route returns 200. NewServer registers the catch-all
+// /api/v1/{path...} after the module's specific "GET /api/v1/fake" pattern, so the specific pattern takes precedence
+// and the module handler is invoked.
 func TestNew_ModuleSeam_DirectRouterMount(t *testing.T) {
 	t.Parallel()
 
 	router := httpx.NewRouter()
 	fakeModule{}.Routes(router)
 
-	// Construct a bare server with no middleware so we hit the handler directly.
-	// NewServer adds the catch-all /api/v1/{path...} after module routes are
-	// mounted, so fakeModule's "GET /api/v1/fake" wins by specificity.
+	// Construct a bare server with no middleware so we hit the handler directly. NewServer adds the catch-all
+	// /api/v1/{path...} after module routes are mounted, so fakeModule's "GET /api/v1/fake" wins by specificity.
 	srv := httpx.NewServer("127.0.0.1:0", "test", router, events.NewBus())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/fake", nil)
@@ -372,9 +361,8 @@ func tableExists(t *testing.T, db *sql.DB, name string) bool {
 	return n > 0
 }
 
-// TestNew_AutoMigrate_True verifies that when AutoMigrate=true, app.New applies
-// all pending migrations so the instance table and goose_db_version table exist
-// on the write pool after construction.
+// TestNew_AutoMigrate_True verifies that when AutoMigrate=true, app.New applies all pending migrations so the instance
+// table and goose_db_version table exist on the write pool after construction.
 func TestNew_AutoMigrate_True(t *testing.T) {
 	t.Parallel()
 
@@ -395,11 +383,10 @@ func TestNew_AutoMigrate_True(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersHarnessSweepPeriodic verifies that app.New wires the harness
-// sweep as a system-scoped periodic job: exactly one jobs row keyed
-// "harness.sweep_confirmations" exists, with a NULL user_id (system scope) and a
-// recurrence (interval) set. This is the wiring seam for the scheduler's periodic
-// machinery; the sweep handler's behavior itself lives in the harness.
+// TestNew_RegistersHarnessSweepPeriodic verifies that app.New wires the harness sweep as a system-scoped periodic job:
+// exactly one jobs row keyed "harness.sweep_confirmations" exists, with a NULL user_id (system scope) and a recurrence
+// (interval) set. This is the wiring seam for the scheduler's periodic machinery; the sweep handler's behavior itself
+// lives in the harness.
 func TestNew_RegistersHarnessSweepPeriodic(t *testing.T) {
 	t.Parallel()
 
@@ -436,8 +423,8 @@ func TestNew_RegistersHarnessSweepPeriodic(t *testing.T) {
 	}
 }
 
-// TestNew_AutoMigrate_False verifies that when AutoMigrate=false, app.New opens
-// the store but does NOT apply migrations, so the instance table is absent.
+// TestNew_AutoMigrate_False verifies that when AutoMigrate=false, app.New opens the store but does NOT apply
+// migrations, so the instance table is absent.
 func TestNew_AutoMigrate_False(t *testing.T) {
 	t.Parallel()
 
@@ -455,10 +442,9 @@ func TestNew_AutoMigrate_False(t *testing.T) {
 	}
 }
 
-// TestNew_AutoMigrate_ReaderSeesSchema verifies that after app.New with
-// AutoMigrate=true, the read pool (separate pool, same file) observes the
-// migrated schema. Confirms migrations were applied to the write pool and the
-// shared WAL propagates the schema to readers.
+// TestNew_AutoMigrate_ReaderSeesSchema verifies that after app.New with AutoMigrate=true, the read pool (separate pool,
+// same file) observes the migrated schema. Confirms migrations were applied to the write pool and the shared WAL
+// propagates the schema to readers.
 func TestNew_AutoMigrate_ReaderSeesSchema(t *testing.T) {
 	t.Parallel()
 
@@ -476,8 +462,8 @@ func TestNew_AutoMigrate_ReaderSeesSchema(t *testing.T) {
 	}
 }
 
-// TestNew_DBPath verifies that app.New creates the database at the path derived
-// by store.DBPath (not at a hardcoded or arbitrary path).
+// TestNew_DBPath verifies that app.New creates the database at the path derived by store.DBPath (not at a hardcoded or
+// arbitrary path).
 func TestNew_DBPath(t *testing.T) {
 	t.Parallel()
 
@@ -496,8 +482,7 @@ func TestNew_DBPath(t *testing.T) {
 	}
 }
 
-// TestDenyAllValidator_ReturnsError verifies the deny-all placeholder returns
-// a non-nil error for any token.
+// TestDenyAllValidator_ReturnsError verifies the deny-all placeholder returns a non-nil error for any token.
 func TestDenyAllValidator_ReturnsError(t *testing.T) {
 	t.Parallel()
 

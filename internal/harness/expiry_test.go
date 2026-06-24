@@ -3,16 +3,14 @@ package harness_test
 // expiry_test.go — TDD tests for the "Expire stale confirmations" slice.
 //
 // Acceptance criteria covered:
-//   (1) Lazy-expiry: approve/deny arriving past ExpiresAt is rejected as expired —
-//       row transitions pending→expired, tool NOT executed, assistant message abandoned,
-//       confirmation.expired emitted, NO model round, HTTP 409 with code "confirmation_expired".
-//   (2) SweepExpiredConfirmations: marks lapsed pending rows expired, emits
-//       confirmation.expired per row, abandons messages, returns correct count,
-//       does NOT touch non-lapsed rows.
-//   (3) Abandoned turns are inert — conversation is never treated as resumable
-//       after expiry; no model round fires.
-//   (4) Concurrency: SweepExpiredConfirmations runs concurrently with Resolve of
-//       the same row; exactly one winner; no double event. Hammered under -count=50.
+//   (1) Lazy-expiry: approve/deny arriving past ExpiresAt is rejected as expired — row transitions pending→expired,
+//       tool NOT executed, assistant message abandoned, confirmation.expired emitted, NO model round, HTTP 409 with
+//       code "confirmation_expired".
+//   (2) SweepExpiredConfirmations: marks lapsed pending rows expired, emits confirmation.expired per row, abandons
+//       messages, returns correct count, does NOT touch non-lapsed rows.
+//   (3) Abandoned turns are inert — conversation is never treated as resumable after expiry; no model round fires.
+//   (4) Concurrency: SweepExpiredConfirmations runs concurrently with Resolve of the same row; exactly one winner; no
+//       double event. Hammered under -count=50.
 
 import (
 	"context"
@@ -33,8 +31,8 @@ import (
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// buildHarnessWithClockAndTool builds a Harness with an injected clock and a single tool,
-// so expiry tests can set ExpiresAt in the past deterministically.
+// buildHarnessWithClockAndTool builds a Harness with an injected clock and a single tool, so expiry tests can set
+// ExpiresAt in the past deterministically.
 func buildHarnessWithClockAndTool(
 	t *testing.T,
 	s *store.Store,
@@ -54,9 +52,8 @@ func buildHarnessWithClockAndTool(
 	return harness.NewWithClock(reg, gw, s, bus, cfg, harness.NewDiscardLogger(), nowFn)
 }
 
-// insertSuspendedConversation manually constructs a conversation in a suspended
-// state: user message + assistant message with one Confirm-tier tool call +
-// pending_confirmations row. Returns the callID, assistantMsgID, and convID.
+// insertSuspendedConversation manually constructs a conversation in a suspended state: user message + assistant
+// message with one Confirm-tier tool call + pending_confirmations row. Returns the callID, assistantMsgID, and convID.
 // The expires_at on the pending row is set to the provided expiresAt string.
 func insertSuspendedConversation(
 	t *testing.T,
@@ -166,10 +163,9 @@ func countExpiredEventsFor(evs []fakeEvent, callID string) int {
 
 // ── AC-1: Lazy expiry — approve past ExpiresAt ────────────────────────────────
 
-// TestExpiry_LazyCheck_ApprovePastTTLIsRejected verifies that an approve arriving
-// after ExpiresAt is rejected with 409/confirmation_expired. The row transitions
-// to "expired", the tool does NOT execute, the assistant message is marked
-// abandoned, confirmation.expired is emitted, and no model round fires.
+// TestExpiry_LazyCheck_ApprovePastTTLIsRejected verifies that an approve arriving after ExpiresAt is rejected with
+// 409/confirmation_expired. The row transitions to "expired", the tool does NOT execute, the assistant message is
+// marked abandoned, confirmation.expired is emitted, and no model round fires.
 func TestExpiry_LazyCheck_ApprovePastTTLIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -258,8 +254,8 @@ func TestExpiry_LazyCheck_ApprovePastTTLIsRejected(t *testing.T) {
 	}
 }
 
-// TestExpiry_LazyCheck_DenyPastTTLIsRejected verifies that a deny (not just approve)
-// arriving after ExpiresAt is also rejected as expired.
+// TestExpiry_LazyCheck_DenyPastTTLIsRejected verifies that a deny (not just approve) arriving after ExpiresAt is also
+// rejected as expired.
 func TestExpiry_LazyCheck_DenyPastTTLIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -309,8 +305,8 @@ func TestExpiry_LazyCheck_DenyPastTTLIsRejected(t *testing.T) {
 	}
 }
 
-// TestExpiry_LazyCheck_NotExpiredStillWorks verifies that an approve arriving BEFORE
-// ExpiresAt still works normally (regression guard).
+// TestExpiry_LazyCheck_NotExpiredStillWorks verifies that an approve arriving BEFORE ExpiresAt still works normally
+// (regression guard).
 func TestExpiry_LazyCheck_NotExpiredStillWorks(t *testing.T) {
 	t.Parallel()
 
@@ -368,10 +364,9 @@ func TestExpiry_LazyCheck_NotExpiredStillWorks(t *testing.T) {
 
 // ── AC-2: SweepExpiredConfirmations ──────────────────────────────────────────
 
-// TestExpiry_Sweep_MarksLapsedRowsAndEmitsEvents verifies that
-// SweepExpiredConfirmations marks all lapsed pending rows as expired, emits one
-// confirmation.expired per row on the correct user bus, abandons their assistant
-// messages, returns the correct count, and leaves non-lapsed rows untouched.
+// TestExpiry_Sweep_MarksLapsedRowsAndEmitsEvents verifies that SweepExpiredConfirmations marks all lapsed pending rows
+// as expired, emits one confirmation.expired per row on the correct user bus, abandons their assistant messages,
+// returns the correct count, and leaves non-lapsed rows untouched.
 func TestExpiry_Sweep_MarksLapsedRowsAndEmitsEvents(t *testing.T) {
 	t.Parallel()
 
@@ -499,10 +494,9 @@ func TestExpiry_Sweep_MarksLapsedRowsAndEmitsEvents(t *testing.T) {
 
 // ── AC-3: Abandoned turns are inert ──────────────────────────────────────────
 
-// TestExpiry_AbandonedTurnIsInert verifies that after expiry, the conversation is
-// not treated as resumable: outstandingToolCalls returns nothing, isTurnComplete
-// returns true, and calling Resolve (after the row is expired) returns 409 without
-// spawning a model round.
+// TestExpiry_AbandonedTurnIsInert verifies that after expiry, the conversation is not treated as resumable:
+// outstandingToolCalls returns nothing, isTurnComplete returns true, and calling Resolve (after the row is expired)
+// returns 409 without spawning a model round.
 func TestExpiry_AbandonedTurnIsInert(t *testing.T) {
 	t.Parallel()
 
@@ -547,8 +541,8 @@ func TestExpiry_AbandonedTurnIsInert(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Second Resolve on the same expired row: must also return 409 (already resolved),
-	// NOT 500, and must NOT fire a model round.
+	// Second Resolve on the same expired row: must also return 409 (already resolved), NOT 500, and must NOT fire a
+	// model round.
 	rr2 := resolveViaHTTP(t, srv, p, convID, callID, "approve")
 	if rr2.Code != http.StatusConflict {
 		t.Errorf("AC-3: second resolve status = %d, want 409 (already expired/resolved)", rr2.Code)
@@ -578,9 +572,8 @@ func TestExpiry_AbandonedTurnIsInert(t *testing.T) {
 	}
 }
 
-// TestExpiry_AbandonedMessage_StartTurnIsNoOp verifies that StartTurn on a
-// conversation whose last assistant message is abandoned is a no-op (the turn
-// completion guard treats abandoned as terminal).
+// TestExpiry_AbandonedMessage_StartTurnIsNoOp verifies that StartTurn on a conversation whose last assistant message
+// is abandoned is a no-op (the turn completion guard treats abandoned as terminal).
 func TestExpiry_AbandonedMessage_StartTurnIsNoOp(t *testing.T) {
 	t.Parallel()
 
@@ -670,10 +663,9 @@ func TestExpiry_AbandonedMessage_StartTurnIsNoOp(t *testing.T) {
 
 // ── AC-4: Concurrency — sweep vs Resolve on the same row ─────────────────────
 
-// TestExpiry_ConcurrentSweepAndResolve verifies that when SweepExpiredConfirmations
-// and Resolve race on the same lapsed pending row, exactly ONE wins the CAS and
-// exactly ONE confirmation.expired event is emitted. No double-execution, no double
-// event. Hammered under -race by the caller (-count=50 in the test runner).
+// TestExpiry_ConcurrentSweepAndResolve verifies that when SweepExpiredConfirmations and Resolve race on the same
+// lapsed pending row, exactly ONE wins the CAS and exactly ONE confirmation.expired event is emitted. No
+// double-execution, no double event. Hammered under -race by the caller (-count=50 in the test runner).
 func TestExpiry_ConcurrentSweepAndResolve(t *testing.T) {
 	t.Parallel()
 
@@ -765,10 +757,9 @@ func TestExpiry_ConcurrentSweepAndResolve(t *testing.T) {
 
 // ── AC-5: Multi-confirm per-call expiry ──────────────────────────────────────
 
-// insertSuspendedConversationMultiCall manually constructs a conversation
-// suspended with N Confirm-tier tool calls on ONE assistant message. Returns the
-// assistant message ID, conversation ID, and a slice of call IDs in insertion order.
-// The expires_at for each call is set to the provided per-call expiresAt string.
+// insertSuspendedConversationMultiCall manually constructs a conversation suspended with N Confirm-tier tool calls on
+// ONE assistant message. Returns the assistant message ID, conversation ID, and a slice of call IDs in insertion
+// order. The expires_at for each call is set to the provided per-call expiresAt string.
 func insertSuspendedConversationMultiCall(
 	t *testing.T,
 	s *store.Store,
@@ -831,8 +822,7 @@ func insertSuspendedConversationMultiCall(
 	return convID, assistantMsgID, callIDs
 }
 
-// hasToolResultForCall returns true if a tool-result message with the given
-// callID exists in the conversation.
+// hasToolResultForCall returns true if a tool-result message with the given callID exists in the conversation.
 func hasToolResultForCall(t *testing.T, s *store.Store, userID, convID, callID string) bool {
 	t.Helper()
 	var n int
@@ -845,12 +835,11 @@ func hasToolResultForCall(t *testing.T, s *store.Store, userID, convID, callID s
 	return n > 0
 }
 
-// TestExpiry_MultiConfirm_ApproveAfterOneSiblingExpires is the MUST-FAIL-BEFORE-FIX
-// TDD test for the multi-confirmation per-call expiry bug.
+// TestExpiry_MultiConfirm_ApproveAfterOneSiblingExpires is the MUST-FAIL-BEFORE-FIX TDD test for the multi-confirmation
+// per-call expiry bug.
 //
-// Setup: one assistant message with THREE Confirm-tier calls (callA, callB, callC),
-// all pending. Expire ONE call (callA) via the lazy path (clock set to past). Then
-// APPROVE a still-pending sibling (callB). Assert:
+// Setup: one assistant message with THREE Confirm-tier calls (callA, callB, callC), all pending. Expire ONE call
+// (callA) via the lazy path (clock set to past). Then APPROVE a still-pending sibling (callB). Assert:
 //   - callA gets a synthetic "expired" tool-result persisted.
 //   - confirmation.expired fired for callA.
 //   - callB's tool EXECUTES exactly once after approval.
@@ -859,11 +848,9 @@ func hasToolResultForCall(t *testing.T, s *store.Store, userID, convID, callID s
 //   - callC is still pending (not affected by callA's expiry).
 //   - The turn does not reach message.completed (callC still pending).
 //
-// After fixing callC, the turn completes with message.completed.
-// Without the fix: callA's expiry marks the whole message abandoned;
-// approving callB spawns run, outstandingToolCalls returns nil (abandoned
-// short-circuit), isTurnComplete returns true, and the turn silently dies
-// with 202 to the user but no execution.
+// After fixing callC, the turn completes with message.completed. Without the fix: callA's expiry marks the whole
+// message abandoned; approving callB spawns run, outstandingToolCalls returns nil (abandoned short-circuit),
+// isTurnComplete returns true, and the turn silently dies with 202 to the user but no execution.
 func TestExpiry_MultiConfirm_ApproveAfterOneSiblingExpires(t *testing.T) {
 	t.Parallel()
 
@@ -908,8 +895,8 @@ func TestExpiry_MultiConfirm_ApproveAfterOneSiblingExpires(t *testing.T) {
 	)
 	callA, callB, callC := callIDs[0], callIDs[1], callIDs[2]
 
-	// Step 1: Attempt to approve callA — it should be rejected as expired (past ExpiresAt).
-	// This triggers the lazy expiry path for callA.
+	// Step 1: Attempt to approve callA — it should be rejected as expired (past ExpiresAt). This triggers the lazy
+	// expiry path for callA.
 	rrA := resolveViaHTTP(t, srv, p, convID, callA, "approve")
 	if rrA.Code != http.StatusConflict {
 		t.Fatalf("multi-confirm: approve callA status = %d, want 409 (expired); body: %s", rrA.Code, rrA.Body.String())
@@ -949,9 +936,8 @@ func TestExpiry_MultiConfirm_ApproveAfterOneSiblingExpires(t *testing.T) {
 		t.Errorf("multi-confirm: callC status = %q, want 'pending'", st)
 	}
 
-	// Step 2: Approve callB (still pending sibling). This should resume the turn,
-	// execute callB's tool, and leave callC still pending (turn re-suspends).
-	// Under the bug: the message is already abandoned → outstandingToolCalls returns
+	// Step 2: Approve callB (still pending sibling). This should resume the turn, execute callB's tool, and leave callC
+	// still pending (turn re-suspends). Under the bug: the message is already abandoned → outstandingToolCalls returns
 	// nil → isTurnComplete returns true → the turn silently dies with 202 but no execution.
 	rrB := resolveViaHTTP(t, srv, p, convID, callB, "approve")
 	if rrB.Code != http.StatusAccepted {
@@ -1017,22 +1003,20 @@ func TestExpiry_MultiConfirm_ApproveAfterOneSiblingExpires(t *testing.T) {
 
 // ── MUST-FIX: expiry-last stall (mixed-turn, C expires after B approved) ────────
 
-// TestExpiry_ExpiryLast_LazyPath is the TDD test for the mixed-turn stall bug:
-// three Confirm-tier calls (callA, callB, callC) on ONE assistant message.
+// TestExpiry_ExpiryLast_LazyPath is the TDD test for the mixed-turn stall bug: three Confirm-tier calls (callA, callB,
+// callC) on ONE assistant message.
 //
-//  1. callA expires lazily (clock past ExpiresAt) — synthetic expired tool-result
-//     persisted, confirmation.expired emitted, message NOT abandoned (B+C pending).
+//  1. callA expires lazily (clock past ExpiresAt) — synthetic expired tool-result persisted, confirmation.expired
+//     emitted, message NOT abandoned (B+C pending).
 //  2. User approves callB — run executes B, suspends on callC still pending.
 //  3. callC expires lazily (second Resolve call on expired callC).
 //
-// Before the fix: the expiry path in Resolve RETURNS without re-entering run, so
-// callC has a synthetic tool-result, the message is NOT abandoned (B is approved),
-// but NOTHING fires the continue round. The turn silently stalls — no message.completed,
-// no turn.failed. The test must see EXACTLY ONE message.completed after step 3.
+// Before the fix: the expiry path in Resolve RETURNS without re-entering run, so callC has a synthetic tool-result,
+// the message is NOT abandoned (B is approved), but NOTHING fires the continue round. The turn silently stalls — no
+// message.completed, no turn.failed. The test must see EXACTLY ONE message.completed after step 3.
 //
-// After the fix: the non-abandoning expiry path re-enters run (mirror of the
-// approve/deny resume goroutine), the continue round narrates B's executed result,
-// and message.completed fires.
+// After the fix: the non-abandoning expiry path re-enters run (mirror of the approve/deny resume goroutine), the
+// continue round narrates B's executed result, and message.completed fires.
 func TestExpiry_ExpiryLast_LazyPath(t *testing.T) {
 	t.Parallel()
 
@@ -1062,8 +1046,8 @@ func TestExpiry_ExpiryLast_LazyPath(t *testing.T) {
 	// callA and callC expire; callB has a future expiry (still valid when approved).
 	expiresAts := []string{pastExpiry, futureExpiry, pastExpiry}
 
-	// After all three calls have tool-results (callA expired, callB executed, callC
-	// expired), the model gives a final reply.
+	// After all three calls have tool-results (callA expired, callB executed, callC expired), the model gives a final
+	// reply.
 	roundFinal := []gateway.Chunk{{TextDelta: "all resolved"}, {Done: true}}
 	gw := &queuedChatter{rounds: [][]gateway.Chunk{roundFinal}}
 
@@ -1099,8 +1083,8 @@ func TestExpiry_ExpiryLast_LazyPath(t *testing.T) {
 		t.Fatal("expiry-last lazy: message abandoned while callB/callC still pending — wrong")
 	}
 
-	// Step 2: Approve callB (still valid). This should resume the turn, execute
-	// callB's tool, and re-suspend on callC still pending.
+	// Step 2: Approve callB (still valid). This should resume the turn, execute callB's tool, and re-suspend on callC
+	// still pending.
 	rrB := resolveViaHTTP(t, srv, p, convID, callB, "approve")
 	if rrB.Code != http.StatusAccepted {
 		t.Fatalf("expiry-last lazy: approve callB status = %d, want 202; body: %s", rrB.Code, rrB.Body.String())
@@ -1124,9 +1108,8 @@ func TestExpiry_ExpiryLast_LazyPath(t *testing.T) {
 		t.Errorf("expiry-last lazy: message.completed emitted %d times after callB approved only — callC still pending", n)
 	}
 
-	// Step 3: Expire callC via the lazy path (Resolve on expired callC).
-	// BEFORE THE FIX: this returns without re-entering run → silent stall.
-	// AFTER THE FIX: re-enters run → continue round fires → message.completed.
+	// Step 3: Expire callC via the lazy path (Resolve on expired callC). BEFORE THE FIX: this returns without
+	// re-entering run → silent stall. AFTER THE FIX: re-enters run → continue round fires → message.completed.
 	rrC := resolveViaHTTP(t, srv, p, convID, callC, "approve")
 	if rrC.Code != http.StatusConflict {
 		t.Fatalf("expiry-last lazy: approve callC status = %d, want 409 (expired); body: %s", rrC.Code, rrC.Body.String())
@@ -1149,8 +1132,8 @@ func TestExpiry_ExpiryLast_LazyPath(t *testing.T) {
 		t.Error("expiry-last lazy: message abandoned in mixed (approved+expired) case — must NOT be abandoned")
 	}
 
-	// Now wait for the turn to complete — this is the MUST-FIX assertion.
-	// Without the fix, the turn stalls here and message.completed never fires.
+	// Now wait for the turn to complete — this is the MUST-FIX assertion. Without the fix, the turn stalls here and
+	// message.completed never fires.
 	waitForCompleted(t, bus, 1, 8*time.Second)
 
 	evsFinal := bus.snapshot()
@@ -1172,10 +1155,9 @@ func TestExpiry_ExpiryLast_LazyPath(t *testing.T) {
 	}
 }
 
-// TestExpiry_ExpiryLast_SweepPath mirrors TestExpiry_ExpiryLast_LazyPath but
-// uses SweepExpiredConfirmations to expire callC (instead of the lazy Resolve path).
-// The same stall manifests via the sweep: callC's expiry does not re-enter run,
-// so the continue round never fires.
+// TestExpiry_ExpiryLast_SweepPath mirrors TestExpiry_ExpiryLast_LazyPath but uses SweepExpiredConfirmations to expire
+// callC (instead of the lazy Resolve path). The same stall manifests via the sweep: callC's expiry does not re-enter
+// run, so the continue round never fires.
 func TestExpiry_ExpiryLast_SweepPath(t *testing.T) {
 	t.Parallel()
 
@@ -1203,9 +1185,8 @@ func TestExpiry_ExpiryLast_SweepPath(t *testing.T) {
 	// callB has a future expiry so it can be approved at stage1 time.
 	futureExpiry := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
 
-	// callA expires; callB is valid (approved later); callC expires.
-	// For the sweep test: callC will also have pastExpiry, but we drive
-	// expiry via the sweep AFTER callB is approved.
+	// callA expires; callB is valid (approved later); callC expires. For the sweep test: callC will also have
+	// pastExpiry, but we drive expiry via the sweep AFTER callB is approved.
 	expiresAts := []string{pastExpiry, futureExpiry, pastExpiry}
 
 	// After all three calls have tool-results, the model gives a final reply.
@@ -1263,11 +1244,9 @@ func TestExpiry_ExpiryLast_SweepPath(t *testing.T) {
 		t.Errorf("expiry-last sweep: message.completed emitted %d times after callB only", n)
 	}
 
-	// Step 3: Expire callC via the sweep.
-	// BEFORE THE FIX: sweep processes callC, marks it expired, but does NOT
-	// re-enter run for the affected conversation → continue round never fires.
-	// AFTER THE FIX: sweep collects the non-abandoned conv IDs and re-enters
-	// run once per conversation after processing.
+	// Step 3: Expire callC via the sweep. BEFORE THE FIX: sweep processes callC, marks it expired, but does NOT
+	// re-enter run for the affected conversation → continue round never fires. AFTER THE FIX: sweep collects the
+	// non-abandoned conv IDs and re-enters run once per conversation after processing.
 	n, sweepErr := h.SweepExpiredConfirmations(context.Background())
 	if sweepErr != nil {
 		t.Fatalf("expiry-last sweep: SweepExpiredConfirmations: %v", sweepErr)
@@ -1294,8 +1273,8 @@ func TestExpiry_ExpiryLast_SweepPath(t *testing.T) {
 		t.Error("expiry-last sweep: message abandoned in mixed case — must NOT be abandoned")
 	}
 
-	// The turn must now complete — this is the MUST-FIX assertion for the sweep path.
-	// Without the fix, the sweep expires callC but never triggers the continue round.
+	// The turn must now complete — this is the MUST-FIX assertion for the sweep path. Without the fix, the sweep
+	// expires callC but never triggers the continue round.
 	waitForCompleted(t, bus, 1, 8*time.Second)
 
 	evsFinal := bus.snapshot()
@@ -1315,9 +1294,8 @@ func TestExpiry_ExpiryLast_SweepPath(t *testing.T) {
 	}
 }
 
-// TestExpiry_MultiConfirm_AllExpire_MessageAbandoned verifies the fully-stale
-// case: all confirm rows for a message expire (none approved/denied). The
-// message MUST be abandoned, NO model round fires, and the turn is inert.
+// TestExpiry_MultiConfirm_AllExpire_MessageAbandoned verifies the fully-stale case: all confirm rows for a message
+// expire (none approved/denied). The message MUST be abandoned, NO model round fires, and the turn is inert.
 func TestExpiry_MultiConfirm_AllExpire_MessageAbandoned(t *testing.T) {
 	t.Parallel()
 
@@ -1411,14 +1389,13 @@ func TestExpiry_MultiConfirm_AllExpire_MessageAbandoned(t *testing.T) {
 
 // ── NICE-TO-HAVE: shape of synthetic expired tool-result ─────────────────────
 
-// TestExpiry_SyntheticResultShape asserts that the synthetic expired tool-result
-// persisted for an expired call has the model-safe JSON shape:
+// TestExpiry_SyntheticResultShape asserts that the synthetic expired tool-result persisted for an expired call has the
+// model-safe JSON shape:
 //
 //	{"error":"This confirmation expired; the action was not performed.","code":"confirmation_expired"}
 //
-// This verifies the exact content the model receives in the continue round, not
-// just that a row was persisted. A wrong payload (e.g. a plain string or a
-// different error key) would cause the model to misinterpret the expiry.
+// This verifies the exact content the model receives in the continue round, not just that a row was persisted. A wrong
+// payload (e.g. a plain string or a different error key) would cause the model to misinterpret the expiry.
 func TestExpiry_SyntheticResultShape(t *testing.T) {
 	t.Parallel()
 

@@ -1,9 +1,8 @@
 // Session store — module-level singleton, per-user data, RESET on logout.
 //
-// This is the client's sole source of auth state. The token is HttpOnly and
-// never visible to JS; we only hold the user object and expiry from the
-// server's response. Module-level $state is valid here because ssr=false is
-// set in +layout.ts — this module only ever runs in the browser.
+// This is the client's sole source of auth state. The token is HttpOnly and never visible to JS; we only hold the user
+// object and expiry from the server's response. Module-level $state is valid here because ssr=false is set in
+// +layout.ts — this module only ever runs in the browser.
 
 import type { components } from "$lib/api/schema.d.ts";
 
@@ -11,10 +10,9 @@ export type User = components["schemas"]["User"];
 
 export interface Session {
   user: User;
-  // RFC 3339 UTC, or null when the expiry is unknown (the /me boot probe does
-  // not return it — only POST /auth/login does). Never fabricate a value: a
-  // made-up expiry would arm the soft pre-expiry timer against a time unrelated
-  // to the real cookie lifetime.
+  // RFC 3339 UTC, or null when the expiry is unknown (the /me boot probe does not return it — only POST /auth/login
+  // does). Never fabricate a value: a made-up expiry would arm the soft pre-expiry timer against a time unrelated to
+  // the real cookie lifetime.
   expiresAt: string | null;
 }
 
@@ -36,8 +34,8 @@ export function getUser(): User | null {
 }
 
 /**
- * Returns true when there is an active session.
- * Derived from _session so it updates reactively in components that read it.
+ * Returns true when there is an active session. Derived from _session so it updates reactively in components that read
+ * it.
  */
 export function isAuthenticated(): boolean {
   return _session !== null;
@@ -48,30 +46,29 @@ export function isAuthenticated(): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Seed the session after a successful /me probe or POST /auth/login response.
- * Replaces any existing session (e.g. re-authentication after soft expiry).
+ * Seed the session after a successful /me probe or POST /auth/login response. Replaces any existing session (e.g.
+ * re-authentication after soft expiry).
  */
 export function seedSession(data: Session): void {
   _session = data;
 }
 
 /**
- * Reset the session store to unauthenticated state.
- * Call on logout or when a 401 is received via the onUnauthorized hook.
- * Safe to call when already unauthenticated.
+ * Reset the session store to unauthenticated state. Call on logout or when a 401 is received via the onUnauthorized
+ * hook. Safe to call when already unauthenticated.
  */
 export function resetSession(): void {
   _session = null;
-  // Cancel any armed soft-pre-expiry timer — after teardown there is no session
-  // to warn about, so a stale re-login prompt must not fire.
+  // Cancel any armed soft-pre-expiry timer — after teardown there is no session to warn about, so a stale re-login
+  // prompt must not fire.
   _cancelPreExpiry();
 }
 
 // ---------------------------------------------------------------------------
 // Soft pre-expiry seam
 //
-// Consumers can register a callback to be notified shortly before the session
-// expires (e.g. to prompt the user to re-authenticate). No-op until wired.
+// Consumers can register a callback to be notified shortly before the session expires (e.g. to prompt the user to
+// re-authenticate). No-op until wired.
 // ---------------------------------------------------------------------------
 
 type PreExpiryCallback = () => void;
@@ -79,9 +76,8 @@ let _preExpiryCallback: PreExpiryCallback | null = null;
 let _preExpiryTimerId: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Register a callback to be invoked a given number of milliseconds before the
- * session expires. Call with null to cancel. Called at most once per session
- * seed. Clears the previous timer on re-seed or reset.
+ * Register a callback to be invoked a given number of milliseconds before the session expires. Call with null to
+ * cancel. Called at most once per session seed. Clears the previous timer on re-seed or reset.
  */
 export function onPreExpiry(cb: PreExpiryCallback | null, warningMs = 60_000): void {
   _preExpiryCallback = cb;

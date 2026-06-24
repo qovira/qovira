@@ -6,9 +6,8 @@
 //   2. Complete   — applyOptimisticComplete / confirmComplete / revertComplete
 //   3. Edit save  — buildNextDueAt / makeReminderPatchBody (no optimism — server-only)
 //
-// These are the pure or store-driving helpers called by the page component.
-// Keeping them here makes TDD straightforward: the page just wires the UI;
-// the logic lives here and is proven by actions.svelte.test.ts.
+// These are the pure or store-driving helpers called by the page component. Keeping them here makes TDD
+// straightforward: the page just wires the UI; the logic lives here and is proven by actions.svelte.test.ts.
 
 import type { ReminderItem } from "$lib/stores/reminders.svelte.js";
 import { getReminderById, upsertReminder, removeReminder } from "$lib/stores/reminders.svelte.js";
@@ -30,8 +29,8 @@ export interface EditFormValues {
 }
 
 /**
- * The PATCH body sent to the server — only the changed fields, with null to
- * clear nullable fields. exactOptionalPropertyTypes is on: absent keys omitted.
+ * The PATCH body sent to the server — only the changed fields, with null to clear nullable fields.
+ * exactOptionalPropertyTypes is on: absent keys omitted.
  */
 export interface ReminderPatchBody {
   title?: string;
@@ -57,17 +56,16 @@ const RRULE_BY_PRESET: Record<Exclude<RrulePreset, "none" | "keep">, string> = {
 // ---------------------------------------------------------------------------
 
 /**
- * Insert the temp reminder into the store immediately (optimistic).
- * Caller provides the fully-built temp ReminderItem with a ulid temp id.
+ * Insert the temp reminder into the store immediately (optimistic). Caller provides the fully-built temp ReminderItem
+ * with a ulid temp id.
  */
 export function applyOptimisticCreate(temp: ReminderItem): void {
   upsertReminder(temp);
 }
 
 /**
- * On success: remove temp, upsert the real server reminder.
- * The server's `reminder.created` SSE echo will idempotently upsert the same
- * id again — that is harmless.
+ * On success: remove temp, upsert the real server reminder. The server's `reminder.created` SSE echo will idempotently
+ * upsert the same id again — that is harmless.
  */
 export function confirmCreate(tempId: string, real: ReminderItem): void {
   removeReminder(tempId);
@@ -86,8 +84,8 @@ export function revertCreate(tempId: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Optimistically mark the reminder as completed.
- * Returns a snapshot of the prior state (for revert), or null if not found.
+ * Optimistically mark the reminder as completed. Returns a snapshot of the prior state (for revert), or null if not
+ * found.
  */
 export function applyOptimisticComplete(id: string): ReminderItem | null {
   const current = getReminderById(id);
@@ -108,9 +106,8 @@ export function applyOptimisticComplete(id: string): ReminderItem | null {
 }
 
 /**
- * On success: upsert the authoritative server reminder (which may have
- * different completedAt, lastFiredAt, etc.). The SSE echo also reconciles
- * idempotently.
+ * On success: upsert the authoritative server reminder (which may have different completedAt, lastFiredAt, etc.). The
+ * SSE echo also reconciles idempotently.
  */
 export function confirmComplete(real: ReminderItem): void {
   upsertReminder(real);
@@ -128,8 +125,8 @@ export function revertComplete(snapshot: ReminderItem): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a `datetime-local` string value ("2030-06-15T09:00") to an
- * RFC3339 UTC ISO string ("2030-06-15T07:00:00.000Z" in UTC+2, etc.).
+ * Convert a `datetime-local` string value ("2030-06-15T09:00") to an RFC3339 UTC ISO string
+ * ("2030-06-15T07:00:00.000Z" in UTC+2, etc.).
  *
  * Returns an empty string for empty input (caller validates before submit).
  */
@@ -145,11 +142,11 @@ export function buildNextDueAt(datetimeLocal: string): string {
 }
 
 /**
- * Compute the default datetime-local value for the due-date input,
- * set to the top of the next hour (a sensible near-future default).
+ * Compute the default datetime-local value for the due-date input, set to the top of the next hour (a sensible
+ * near-future default).
  *
- * Returns a string in the format expected by `<input type="datetime-local">`,
- * i.e. "YYYY-MM-DDTHH:MM" (no seconds, no Z — local time).
+ * Returns a string in the format expected by `<input type="datetime-local">`, i.e. "YYYY-MM-DDTHH:MM" (no seconds, no
+ * Z — local time).
  */
 export function defaultDueAtLocal(): string {
   const now = new Date();
@@ -167,8 +164,7 @@ export function defaultDueAtLocal(): string {
 }
 
 /**
- * Convert a UTC RFC3339 dueAt to a `datetime-local` string for the edit
- * sheet input (local time, no seconds, no Z).
+ * Convert a UTC RFC3339 dueAt to a `datetime-local` string for the edit sheet input (local time, no seconds, no Z).
  */
 export function dueAtToLocal(dueAt: string): string {
   if (!dueAt) {
@@ -188,8 +184,8 @@ export function dueAtToLocal(dueAt: string): string {
 }
 
 /**
- * Infer the RrulePreset from an existing rrule string.
- * Known presets → their preset key. Unknown → "keep". Absent → "none".
+ * Infer the RrulePreset from an existing rrule string. Known presets → their preset key. Unknown → "keep". Absent →
+ * "none".
  */
 export function rruleToPreset(rrule: string | undefined): RrulePreset {
   if (rrule === undefined) {
@@ -224,11 +220,9 @@ export function makeReminderPatchBody(original: ReminderItem, next: EditFormValu
     body.title = next.title;
   }
 
-  // dueAt: compare by instant (getTime()), not raw string.
-  // The server stores second-truncated RFC3339 ("…:00Z") while buildNextDueAt
-  // produces full ISO ("…:00.000Z"). They are the same instant but differ as
-  // strings, causing a spurious patch on every save if we compare strings.
-  // Using getTime() avoids the false positive and prevents silently zeroing
+  // dueAt: compare by instant (getTime()), not raw string. The server stores second-truncated RFC3339 ("…:00Z") while
+  // buildNextDueAt produces full ISO ("…:00.000Z"). They are the same instant but differ as strings, causing a spurious
+  // patch on every save if we compare strings. Using getTime() avoids the false positive and prevents silently zeroing
   // sub-minute seconds that dueAtToLocal drops from the input form value.
   if (new Date(next.dueAt).getTime() !== new Date(original.dueAt).getTime()) {
     body.dueAt = next.dueAt;

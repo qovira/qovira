@@ -1,8 +1,8 @@
 // Tests for turn.failed handling in the conversation store.
 //
 // Vitest project: runes — node + Svelte compiler.
-// Verifies that setTurnFailed() and clearTurnError() work correctly,
-// and that getTurnError() returns the correct state.
+// Verifies that setTurnFailed() and clearTurnError() work correctly, and that getTurnError() returns the correct
+// state.
 
 import { flushSync } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";

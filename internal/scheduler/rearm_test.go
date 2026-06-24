@@ -1,8 +1,7 @@
 package scheduler
 
-// White-box tests for rearmRow. These live in package scheduler (not package
-// scheduler_test) so they can call s.rearmRow directly — the only way to exercise
-// that unexported method without a real rows.Scan failure.
+// White-box tests for rearmRow. These live in package scheduler (not package scheduler_test) so they can call
+// s.rearmRow directly — the only way to exercise that unexported method without a real rows.Scan failure.
 
 import (
 	"context"
@@ -16,9 +15,8 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// openMigratedStoreInternal opens a fresh SQLCipher database on a temp file and
-// runs all migrations. Mirrors the helper in scheduler_test.go but lives in
-// package scheduler so the white-box test file can use it without a circular
+// openMigratedStoreInternal opens a fresh SQLCipher database on a temp file and runs all migrations. Mirrors the
+// helper in scheduler_test.go but lives in package scheduler so the white-box test file can use it without a circular
 // dependency on the _test package.
 func openMigratedStoreInternal(t *testing.T) *store.Store {
 	t.Helper()
@@ -38,8 +36,8 @@ func openMigratedStoreInternal(t *testing.T) *store.Store {
 	return s
 }
 
-// insertRunningRowInternal inserts a row in status='running' with a specific
-// locked_at, bypassing the scheduler claim path. Returns the generated job id.
+// insertRunningRowInternal inserts a row in status='running' with a specific locked_at, bypassing the scheduler claim
+// path. Returns the generated job id.
 func insertRunningRowInternal(t *testing.T, db *sql.DB, attempt int, lockedAt string) string {
 	t.Helper()
 	jobID := fmt.Sprintf("01TESTREARM%014d", attempt)
@@ -65,10 +63,8 @@ func (nopBus) Subscribe(_ string) (<-chan events.Event, func()) {
 }
 
 // TestRearmRow_RunningRowReturnsToPending verifies the core behaviour of rearmRow:
-//   - A row in status='running' with a set locked_at is flipped to status='pending'
-//     with locked_at cleared.
-//   - attempt is unchanged (the claim already consumed one attempt; rearm must not
-//     reset or double-count it).
+//   - A row in status='running' with a set locked_at is flipped to status='pending' with locked_at cleared.
+//   - attempt is unchanged (the claim already consumed one attempt; rearm must not reset or double-count it).
 func TestRearmRow_RunningRowReturnsToPending(t *testing.T) {
 	t.Parallel()
 
@@ -119,10 +115,9 @@ func TestRearmRow_RunningRowReturnsToPending(t *testing.T) {
 	}
 }
 
-// TestRearmRow_NonRunningRowIsUntouched verifies the WHERE status='running' guard:
-// calling rearmRow on a row that is already 'pending' (or 'failed') must be a no-op.
-// This prevents a double-update if reclaim already fired between the scan failure
-// and the proactive re-arm.
+// TestRearmRow_NonRunningRowIsUntouched verifies the WHERE status='running' guard: calling rearmRow on a row that is
+// already 'pending' (or 'failed') must be a no-op. This prevents a double-update if reclaim already fired between the
+// scan failure and the proactive re-arm.
 func TestRearmRow_NonRunningRowIsUntouched(t *testing.T) {
 	t.Parallel()
 
@@ -130,8 +125,8 @@ func TestRearmRow_NonRunningRowIsUntouched(t *testing.T) {
 	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	sched := NewWithClock(st, nopBus{}, DefaultConfig(), func() time.Time { return now })
 
-	// Insert the row in 'running', then flip it to 'pending' to simulate reclaim
-	// having already fired before our proactive re-arm arrives.
+	// Insert the row in 'running', then flip it to 'pending' to simulate reclaim having already fired before our
+	// proactive re-arm arrives.
 	lockedAt := now.UTC().Format(time.RFC3339)
 	jobID := insertRunningRowInternal(t, st.Writer(), 2, lockedAt)
 

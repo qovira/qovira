@@ -23,8 +23,8 @@ const KeyModelEndpoint = "model.endpoint"
 // UserExister reports whether any user account exists in the system. Implementing this minimal interface avoids
 // importing internal/store (which carries CGO/database dependencies) from this package.
 type UserExister interface {
-	// HasAnyUser returns (true, nil) when at least one user account exists,
-	// (false, nil) when none do, or (false, err) on a store failure.
+	// HasAnyUser returns (true, nil) when at least one user account exists, (false, nil) when none do, or (false, err)
+	// on a store failure.
 	HasAnyUser(ctx context.Context) (bool, error)
 }
 
@@ -32,8 +32,8 @@ type UserExister interface {
 // the concrete implementation (Identity & Auth Spec) — this seam receives the plain-text password only so bootstrap
 // never needs to know the hashing algorithm.
 type AccountCreator interface {
-	// CreateAdmin persists a new admin account identified by email and
-	// protected by password. It returns a non-nil error on failure.
+	// CreateAdmin persists a new admin account identified by email and protected by password. It returns a non-nil
+	// error on failure.
 	CreateAdmin(ctx context.Context, email, password string) error
 }
 
@@ -41,9 +41,8 @@ type AccountCreator interface {
 // (*store.SettingsStore).Get exactly so the composition root can pass the real *store.SettingsStore without an adapter;
 // the interface is defined here (at the consumer) to avoid importing internal/store.
 type SettingsReader interface {
-	// Get returns the value for key. It returns (value, true, nil) when the
-	// key exists, ("", false, nil) when absent, and ("", false, err) on
-	// failure.
+	// Get returns the value for key. It returns (value, true, nil) when the key exists, ("", false, nil) when absent,
+	// and ("", false, err) on failure.
 	Get(ctx context.Context, key string) (value string, found bool, err error)
 }
 

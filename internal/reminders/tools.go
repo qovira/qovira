@@ -2,20 +2,17 @@ package reminders
 
 // tools.go — AI tool adapters for the reminders module (slice 5).
 //
-// Tools() returns five capability.Tool instances that are thin adapters over the
-// same Service methods used by the REST handlers. This proves one-service-two-surfaces:
-// all validation, fire-job sync, and event emission stay in the Service layer.
+// Tools() returns five capability.Tool instances that are thin adapters over the same Service methods used by the
+// REST handlers. This proves one-service-two-surfaces: all validation, fire-job sync, and event emission stay in the
+// Service layer.
 //
-// The adapters decode structured camelCase args (RFC 3339 timestamps, RFC 5545
-// RRULE strings, IANA timezone names) — the model converts natural language to
-// these formats using the now+timezone injected into context by the harness.
+// The adapters decode structured camelCase args (RFC 3339 timestamps, RFC 5545 RRULE strings, IANA timezone names) —
+// the model converts natural language to these formats using the now+timezone injected into context by the harness.
 // No natural-language date parsing is performed here.
 //
 // Error mapping:
-//   - *ValidationError (same that yields 422 on REST) → *capability.ToolError
-//     (model-correctable; turn continues).
-//   - ErrNotFound (non-existent or other-user's id) → *capability.ToolError
-//     (model-correctable; turn continues).
+//   - *ValidationError (same that yields 422 on REST) → *capability.ToolError (model-correctable; turn continues).
+//   - ErrNotFound (non-existent or other-user's id) → *capability.ToolError (model-correctable; turn continues).
 //   - All other errors (DB down etc.) pass through as plain errors (abort turn).
 
 import (
@@ -32,53 +29,48 @@ import (
 
 // ── Args structs ──────────────────────────────────────────────────────────────
 
-// createReminderArgs mirrors CreateInput fields for the AI tool boundary.
-// All timestamps are RFC 3339; rrule is RFC 5545; tz is an IANA zone name.
-// The model must produce these structured values — no natural-language parsing.
+// createReminderArgs mirrors CreateInput fields for the AI tool boundary. All timestamps are RFC 3339; rrule is RFC
+// 5545; tz is an IANA zone name. The model must produce these structured values — no natural-language parsing.
 type createReminderArgs struct {
 	// Title is the reminder headline. Required; must be non-empty after trimming.
 	Title string `json:"title"`
 	// Notes is optional free text.
 	Notes string `json:"notes,omitempty"`
-	// DueAt is the RFC 3339 timestamp for the first (or only) fire instant.
-	// The model must convert natural language (e.g. "Thursday 8am") to this
-	// format using the user's current time and timezone from the harness context.
+	// DueAt is the RFC 3339 timestamp for the first (or only) fire instant. The model must convert natural language
+	// (e.g. "Thursday 8am") to this format using the user's current time and timezone from the harness context.
 	DueAt string `json:"dueAt"`
 	// Rrule is an optional RFC 5545 RRULE string (e.g. "FREQ=WEEKLY;BYDAY=MO").
 	Rrule string `json:"rrule,omitempty"`
-	// Tz is an optional IANA timezone name (e.g. "America/New_York"). When
-	// omitted the Service defaults to the user's profile timezone or "UTC".
+	// Tz is an optional IANA timezone name (e.g. "America/New_York"). When omitted the Service defaults to the user's
+	// profile timezone or "UTC".
 	Tz string `json:"tz,omitempty"`
-	// AutoComplete controls whether the reminder auto-completes when it fires.
-	// Omit to use the default (true).
+	// AutoComplete controls whether the reminder auto-completes when it fires. Omit to use the default (true).
 	AutoComplete *bool `json:"autoComplete,omitempty"`
 }
 
-// updateReminderArgs mirrors UpdateInput fields for the AI tool boundary.
-// Only present fields are applied; absent fields leave the stored value unchanged.
-// Note: tz is intentionally absent — it is immutable after creation.
+// updateReminderArgs mirrors UpdateInput fields for the AI tool boundary. Only present fields are applied; absent
+// fields leave the stored value unchanged. Note: tz is intentionally absent — it is immutable after creation.
 //
 // For nullable string columns (notes, rrule) the three-way semantics are:
 //   - absent field       → leave unchanged (JSON omitempty + OptionalString{Present:false}).
 //   - present, null      → clear the column (JSON null → OptionalString{Present:true, Value:""}).
 //   - present, non-empty → set the column (OptionalString{Present:true, Value:"x"}).
 //
-// Because encoding/json unmarshals an absent optional field to its zero value
-// (Present=false), and JSON null to a non-nil *json.RawMessage, we need an
-// intermediate raw-message type for the two nullable fields. The same approach
-// is used by patchRequestBody in the REST handler.
+// Because encoding/json unmarshals an absent optional field to its zero value (Present=false), and JSON null to a
+// non-nil *json.RawMessage, we need an intermediate raw-message type for the two nullable fields. The same approach is
+// used by patchRequestBody in the REST handler.
 type updateReminderArgs struct {
 	// ID of the reminder to update. Required.
 	ID string `json:"id"`
 	// Title replaces the reminder's title when present. Must be non-empty.
 	Title *string `json:"title,omitempty"`
-	// Notes replaces (or clears) the notes column when present.
-	// Set to null to clear; set to a string to replace; omit to leave unchanged.
+	// Notes replaces (or clears) the notes column when present. Set to null to clear; set to a string to replace; omit
+	// to leave unchanged.
 	Notes *json.RawMessage `json:"notes,omitempty"`
 	// DueAt replaces the fire instant when present. Must be RFC 3339.
 	DueAt *string `json:"dueAt,omitempty"`
-	// Rrule replaces (or clears) the RRULE when present.
-	// Set to null to clear; set to an RFC 5545 string to replace; omit to leave.
+	// Rrule replaces (or clears) the RRULE when present. Set to null to clear; set to an RFC 5545 string to replace;
+	// omit to leave.
 	Rrule *json.RawMessage `json:"rrule,omitempty"`
 	// AutoComplete replaces the auto-complete flag when present.
 	AutoComplete *bool `json:"autoComplete,omitempty"`
@@ -98,24 +90,24 @@ type deleteReminderArgs struct {
 	ID string `json:"id"`
 }
 
-// listRemindersArgs holds the optional filter args for the list_reminders tool.
-// All fields are optional; absent fields use the defaults described below.
+// listRemindersArgs holds the optional filter args for the list_reminders tool. All fields are optional; absent fields
+// use the defaults described below.
 type listRemindersArgs struct {
-	// Status filters reminders by status. Accepted values: "active" (default),
-	// "completed". Omit to use the default (active).
+	// Status filters reminders by status. Accepted values: "active" (default), "completed". Omit to use the default
+	// (active).
 	Status string `json:"status,omitempty"`
-	// DueBefore is an optional RFC 3339 upper bound on due_at (exclusive). Use
-	// to narrow results to reminders due before a specific instant.
+	// DueBefore is an optional RFC 3339 upper bound on due_at (exclusive). Use to narrow results to reminders due
+	// before a specific instant.
 	DueBefore string `json:"dueBefore,omitempty"`
-	// DueAfter is an optional RFC 3339 lower bound on due_at (exclusive). Use
-	// to narrow results to reminders due after a specific instant.
+	// DueAfter is an optional RFC 3339 lower bound on due_at (exclusive). Use to narrow results to reminders due after
+	// a specific instant.
 	DueAfter string `json:"dueAfter,omitempty"`
 }
 
 // ── JSON Schemas ──────────────────────────────────────────────────────────────
 
-// schemaCreateReminder is the hand-authored JSON Schema for createReminderArgs.
-// The model uses this to understand the expected structure and field semantics.
+// schemaCreateReminder is the hand-authored JSON Schema for createReminderArgs. The model uses this to understand the
+// expected structure and field semantics.
 var schemaCreateReminder = json.RawMessage(`{
   "type": "object",
   "required": ["title", "dueAt"],
@@ -214,8 +206,8 @@ var schemaDeleteReminder = json.RawMessage(`{
   "additionalProperties": false
 }`)
 
-// schemaListReminders is the hand-authored JSON Schema for listRemindersArgs.
-// All fields are optional; the tool defaults status to "active".
+// schemaListReminders is the hand-authored JSON Schema for listRemindersArgs. All fields are optional; the tool
+// defaults status to "active".
 var schemaListReminders = json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -240,9 +232,8 @@ var schemaListReminders = json.RawMessage(`{
 
 // ── Tools() ───────────────────────────────────────────────────────────────────
 
-// Tools returns the five AI capability tools contributed by the reminders module.
-// Each tool is a thin adapter over the same Service methods used by the REST
-// handlers, proving one-service-two-surfaces. Risk tiers are declared here;
+// Tools returns the five AI capability tools contributed by the reminders module. Each tool is a thin adapter over the
+// same Service methods used by the REST handlers, proving one-service-two-surfaces. Risk tiers are declared here;
 // confirmation and trust-level enforcement are the harness's responsibility.
 func (m *Module) Tools() []capability.Tool {
 	return []capability.Tool{
@@ -301,8 +292,8 @@ func (m *Module) Tools() []capability.Tool {
 
 // ── tool handlers ─────────────────────────────────────────────────────────────
 
-// toolCreate is the typed handler for create_reminder.
-// It decodes the structured args, builds a CreateInput, and delegates to Service.Create.
+// toolCreate is the typed handler for create_reminder. It decodes the structured args, builds a CreateInput, and
+// delegates to Service.Create.
 func (m *Module) toolCreate(ctx context.Context, scope store.Scope, args createReminderArgs) (capability.Result, error) {
 	// Parse dueAt: must be RFC 3339 (model provides it; natural language is rejected).
 	if args.DueAt == "" {
@@ -335,10 +326,9 @@ func (m *Module) toolCreate(ctx context.Context, scope store.Scope, args createR
 	return result, nil
 }
 
-// toolUpdate is the typed handler for update_reminder.
-// It decodes the structured args (using raw JSON for nullable fields to distinguish
-// absent/null/value) and delegates to Service.Update with the same merge semantics
-// as the PATCH handler.
+// toolUpdate is the typed handler for update_reminder. It decodes the structured args (using raw JSON for nullable
+// fields to distinguish absent/null/value) and delegates to Service.Update with the same merge semantics as the PATCH
+// handler.
 func (m *Module) toolUpdate(ctx context.Context, scope store.Scope, args updateReminderArgs) (capability.Result, error) {
 	if args.ID == "" {
 		return nil, &capability.ToolError{
@@ -433,9 +423,8 @@ func (m *Module) toolComplete(ctx context.Context, scope store.Scope, args compl
 	return result, nil
 }
 
-// toolDelete is the typed handler for delete_reminder.
-// The RiskDestructive tier is declared on the Tool; confirmation enforcement is
-// the harness's responsibility — this adapter does not duplicate it.
+// toolDelete is the typed handler for delete_reminder. The RiskDestructive tier is declared on the Tool; confirmation
+// enforcement is the harness's responsibility — this adapter does not duplicate it.
 func (m *Module) toolDelete(ctx context.Context, scope store.Scope, args deleteReminderArgs) (capability.Result, error) {
 	if args.ID == "" {
 		return nil, &capability.ToolError{
@@ -447,23 +436,22 @@ func (m *Module) toolDelete(ctx context.Context, scope store.Scope, args deleteR
 	if err := m.svc.Delete(ctx, scope, args.ID); err != nil {
 		return nil, mapServiceError(err)
 	}
-	// Delete has no meaningful entity to return. A struct{} result is
-	// JSON-marshalable (→ {}) and satisfies the nilnil linter.
+	// Delete has no meaningful entity to return. A struct{} result is JSON-marshalable (→ {}) and satisfies the nilnil
+	// linter.
 	return struct{}{}, nil
 }
 
-// toolList is the typed handler for list_reminders.
-// It is context-safe for the model's token budget: it hard-caps at 20 results,
-// returns a compact projection (id, title, dueAt, status — no notes), and
-// appends a truncation line when the total count exceeds the cap.
+// toolList is the typed handler for list_reminders. It is context-safe for the model's token budget: it hard-caps at
+// 20 results, returns a compact projection (id, title, dueAt, status — no notes), and appends a truncation line when
+// the total count exceeds the cap.
 //
 // Defaults:
 //   - status: "active" (overridable to "completed").
 //   - order:  ascending due_at (upcoming-first) — Service.List already orders by (due_at, id).
 //   - limit:  20 (hard cap; not configurable by the model).
 //
-// The truncation total is obtained from Service.Count with the same filters
-// so the model sees an accurate shown/total ratio.
+// The truncation total is obtained from Service.Count with the same filters so the model sees an accurate shown/total
+// ratio.
 func (m *Module) toolList(ctx context.Context, scope store.Scope, args listRemindersArgs) (capability.Result, error) {
 	const toolCap = 20
 
@@ -520,14 +508,13 @@ func (m *Module) toolList(ctx context.Context, scope store.Scope, args listRemin
 	}
 
 	// ── Compact projection ───────────────────────────────────────────────────
-	// Build a plain text block: one compact line per reminder, so the model can
-	// scan without JSON parsing overhead. Fields: id | title | dueAt | status.
+	// Build a plain text block: one compact line per reminder, so the model can scan without JSON parsing overhead.
+	// Fields: id | title | dueAt | status.
 	var sb strings.Builder
 	for _, r := range page.Items {
-		// Compact line: "id | title | dueAt | status".
-		// Sanitize the title to prevent a crafted CR/LF from forging extra lines
-		// or fake truncation signals in the model-facing output. This is applied
-		// only here — stored data and all other surfaces are unaffected.
+		// Compact line: "id | title | dueAt | status". Sanitize the title to prevent a crafted CR/LF from forging
+		// extra lines or fake truncation signals in the model-facing output. This is applied only here — stored data
+		// and all other surfaces are unaffected.
 		safeTitle := sanitizeLineField(r.Title)
 		sb.WriteString(r.ID)
 		sb.WriteString(" | ")
@@ -540,9 +527,8 @@ func (m *Module) toolList(ctx context.Context, scope store.Scope, args listRemin
 	}
 
 	// ── Truncation signal ────────────────────────────────────────────────────
-	// When the cap was reached (Service.List returned exactly toolCap items and
-	// the page might have more), get the exact total via Service.Count and emit
-	// a truncation line so the model knows to narrow by date.
+	// When the cap was reached (Service.List returned exactly toolCap items and the page might have more), get the
+	// exact total via Service.Count and emit a truncation line so the model knows to narrow by date.
 	if len(page.Items) == toolCap {
 		total, countErr := m.svc.Count(ctx, scope, q)
 		if countErr != nil {
@@ -561,11 +547,9 @@ func (m *Module) toolList(ctx context.Context, scope store.Scope, args listRemin
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// sanitizeLineField replaces CR and LF characters in s with a single space so
-// that a crafted title cannot forge additional lines or fake truncation signals
-// in the compact tool text block written to the model. Applied only to
-// model-facing text rendering — stored values and all other surfaces are
-// unaffected.
+// sanitizeLineField replaces CR and LF characters in s with a single space so that a crafted title cannot forge
+// additional lines or fake truncation signals in the compact tool text block written to the model. Applied only to
+// model-facing text rendering — stored values and all other surfaces are unaffected.
 func sanitizeLineField(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
@@ -574,13 +558,12 @@ func sanitizeLineField(s string) string {
 
 // ── error mapping ─────────────────────────────────────────────────────────────
 
-// mapServiceError maps domain errors to *capability.ToolError for model-correctable
-// failures, leaving genuine infrastructure errors as plain errors so the harness
-// aborts the turn.
+// mapServiceError maps domain errors to *capability.ToolError for model-correctable failures, leaving genuine
+// infrastructure errors as plain errors so the harness aborts the turn.
 //
 // Mapped (model-correctable):
-//   - *ValidationError → *ToolError with code "validation_failed" and a
-//     human-readable message listing all failing fields.
+//   - *ValidationError → *ToolError with code "validation_failed" and a human-readable message listing all failing
+//     fields.
 //   - ErrNotFound → *ToolError with code "not_found".
 //
 // Not mapped (infrastructure — plain error, abort turn):

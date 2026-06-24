@@ -1,30 +1,29 @@
 // Tests for the switchConversation helper.
 //
-// Rune environment: node + Svelte compiler (vitest project "runes").
-// Uses flushSync to drain $state updates synchronously.
+// Rune environment: node + Svelte compiler (vitest project "runes"). Uses flushSync to drain $state updates
+// synchronously.
 //
-// Critical invariant (from the issue): switching conversations MUST reset the
-// tool-calls and confirmations stores, or the previous conversation's
-// tool/confirmation cards leak into the newly-opened thread.
+// Critical invariant (from the issue): switching conversations MUST reset the tool-calls and confirmations stores, or
+// the previous conversation's tool/confirmation cards leak into the newly-opened thread.
 //
 // Acceptance criteria verified here:
-//   - switchConversation(id) pivots the active id BEFORE the await so old-conversation
-//     SSE events (which guard on getActiveConversationId()) are rejected during the fetch.
+//   - switchConversation(id) pivots the active id BEFORE the await so old-conversation SSE events (which guard on
+//     getActiveConversationId()) are rejected during the fetch.
 //   - switchConversation(id) resets tool-calls before seeding the new thread.
 //   - switchConversation(id) resets confirmations before seeding the new thread.
 //   - switchConversation(id) calls setActiveConversation with the fetched history.
 //   - startNewConversation() resets tool-calls and confirmations.
 //   - startNewConversation() mints a fresh id and seeds an empty history.
 //   - startNewConversation() does NOT call the API.
-//   - switchConversation() on a real (non-404) API error surfaces a turn-error
-//     rather than silently presenting an empty history.
+//   - switchConversation() on a real (non-404) API error surfaces a turn-error rather than silently presenting an
+//     empty history.
 
 import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Mocks — declared before the module-under-test is imported so vitest hoists
-// them above the import. We mock the Api and the peer stores.
+// Mocks — declared before the module-under-test is imported so vitest hoists them above the import. We mock the Api
+// and the peer stores.
 // ---------------------------------------------------------------------------
 
 vi.mock("$lib/api/index.js", async (importActual) => {
@@ -217,9 +216,8 @@ describe("switchConversation() — pivot before fetch closes SSE race window", (
     let activeIdDuringFetch: string | null = null;
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     (Api.GET as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      // This runs while the await is in-flight — the active id must already be
-      // "conv-new" so SSE guards (conversationId !== getActiveConversationId()) reject
-      // "conv-old" events during this window.
+      // This runs while the await is in-flight — the active id must already be "conv-new" so SSE guards
+      // (conversationId !== getActiveConversationId()) reject "conv-old" events during this window.
       activeIdDuringFetch = getActiveConversationId();
       return Promise.resolve({
         data: { id: "conv-new", messages: [], createdAt: "", updatedAt: "" },
@@ -241,10 +239,9 @@ describe("switchConversation() — pivot before fetch closes SSE race window", (
     setActiveConversation("conv-old", []);
     flushSync();
 
-    // During the fetch, simulate an old-conversation SSE delta landing.
-    // The guard in client.ts: `if (conversationId !== getActiveConversationId()) return;`
-    // With the pivot happening before the fetch, getActiveConversationId() returns
-    // "conv-new", so an event for "conv-old" is rejected.
+    // During the fetch, simulate an old-conversation SSE delta landing. The guard in client.ts:
+    // `if (conversationId !== getActiveConversationId()) return;` With the pivot happening before the fetch,
+    // getActiveConversationId() returns "conv-new", so an event for "conv-old" is rejected.
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     (Api.GET as ReturnType<typeof vi.fn>).mockImplementation(() => {
       // Simulate SSE handler logic for a stale "conv-old" delta.
@@ -386,8 +383,8 @@ describe("startNewConversation() — store-reset and fresh ULID", () => {
     startNewConversation();
     flushSync();
 
-    // ulid is mocked; no Api import required because this is purely synchronous.
-    // Just verify the conversation id was set to the ULID value.
+    // ulid is mocked; no Api import required because this is purely synchronous. Just verify the conversation id was
+    // set to the ULID value.
     expect(getActiveConversationId()).not.toBeNull();
   });
 });

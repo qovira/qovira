@@ -1,5 +1,5 @@
-// Package logging constructs the root slog.Logger for the application and
-// establishes the privacy contract for all log output.
+// Package logging constructs the root slog.Logger for the application and establishes the privacy contract for all log
+// output.
 //
 // # Privacy contract
 //
@@ -10,9 +10,8 @@
 //
 // # Swappability
 //
-// NewHandler is the single construction point for concrete handler types.
-// To swap in the OTLP handler (v0.2), replace the body of NewHandler with a
-// call to the OTLP constructor — no call sites change.
+// NewHandler is the single construction point for concrete handler types. To swap in the OTLP handler (v0.2), replace
+// the body of NewHandler with a call to the OTLP constructor — no call sites change.
 package logging
 
 import (

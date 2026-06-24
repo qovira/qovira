@@ -40,23 +40,19 @@ func NewServer(addr, version string, router *Router, bus events.Bus, mws ...Midd
 // Route precedence (most-specific first, per ServeMux):
 //
 //  1. GET /healthz — unauthenticated health check.
-//  2. /api/v1/{path...} — API catch-all; unknown paths return a JSON 404 problem.
-//     Real module endpoints registered earlier take priority.
-//  3. /events — per-user SSE stream; bare all-methods pattern so the SPA
-//     fallback cannot intercept it.
+//  2. /api/v1/{path...} — API catch-all; unknown paths return a JSON 404 problem. Real module endpoints registered
+//     earlier take priority.
+//  3. /events — per-user SSE stream; bare all-methods pattern so the SPA fallback cannot intercept it.
 //  4. / (everything else) — embedded SPA with SPA-fallback to index.html.
 func mountFixedRoutes(router *Router, version string, bus events.Bus) {
-	// 1. Health check — the middleware chain (recover/request-id/log/security-
-	//    headers) wraps this route too, but the isPublic predicate exempts it
-	//    from auth. Adding observability middleware here is intentional.
+	// 1. Health check — the middleware chain (recover/request-id/log/security-headers) wraps this route too, but the
+	//    isPublic predicate exempts it from auth. Adding observability middleware here is intentional.
 	router.mux.HandleFunc("GET /healthz", healthzHandler(version))
 
-	// 2. API catch-all — unknown /api/v1/... paths return a JSON 404 problem.
-	// Module routes registered before this call take priority due to specificity.
-	// The bare "/api/v1" route is registered explicitly because the {path...}
-	// wildcard requires at least one path segment; without it Go's ServeMux
-	// redirects GET /api/v1 → /api/v1/ (307), which returns HTML via the SPA
-	// fallback. Registering "/api/v1" directly prevents that redirect.
+	// 2. API catch-all — unknown /api/v1/... paths return a JSON 404 problem. Module routes registered before this call
+	// take priority due to specificity. The bare "/api/v1" route is registered explicitly because the {path...}
+	// wildcard requires at least one path segment; without it Go's ServeMux redirects GET /api/v1 → /api/v1/ (307),
+	// which returns HTML via the SPA fallback. Registering "/api/v1" directly prevents that redirect.
 	router.mux.HandleFunc("/api/v1", apiNotFoundHandler)
 	router.mux.HandleFunc("/api/v1/{path...}", apiNotFoundHandler)
 
@@ -64,8 +60,8 @@ func mountFixedRoutes(router *Router, version string, bus events.Bus) {
 	//    fallback for any verb. The handler enforces GET and requires an authenticated principal in context.
 	router.mux.HandleFunc("/events", eventsHandler(bus))
 
-	// 4. SPA fallback — serves the embedded SvelteKit build for all remaining
-	// paths, with SPA fallback to index.html for unknown routes.
+	// 4. SPA fallback — serves the embedded SvelteKit build for all remaining paths, with SPA fallback to index.html
+	// for unknown routes.
 	router.mux.Handle("/", spaHandler())
 }
 

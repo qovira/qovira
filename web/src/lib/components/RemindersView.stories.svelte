@@ -1,13 +1,12 @@
 <script module lang="ts">
-  // RemindersView stories — covers the reminders view buckets, the recurring ↻
-  // chip, and the empty state.
+  // RemindersView stories — covers the reminders view buckets, the recurring ↻ chip, and the empty state.
   //
-  // These are app compositions, not library primitives. They use the real reminders
-  // store (setReminders / resetReminders) seeded via beforeEach so the actual
-  // bucketing logic (bucketReminders, shouldShowPlaceholder) is exercised.
+  // These are app compositions, not library primitives. They use the real reminders store (setReminders /
+  // resetReminders) seeded via beforeEach so the actual bucketing logic (bucketReminders, shouldShowPlaceholder) is
+  // exercised.
   //
-  // The `now` prop on RemindersView accepts a fixed Date so bucket boundaries are
-  // deterministic regardless of when the story runs.
+  // The `now` prop on RemindersView accepts a fixed Date so bucket boundaries are deterministic regardless of when the
+  // story runs.
 
   import { defineMeta } from "@storybook/addon-svelte-csf";
   import { expect, userEvent } from "storybook/test";
@@ -107,8 +106,7 @@
 </script>
 
 <!--
-  EmptyState: no reminders at all → placeholder text is shown.
-  Covers AC: "empty state".
+  EmptyState: no reminders at all → placeholder text is shown. Covers AC: "empty state".
 -->
 <Story
   name="EmptyState"
@@ -142,8 +140,7 @@
 />
 
 <!--
-  TodayBucket: reminders due today (including the recurring one with ↻ chip).
-  Covers AC: "the recurring ↻ chip".
+  TodayBucket: reminders due today (including the recurring one with ↻ chip). Covers AC: "the recurring ↻ chip".
 -->
 <Story
   name="TodayBucket"
@@ -154,9 +151,8 @@
 />
 
 <!--
-  RecurringChip: a single recurring reminder in the Later bucket, to isolate
-  the ↻ chip rendering.
-  Covers AC: "the recurring ↻ chip".
+  RecurringChip: a single recurring reminder in the Later bucket, to isolate the ↻ chip rendering. Covers AC:
+  "the recurring ↻ chip".
 -->
 <Story
   name="RecurringChip"
@@ -196,10 +192,9 @@
 />
 
 <!--
-  WithCompleted: mix of active (today) and completed reminders.
-  The Done section accordion shows the completed count.
-  play: exercises the accordion expand/collapse — clicking "Done" toggles aria-expanded
-  and shows/hides the completed items list.
+  WithCompleted: mix of active (today) and completed reminders. The Done section accordion shows the completed count.
+  play: exercises the accordion expand/collapse — clicking "Done" toggles aria-expanded and shows/hides the completed
+  items list.
 -->
 <Story
   name="WithCompleted"
@@ -212,8 +207,8 @@
     return () => resetReminders();
   }}
   play={async ({ canvas }) => {
-    // The Done toggle button is closed initially (aria-expanded=false).
-    // The button's aria-label is "Show completed reminders" (from reminders_done_toggle_label).
+    // The Done toggle button is closed initially (aria-expanded=false). The button's aria-label is
+    // "Show completed reminders" (from reminders_done_toggle_label).
     const doneToggle = await canvas.findByRole("button", { name: /show completed reminders/i });
     await expect(doneToggle).toHaveAttribute("aria-expanded", "false");
 

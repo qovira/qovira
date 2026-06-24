@@ -32,18 +32,16 @@ func newServeCmd() *cobra.Command {
 
 			logger := logging.NewLogger(os.Stdout, *cfg)
 
-			// newValidator builds the real token validator once the store is open.
-			// Session config is wired via DefaultSessionConfig (per-instance tuning
-			// lives in the DB config layer, which is a later slice).
+			// newValidator builds the real token validator once the store is open. Session config is wired via
+			// DefaultSessionConfig (per-instance tuning lives in the DB config layer, which is a later slice).
 			newValidator := func(s *store.Store) httpx.TokenValidator {
 				sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
 				return auth.NewAuthenticator(sessions)
 			}
 
-			// authCtor builds the auth HTTP module from the store. DefaultParams,
-			// DefaultPolicy, and DefaultSessionConfig are the production values;
-			// per-instance overrides live in the DB settings layer (a later slice).
-			// logger is forwarded so internal errors are diagnosable server-side.
+			// authCtor builds the auth HTTP module from the store. DefaultParams, DefaultPolicy, and
+			// DefaultSessionConfig are the production values; per-instance overrides live in the DB settings layer (a
+			// later slice). logger is forwarded so internal errors are diagnosable server-side.
 			authCtor := app.AuthModuleCtor(auth.DefaultParams, auth.DefaultPolicy, auth.DefaultSessionConfig, logger)
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)

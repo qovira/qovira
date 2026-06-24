@@ -25,8 +25,8 @@ type publishedEvent struct {
 	event  events.Event
 }
 
-// capturingBus is a fake events.Bus that records all Publish calls for later assertion.
-// It is safe for concurrent use.
+// capturingBus is a fake events.Bus that records all Publish calls for later assertion. It is safe for concurrent
+// use.
 type capturingBus struct {
 	mu     sync.Mutex
 	events []publishedEvent
@@ -54,9 +54,8 @@ func (b *capturingBus) published() []publishedEvent {
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
-// openMigratedStore opens a fresh SQLCipher database on a temp file and runs all
-// migrations. It is closed via t.Cleanup. Never use ":memory:" -- SQLCipher
-// requires a file path.
+// openMigratedStore opens a fresh SQLCipher database on a temp file and runs all migrations. It is closed via
+// t.Cleanup. Never use ":memory:" -- SQLCipher requires a file path.
 func openMigratedStore(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
@@ -179,8 +178,8 @@ func countJobsByKey(t *testing.T, db *sql.DB, key string) int {
 	return n
 }
 
-// defaultTestConfig returns a Config suitable for unit tests -- very short intervals so
-// tests are fast, but with the invariant (LeaseTimeout > JobTimeout) satisfied.
+// defaultTestConfig returns a Config suitable for unit tests -- very short intervals so tests are fast, but with
+// the invariant (LeaseTimeout > JobTimeout) satisfied.
 func defaultTestConfig() scheduler.Config {
 	return scheduler.Config{
 		PollInterval: 10 * time.Millisecond,
@@ -292,8 +291,7 @@ func TestEnqueue_IdempotentByKey(t *testing.T) {
 func TestPoller_ClaimLeaseAtomic(t *testing.T) {
 	t.Parallel()
 
-	// Use a controllable clock frozen in the past so we can decide exactly when
-	// a job becomes due.
+	// Use a controllable clock frozen in the past so we can decide exactly when a job becomes due.
 	clk := &advanceable{now: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)}
 	s := openMigratedStore(t)
 
@@ -412,13 +410,13 @@ func TestPoller_ClaimSetsAttemptAndLockedAt(t *testing.T) {
 //    doesn't block other jobs on a later tick.
 //
 // This test verifies two things:
-//  1. The poller dispatches all due jobs concurrently (non-blocking): 2 slow jobs running
-//     simultaneously do not prevent the fast job from being dispatched and completing.
-//  2. Claims are bounded by Workers: with Workers=4 and only 3 jobs, all 3 are claimed on
-//     the first tick, which is within the Workers bound.
+//  1. The poller dispatches all due jobs concurrently (non-blocking): 2 slow jobs running simultaneously do not
+//     prevent the fast job from being dispatched and completing.
+//  2. Claims are bounded by Workers: with Workers=4 and only 3 jobs, all 3 are claimed on the first tick, which
+//     is within the Workers bound.
 //
-// "Slow handler occupies one slot without blocking other jobs" means the poller goroutine
-// does not wait for handlers to finish -- it dispatches to the bounded pool and returns.
+// "Slow handler occupies one slot without blocking other jobs" means the poller goroutine does not wait for
+// handlers to finish -- it dispatches to the bounded pool and returns.
 
 func TestPoller_WorkerBoundAndNonBlocking(t *testing.T) {
 	t.Parallel()
@@ -492,18 +490,16 @@ func TestPoller_WorkerBoundAndNonBlocking(t *testing.T) {
 	}
 }
 
-// TestPoller_WorkerCapIsEnforced verifies that the peak concurrency of simultaneously
-// running handlers never exceeds cfg.Workers even when more jobs are due simultaneously.
-// It enqueues Workers+2 jobs, each of which:
+// TestPoller_WorkerCapIsEnforced verifies that the peak concurrency of simultaneously running handlers never
+// exceeds cfg.Workers even when more jobs are due simultaneously. It enqueues Workers+2 jobs, each of which:
 //  1. Atomically increments a live-concurrency counter.
 //  2. Blocks on a barrier until all workers have been observed at peak.
 //  3. Atomically decrements the counter on exit.
 //
-// The observed peak counter must be <= Workers AND >= Workers (the barrier guarantees
-// all first-batch handlers block before any decrement, so peak must equal Workers).
-// The poller implements the cap via "free := Workers - len(s.sem)" then claims exactly
-// that many rows per tick, so the buffered semaphore physically bounds concurrent
-// handlers. Under -race, the atomic counter catches any unsynchronised access.
+// The observed peak counter must be <= Workers AND >= Workers (the barrier guarantees all first-batch handlers
+// block before any decrement, so peak must equal Workers). The poller implements the cap via
+// "free := Workers - len(s.sem)" then claims exactly that many rows per tick, so the buffered semaphore physically
+// bounds concurrent handlers. Under -race, the atomic counter catches any unsynchronised access.
 func TestPoller_WorkerCapIsEnforced(t *testing.T) {
 	t.Parallel()
 
@@ -525,8 +521,8 @@ func TestPoller_WorkerCapIsEnforced(t *testing.T) {
 		peakObserved    atomic.Int32
 	)
 
-	// barrier is used to keep all workers running simultaneously so the peak is observable.
-	// It is released once we have confirmed the cap holds.
+	// barrier is used to keep all workers running simultaneously so the peak is observable. It is released once we
+	// have confirmed the cap holds.
 	barrier := make(chan struct{})
 
 	var doneCount atomic.Int32
@@ -572,9 +568,8 @@ func TestPoller_WorkerCapIsEnforced(t *testing.T) {
 		_ = sched.Stop(stopCtx)
 	})
 
-	// Give workers time to fill up to the cap and stabilise before we release.
-	// With Workers=3 and PollInterval=5ms, within 100ms at least the first batch of
-	// Workers handlers should be blocked at the barrier.
+	// Give workers time to fill up to the cap and stabilise before we release. With Workers=3 and PollInterval=5ms,
+	// within 100ms at least the first batch of Workers handlers should be blocked at the barrier.
 	time.Sleep(200 * time.Millisecond)
 
 	// Release the barrier and wait for all jobs to complete.
@@ -586,9 +581,9 @@ func TestPoller_WorkerCapIsEnforced(t *testing.T) {
 	}
 
 	peak := peakObserved.Load()
-	// The barrier guarantees all Workers first-batch handlers are simultaneously running
-	// before any of them exit, so the observed peak must equal Workers exactly — not just
-	// be <= Workers (which would pass a serialising regression) or > Workers (cap breach).
+	// The barrier guarantees all Workers first-batch handlers are simultaneously running before any of them exit,
+	// so the observed peak must equal Workers exactly — not just be <= Workers (which would pass a serialising
+	// regression) or > Workers (cap breach).
 	if int(peak) > workers {
 		t.Errorf("peak concurrent handlers = %d; want <= Workers (%d): cap exceeded", peak, workers)
 	}
@@ -653,8 +648,8 @@ func TestHandler_ReceivesScopeAndPayload(t *testing.T) {
 	}
 }
 
-// TestHandler_UserScopeResolved verifies that a job enqueued with a user scope
-// delivers a user scope (not system scope) to the handler.
+// TestHandler_UserScopeResolved verifies that a job enqueued with a user scope delivers a user scope (not system
+// scope) to the handler.
 func TestHandler_UserScopeResolved(t *testing.T) {
 	t.Parallel()
 
@@ -912,13 +907,11 @@ func TestDefaultConfig_Defaults(t *testing.T) {
 
 // ── Fix #1: panicking handler must not crash the process ─────────────────────
 //
-// TestHandler_PanicDoesNotCrash verifies three things after a handler panics:
-// (a) the scheduler/process survives (the test itself proves this -- a process
-// crash would be a test binary crash, not a test failure),
-// (b) the panicking job's row is re-armed as pending (not left running), because
-// panics now flow through the retry/dead-letter failure path as transient failures,
-// (c) a second, well-behaved job dispatched concurrently/after still runs to
-// completion and its row is deleted.
+// TestHandler_PanicDoesNotCrash verifies three things after a handler panics: (a) the scheduler/process survives
+// (the test itself proves this -- a process crash would be a test binary crash, not a test failure), (b) the
+// panicking job's row is re-armed as pending (not left running), because panics now flow through the
+// retry/dead-letter failure path as transient failures, (c) a second, well-behaved job dispatched
+// concurrently/after still runs to completion and its row is deleted.
 func TestHandler_PanicDoesNotCrash(t *testing.T) {
 	t.Parallel()
 
@@ -928,23 +921,21 @@ func TestHandler_PanicDoesNotCrash(t *testing.T) {
 	cfg := defaultTestConfig()
 	cfg.PollInterval = 10 * time.Millisecond
 	cfg.Workers = 4
-	// Set MaxAttempts high enough that the panicking job isn't dead-lettered during
-	// the short observation window — we want to assert it gets re-armed as pending.
+	// Set MaxAttempts high enough that the panicking job isn't dead-lettered during the short observation window —
+	// we want to assert it gets re-armed as pending.
 	cfg.MaxAttempts = 100
-	// Large backoff so the re-armed run_at is strictly in the future under the frozen
-	// clock: with a frozen clock at 12:00:00.000 and BackoffBase=1s, the full-jitter
-	// backoff samples in [0,1s) and RFC3339 truncates to the same second — run_at <= now
-	// remains true so the poller re-claims on the very next tick and can catch the row
-	// transiently 'running' during our status check. 1h backoff guarantees the re-armed
-	// run_at is now+jitter > now for any jitter > 0, and the frozen clock never advances
-	// past it, making the post-panic status deterministically 'pending'.
+	// Large backoff so the re-armed run_at is strictly in the future under the frozen clock: with a frozen clock at
+	// 12:00:00.000 and BackoffBase=1s, the full-jitter backoff samples in [0,1s) and RFC3339 truncates to the same
+	// second — run_at <= now remains true so the poller re-claims on the very next tick and can catch the row
+	// transiently 'running' during our status check. 1h backoff guarantees the re-armed run_at is now+jitter > now
+	// for any jitter > 0, and the frozen clock never advances past it, making the post-panic status
+	// deterministically 'pending'.
 	cfg.BackoffBase = 1 * time.Hour
 	cfg.BackoffCap = 1 * time.Hour
 
-	// panicDone is closed once the panicking handler has been invoked (the panic
-	// itself immediately follows). We use a sync.Once so the close is idempotent
-	// in case the poller re-dispatches before the row transitions (shouldn't, but
-	// defensive).
+	// panicDone is closed once the panicking handler has been invoked (the panic itself immediately follows). We use
+	// a sync.Once so the close is idempotent in case the poller re-dispatches before the row transitions (shouldn't,
+	// but defensive).
 	var panicOnce sync.Once
 	panicInvoked := make(chan struct{})
 
@@ -996,13 +987,12 @@ func TestHandler_PanicDoesNotCrash(t *testing.T) {
 		t.Fatal("panicking handler was not invoked within timeout")
 	}
 
-	// (b) The panicking job's row must still be present. After a panic the failure path
-	// re-arms it as 'pending' (transient failure with backoff) rather than leaving it
-	// in 'running'. Give the scheduler a moment to process the post-panic update.
-	// MaxAttempts=100 is chosen specifically so the job is nowhere near dead-lettering
-	// during this short window; the only expected outcome is 'pending' (re-armed).
-	// A regression that mis-routes the panic to dead-letter (status='failed') would also
-	// be caught here, distinguishing the two valid alternatives from this expected path.
+	// (b) The panicking job's row must still be present. After a panic the failure path re-arms it as 'pending'
+	// (transient failure with backoff) rather than leaving it in 'running'. Give the scheduler a moment to process
+	// the post-panic update. MaxAttempts=100 is chosen specifically so the job is nowhere near dead-lettering
+	// during this short window; the only expected outcome is 'pending' (re-armed). A regression that mis-routes the
+	// panic to dead-letter (status='failed') would also be caught here, distinguishing the two valid alternatives
+	// from this expected path.
 	time.Sleep(100 * time.Millisecond)
 	if !jobExists(t, s.Writer(), panicJobID) {
 		t.Error("panicking job row was deleted; expected it to remain (re-armed as pending)")
@@ -1027,8 +1017,8 @@ func TestHandler_PanicDoesNotCrash(t *testing.T) {
 
 // ── Fix #2: Stop before/concurrent with Start must be race-free ──────────────
 //
-// TestStop_BeforeStart verifies that calling Stop before Start is safe and
-// returns nil without panicking or blocking.
+// TestStop_BeforeStart verifies that calling Stop before Start is safe and returns nil without panicking or
+// blocking.
 func TestStop_BeforeStart(t *testing.T) {
 	t.Parallel()
 
@@ -1043,9 +1033,9 @@ func TestStop_BeforeStart(t *testing.T) {
 	}
 }
 
-// TestStop_ConcurrentWithStart exercises Start and Stop racing. Under -race, any
-// unsynchronised read of s.cancel in Stop while Start is writing it must be
-// detected. We run several iterations to increase the chance of observing the race.
+// TestStop_ConcurrentWithStart exercises Start and Stop racing. Under -race, any unsynchronised read of s.cancel
+// in Stop while Start is writing it must be detected. We run several iterations to increase the chance of
+// observing the race.
 func TestStop_ConcurrentWithStart(t *testing.T) {
 	t.Parallel()
 
@@ -1108,8 +1098,8 @@ func TestCancel_PendingJob(t *testing.T) {
 	}
 }
 
-// TestCancel_PendingNeverClaimed verifies that a cancelled job is never subsequently claimed
-// even when the scheduler is running (criterion 1 — integration).
+// TestCancel_PendingNeverClaimed verifies that a cancelled job is never subsequently claimed even when the
+// scheduler is running (criterion 1 — integration).
 func TestCancel_PendingNeverClaimed(t *testing.T) {
 	t.Parallel()
 
@@ -1174,8 +1164,8 @@ func TestCancel_NotFound(t *testing.T) {
 	}
 }
 
-// TestCancel_RunningJob verifies criterion 4: Cancel of a running job deletes the row
-// without interrupting the handler and without causing a double-run.
+// TestCancel_RunningJob verifies criterion 4: Cancel of a running job deletes the row without interrupting the
+// handler and without causing a double-run.
 func TestCancel_RunningJob(t *testing.T) {
 	t.Parallel()
 
@@ -1187,8 +1177,8 @@ func TestCancel_RunningJob(t *testing.T) {
 
 	handlerStarted := make(chan struct{})
 	handlerBlock := make(chan struct{})
-	// release closes handlerBlock exactly once, whether the test body or the
-	// cleanup gets there first (an early t.Fatal can skip the body's release).
+	// release closes handlerBlock exactly once, whether the test body or the cleanup gets there first (an early
+	// t.Fatal can skip the body's release).
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(handlerBlock) }) }
 	var runCount atomic.Int32
@@ -1249,8 +1239,8 @@ func TestCancel_RunningJob(t *testing.T) {
 	}
 }
 
-// TestReschedule_PendingJob verifies criterion 2: Reschedule updates run_at and the
-// job fires at the new time, not the old.
+// TestReschedule_PendingJob verifies criterion 2: Reschedule updates run_at and the job fires at the new time, not
+// the old.
 func TestReschedule_PendingJob(t *testing.T) {
 	t.Parallel()
 
@@ -1334,8 +1324,8 @@ func TestReschedule_NotFound(t *testing.T) {
 	}
 }
 
-// TestReschedule_RunningJob verifies criterion 4: Reschedule of a running job returns
-// ErrJobRunning and does NOT touch the row (no double-run risk).
+// TestReschedule_RunningJob verifies criterion 4: Reschedule of a running job returns ErrJobRunning and does NOT
+// touch the row (no double-run risk).
 func TestReschedule_RunningJob(t *testing.T) {
 	t.Parallel()
 
@@ -1407,8 +1397,8 @@ func TestReschedule_RunningJob(t *testing.T) {
 // Retry / backoff / dead-letter tests (issue: failing jobs retry with backoff)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// TestDeadLetter_AtMaxAttempts verifies criterion 2: at MaxAttempts the job is dead-lettered
-// with status=failed, last_error set, row kept, and a job.failed event emitted.
+// TestDeadLetter_AtMaxAttempts verifies criterion 2: at MaxAttempts the job is dead-lettered with status=failed,
+// last_error set, row kept, and a job.failed event emitted.
 func TestDeadLetter_AtMaxAttempts(t *testing.T) {
 	t.Parallel()
 
@@ -1465,10 +1455,9 @@ func TestDeadLetter_AtMaxAttempts(t *testing.T) {
 		t.Errorf("job status = %q after MaxAttempts=%d; want %q", finalStatus, cfg.MaxAttempts, "failed")
 	}
 
-	// The handler must have been called exactly MaxAttempts times: fail attempt 1 →
-	// retry with backoff → fail attempt 2 → dead-letter. A regression that dead-letters
-	// on the first failure (skipping the retry loop) would call it only once and pass all
-	// the DB assertions above; this assertion catches that regression.
+	// The handler must have been called exactly MaxAttempts times: fail attempt 1 → retry with backoff → fail
+	// attempt 2 → dead-letter. A regression that dead-letters on the first failure (skipping the retry loop) would
+	// call it only once and pass all the DB assertions above; this assertion catches that regression.
 	if n := callCount.Load(); int(n) != cfg.MaxAttempts {
 		t.Errorf("handler call count = %d; want %d (== MaxAttempts: fail each attempt then dead-letter)", n, cfg.MaxAttempts)
 	}
@@ -1484,8 +1473,8 @@ func TestDeadLetter_AtMaxAttempts(t *testing.T) {
 		t.Error("last_error is NULL/empty after dead-letter; expected the error text")
 	}
 
-	// System-scoped job: job.failed must be logged only, NOT published to the bus.
-	// (The bus has no system channel; system jobs are logged only.)
+	// System-scoped job: job.failed must be logged only, NOT published to the bus. (The bus has no system channel;
+	// system jobs are logged only.)
 	evts := bus.published()
 	for _, ev := range evts {
 		if ev.event.Type == "job.failed" {
@@ -1494,8 +1483,8 @@ func TestDeadLetter_AtMaxAttempts(t *testing.T) {
 	}
 }
 
-// TestDeadLetter_PermanentErrorSkipsRetry verifies criterion 3: a Permanent error causes
-// immediate dead-letter on the first failure (attempt=1), with no backoff, status=failed.
+// TestDeadLetter_PermanentErrorSkipsRetry verifies criterion 3: a Permanent error causes immediate dead-letter on
+// the first failure (attempt=1), with no backoff, status=failed.
 func TestDeadLetter_PermanentErrorSkipsRetry(t *testing.T) {
 	t.Parallel()
 
@@ -1562,8 +1551,8 @@ func TestDeadLetter_PermanentErrorSkipsRetry(t *testing.T) {
 	}
 }
 
-// TestJobFailed_UserScopedPublishesEvent verifies criterion 4 (user side): a user-scoped job
-// that dead-letters publishes a job.failed event on the owning user's bus.
+// TestJobFailed_UserScopedPublishesEvent verifies criterion 4 (user side): a user-scoped job that dead-letters
+// publishes a job.failed event on the owning user's bus.
 func TestJobFailed_UserScopedPublishesEvent(t *testing.T) {
 	t.Parallel()
 
@@ -1640,8 +1629,8 @@ func TestJobFailed_UserScopedPublishesEvent(t *testing.T) {
 	}
 }
 
-// TestJobFailed_SystemScopedLogsOnly verifies criterion 4 (system side): a system-scoped
-// dead-lettered job does NOT publish to the bus (logged only).
+// TestJobFailed_SystemScopedLogsOnly verifies criterion 4 (system side): a system-scoped dead-lettered job does
+// NOT publish to the bus (logged only).
 func TestJobFailed_SystemScopedLogsOnly(t *testing.T) {
 	t.Parallel()
 
@@ -1703,8 +1692,8 @@ func TestJobFailed_SystemScopedLogsOnly(t *testing.T) {
 	}
 }
 
-// TestRetry_JobTimeoutIsTransient verifies criterion 5: when a handler's JobTimeout fires,
-// the job is treated as a transient failure and re-armed as pending (not dead-lettered).
+// TestRetry_JobTimeoutIsTransient verifies criterion 5: when a handler's JobTimeout fires, the job is treated as a
+// transient failure and re-armed as pending (not dead-lettered).
 func TestRetry_JobTimeoutIsTransient(t *testing.T) {
 	t.Parallel()
 
@@ -1716,11 +1705,10 @@ func TestRetry_JobTimeoutIsTransient(t *testing.T) {
 	cfg.JobTimeout = 20 * time.Millisecond // very short so the test is fast
 	cfg.LeaseTimeout = 1 * time.Minute     // maintain invariant: LeaseTimeout > JobTimeout
 	cfg.MaxAttempts = 5                    // don't dead-letter on first attempt
-	// Large backoff so the retried run_at lands far in the future of the frozen
-	// clock: the job stays 'pending' and is never re-claimed, so it cannot churn
-	// through all MaxAttempts and dead-letter before the assertion samples the row.
-	// Without this, a slow/loaded runner can observe 'failed' instead of 'pending'
-	// (same fragility fixed in TestRecurring_FailureRetriesSameOccurrence).
+	// Large backoff so the retried run_at lands far in the future of the frozen clock: the job stays 'pending' and
+	// is never re-claimed, so it cannot churn through all MaxAttempts and dead-letter before the assertion samples
+	// the row. Without this, a slow/loaded runner can observe 'failed' instead of 'pending' (same fragility fixed
+	// in TestRecurring_FailureRetriesSameOccurrence).
 	cfg.BackoffBase = 1 * time.Hour
 	cfg.BackoffCap = 1 * time.Hour
 
@@ -1762,11 +1750,10 @@ func TestRetry_JobTimeoutIsTransient(t *testing.T) {
 		t.Fatal("handler not invoked within timeout")
 	}
 
-	// Wait for the job to be re-armed (status=pending after the timeout). Use jobRow to
-	// read status and locked_at atomically so the test does not observe a re-claimed row
-	// between two separate SELECT calls on high-load parallel runs (when backoff is 0ms
-	// and the frozen clock makes run_at immediately due, the poller can re-claim the row
-	// between a status read and a separate locked_at read).
+	// Wait for the job to be re-armed (status=pending after the timeout). Use jobRow to read status and locked_at
+	// atomically so the test does not observe a re-claimed row between two separate SELECT calls on high-load
+	// parallel runs (when backoff is 0ms and the frozen clock makes run_at immediately due, the poller can re-claim
+	// the row between a status read and a separate locked_at read).
 	var finalStatus, finalLockedAt string
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -1787,9 +1774,8 @@ func TestRetry_JobTimeoutIsTransient(t *testing.T) {
 	}
 }
 
-// TestRetry_UnknownKindFlowsThroughFailurePath verifies that a job with no registered handler
-// flows through the retry/dead-letter failure path (transient), rather than being left in
-// 'running' state (the old behavior).
+// TestRetry_UnknownKindFlowsThroughFailurePath verifies that a job with no registered handler flows through the
+// retry/dead-letter failure path (transient), rather than being left in 'running' state (the old behavior).
 func TestRetry_UnknownKindFlowsThroughFailurePath(t *testing.T) {
 	t.Parallel()
 
@@ -1841,8 +1827,8 @@ func TestRetry_UnknownKindFlowsThroughFailurePath(t *testing.T) {
 	}
 }
 
-// TestPermanent_ErrorWrapsAndUnwraps verifies that scheduler.Permanent wraps the inner error
-// and that errors.Is/As can see through it via Unwrap.
+// TestPermanent_ErrorWrapsAndUnwraps verifies that scheduler.Permanent wraps the inner error and that errors.Is/As
+// can see through it via Unwrap.
 func TestPermanent_ErrorWrapsAndUnwraps(t *testing.T) {
 	t.Parallel()
 
@@ -1864,9 +1850,9 @@ func TestPermanent_ErrorWrapsAndUnwraps(t *testing.T) {
 	}
 }
 
-// TestCancel_FailedJob verifies that Cancel of a dead-lettered (status='failed') row deletes
-// it cleanly and returns no error. An operator cancelling a dead-lettered job removes it so
-// the failed row does not accumulate indefinitely.
+// TestCancel_FailedJob verifies that Cancel of a dead-lettered (status='failed') row deletes it cleanly and
+// returns no error. An operator cancelling a dead-lettered job removes it so the failed row does not accumulate
+// indefinitely.
 func TestCancel_FailedJob(t *testing.T) {
 	t.Parallel()
 
@@ -1933,9 +1919,8 @@ func TestCancel_FailedJob(t *testing.T) {
 // Reclaim tests (issue: crashed or wedged jobs are reclaimed)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// insertRunningJob directly inserts a row into the jobs table with status='running'
-// and the given locked_at timestamp, bypassing the scheduler claim path. This
-// simulates a row orphaned by a process crash.
+// insertRunningJob directly inserts a row into the jobs table with status='running' and the given locked_at
+// timestamp, bypassing the scheduler claim path. This simulates a row orphaned by a process crash.
 func insertRunningJob(t *testing.T, db *sql.DB, kind, lockedAt string, attempt int) string {
 	t.Helper()
 	jobID := "01TEST" + kind[:min(len(kind), 10)] + fmt.Sprintf("%014d", attempt)
@@ -1951,9 +1936,8 @@ func insertRunningJob(t *testing.T, db *sql.DB, kind, lockedAt string, attempt i
 	return jobID
 }
 
-// TestReclaim_BootSweepReclaimsStaleLeasedRow verifies acceptance criterion 1:
-// a row left running with a locked_at older than LeaseTimeout is reclaimed to pending
-// by the boot sweep (before the poll loop ticks).
+// TestReclaim_BootSweepReclaimsStaleLeasedRow verifies acceptance criterion 1: a row left running with a locked_at
+// older than LeaseTimeout is reclaimed to pending by the boot sweep (before the poll loop ticks).
 func TestReclaim_BootSweepReclaimsStaleLeasedRow(t *testing.T) {
 	t.Parallel()
 
@@ -1989,8 +1973,8 @@ func TestReclaim_BootSweepReclaimsStaleLeasedRow(t *testing.T) {
 		_ = sched.Stop(stopCtx)
 	})
 
-	// The boot sweep is synchronous before the poll loop, so after Start returns the
-	// reclaim has already happened. Give it a brief moment to be safe.
+	// The boot sweep is synchronous before the poll loop, so after Start returns the reclaim has already happened.
+	// Give it a brief moment to be safe.
 	time.Sleep(50 * time.Millisecond)
 
 	// Row must be pending now, locked_at cleared, attempt preserved.
@@ -2006,9 +1990,9 @@ func TestReclaim_BootSweepReclaimsStaleLeasedRow(t *testing.T) {
 	}
 }
 
-// TestReclaim_PeriodicTickReclaimsStaleLeasedRow verifies acceptance criterion 2:
-// a row inserted AFTER Start (so the boot sweep has already run) is reclaimed to
-// pending by the periodic in-loop check when its locked_at goes stale.
+// TestReclaim_PeriodicTickReclaimsStaleLeasedRow verifies acceptance criterion 2: a row inserted AFTER Start (so
+// the boot sweep has already run) is reclaimed to pending by the periodic in-loop check when its locked_at goes
+// stale.
 func TestReclaim_PeriodicTickReclaimsStaleLeasedRow(t *testing.T) {
 	t.Parallel()
 
@@ -2034,8 +2018,8 @@ func TestReclaim_PeriodicTickReclaimsStaleLeasedRow(t *testing.T) {
 	// Wait for the boot sweep tick to have fired (at least one poll cycle).
 	time.Sleep(50 * time.Millisecond)
 
-	// NOW insert the stale running row — after Start, so the boot sweep already ran.
-	// locked_at is at the current clock time (not yet stale).
+	// NOW insert the stale running row — after Start, so the boot sweep already ran. locked_at is at the current
+	// clock time (not yet stale).
 	lockedAtNow := clk.Now().UTC().Format(time.RFC3339)
 	jobID := insertRunningJob(t, s.Writer(), "reclaim.tick", lockedAtNow, 2)
 
@@ -2071,8 +2055,8 @@ func TestReclaim_PeriodicTickReclaimsStaleLeasedRow(t *testing.T) {
 	}
 }
 
-// TestReclaim_NotStaleRowIsNotReclaimed verifies acceptance criterion 4:
-// a still-running job with locked_at within LeaseTimeout is NOT reclaimed.
+// TestReclaim_NotStaleRowIsNotReclaimed verifies acceptance criterion 4: a still-running job with locked_at within
+// LeaseTimeout is NOT reclaimed.
 func TestReclaim_NotStaleRowIsNotReclaimed(t *testing.T) {
 	t.Parallel()
 
@@ -2111,11 +2095,10 @@ func TestReclaim_NotStaleRowIsNotReclaimed(t *testing.T) {
 	}
 }
 
-// TestReclaim_PoisonJobDeadLettersViaAttemptCeiling verifies acceptance criterion 3:
-// a process-crashing poison job (simulated by inserting running row with
-// attempt=MaxAttempts) is reclaimed → pending (attempt preserved), then re-leased
-// (attempt becomes MaxAttempts+1), and the dispatch-time guard dead-letters it
-// WITHOUT invoking the handler. The job.failed event is published (user-scoped).
+// TestReclaim_PoisonJobDeadLettersViaAttemptCeiling verifies acceptance criterion 3: a process-crashing poison job
+// (simulated by inserting running row with attempt=MaxAttempts) is reclaimed → pending (attempt preserved), then
+// re-leased (attempt becomes MaxAttempts+1), and the dispatch-time guard dead-letters it WITHOUT invoking the
+// handler. The job.failed event is published (user-scoped).
 func TestReclaim_PoisonJobDeadLettersViaAttemptCeiling(t *testing.T) {
 	t.Parallel()
 
@@ -2141,8 +2124,8 @@ func TestReclaim_PoisonJobDeadLettersViaAttemptCeiling(t *testing.T) {
 		return nil
 	})
 
-	// Insert a running row with attempt=MaxAttempts and a stale locked_at.
-	// This simulates a job that already used all its attempts and is now orphaned.
+	// Insert a running row with attempt=MaxAttempts and a stale locked_at. This simulates a job that already used
+	// all its attempts and is now orphaned.
 	staleLockedAt := now.Add(-2 * cfg.LeaseTimeout).UTC().Format(time.RFC3339)
 
 	// Insert directly with user_id so we can assert job.failed event.
@@ -2229,23 +2212,21 @@ func TestReclaim_PoisonJobDeadLettersViaAttemptCeiling(t *testing.T) {
 	}
 }
 
-// TestRetry_BackoffWindowOnTransientFailure verifies that after a transient failure the
-// job is re-armed with run_at inside the full-jitter exponential window for attempt=1.
+// TestRetry_BackoffWindowOnTransientFailure verifies that after a transient failure the job is re-armed with
+// run_at inside the full-jitter exponential window for attempt=1.
 //
-// Clock strategy: a frozen clock is injected so that run_at - now equals exactly the
-// backoff duration with no real-time drift. BackoffBase=30s, BackoffCap=1h, so the
-// attempt=1 ceiling is 30s — well above the 1s RFC3339 storage granularity. The
-// assertion allows a ≤1s downward tolerance for the truncation, but no upward slack.
+// Clock strategy: a frozen clock is injected so that run_at - now equals exactly the backoff duration with no
+// real-time drift. BackoffBase=30s, BackoffCap=1h, so the attempt=1 ceiling is 30s — well above the 1s RFC3339
+// storage granularity. The assertion allows a ≤1s downward tolerance for the truncation, but no upward slack.
 //
-// Exponential growth and cap-clamp are covered deterministically by the pure-function
-// tests in backoff_internal_test.go (package scheduler); this test focuses solely on
-// the end-to-end re-arm path: claim → fail → DB write → status/run_at check.
+// Exponential growth and cap-clamp are covered deterministically by the pure-function tests in
+// backoff_internal_test.go (package scheduler); this test focuses solely on the end-to-end re-arm path: claim →
+// fail → DB write → status/run_at check.
 func TestRetry_BackoffWindowOnTransientFailure(t *testing.T) {
 	t.Parallel()
 
-	// BackoffBase=30s, BackoffCap=1h: attempt=1 ceiling = min(1h, 30s*2^0) = 30s.
-	// Using second-scale values ensures RFC3339 storage preserves the bound; the
-	// 1s truncation is the only allowed slack on the lower bound.
+	// BackoffBase=30s, BackoffCap=1h: attempt=1 ceiling = min(1h, 30s*2^0) = 30s. Using second-scale values ensures
+	// RFC3339 storage preserves the bound; the 1s truncation is the only allowed slack on the lower bound.
 	const backoffBase = 30 * time.Second
 	const backoffCap = 1 * time.Hour
 
@@ -2271,8 +2252,8 @@ func TestRetry_BackoffWindowOnTransientFailure(t *testing.T) {
 		return errors.New("transient failure")
 	})
 
-	// Enqueue with zero RunAt so the scheduler sets run_at = clk() = now, which
-	// satisfies the claim predicate (run_at <= now) on the very first tick.
+	// Enqueue with zero RunAt so the scheduler sets run_at = clk() = now, which satisfies the claim predicate
+	// (run_at <= now) on the very first tick.
 	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
 		Kind:    "backoff.window.test",
 		Payload: json.RawMessage(`{}`),
@@ -2293,8 +2274,8 @@ func TestRetry_BackoffWindowOnTransientFailure(t *testing.T) {
 		t.Fatal("handler was not called within timeout")
 	}
 
-	// Stop the scheduler before it can attempt a second claim (with the frozen clock
-	// the re-armed row is not yet due, so this is a safety measure, not a race).
+	// Stop the scheduler before it can attempt a second claim (with the frozen clock the re-armed row is not yet
+	// due, so this is a safety measure, not a race).
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stopCancel()
 	if err := sched.Stop(stopCtx); err != nil {
@@ -2311,13 +2292,12 @@ func TestRetry_BackoffWindowOnTransientFailure(t *testing.T) {
 		t.Fatalf("parse run_at %q: %v", runAtStr, err)
 	}
 
-	// With a frozen clock, run_at = now + backoff where backoff ∈ [0, BackoffBase].
-	// Therefore run_at - now ∈ [0, BackoffBase].
+	// With a frozen clock, run_at = now + backoff where backoff ∈ [0, BackoffBase]. Therefore run_at - now ∈
+	// [0, BackoffBase].
 	//
-	// RFC3339 stores at second precision; backoffDuration uses Int64N so it can produce
-	// values anywhere in [0, ceiling]. A sample of exactly 0 round-trips without loss.
-	// A sample of e.g. 17,400,999,999ns stores as 17s (truncation ≤1s downward).
-	// We therefore allow ≤1s below 'now' on the lower bound, but no upward slack.
+	// RFC3339 stores at second precision; backoffDuration uses Int64N so it can produce values anywhere in
+	// [0, ceiling]. A sample of exactly 0 round-trips without loss. A sample of e.g. 17,400,999,999ns stores as 17s
+	// (truncation ≤1s downward). We therefore allow ≤1s below 'now' on the lower bound, but no upward slack.
 	lowerBound := now.Add(-1 * time.Second) // 1s tolerance for RFC3339 truncation
 	upperBound := now.Add(backoffBase)      // attempt=1 ceiling = BackoffBase
 	if runAt.Before(lowerBound) {

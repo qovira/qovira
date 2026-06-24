@@ -9,8 +9,7 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// TestSettingsStore_SetAndGet verifies that Set persists a value and Get
-// retrieves it correctly.
+// TestSettingsStore_SetAndGet verifies that Set persists a value and Get retrieves it correctly.
 func TestSettingsStore_SetAndGet(t *testing.T) {
 	t.Parallel()
 
@@ -34,8 +33,7 @@ func TestSettingsStore_SetAndGet(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_GetMissing verifies that Get returns found=false and no
-// error when the key does not exist.
+// TestSettingsStore_GetMissing verifies that Get returns found=false and no error when the key does not exist.
 func TestSettingsStore_GetMissing(t *testing.T) {
 	t.Parallel()
 
@@ -55,8 +53,7 @@ func TestSettingsStore_GetMissing(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_SetOverwrites verifies that Set on an existing key updates
-// the value (upsert semantics).
+// TestSettingsStore_SetOverwrites verifies that Set on an existing key updates the value (upsert semantics).
 func TestSettingsStore_SetOverwrites(t *testing.T) {
 	t.Parallel()
 
@@ -80,8 +77,7 @@ func TestSettingsStore_SetOverwrites(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_Delete verifies that Delete removes a key and subsequent
-// Get returns found=false.
+// TestSettingsStore_Delete verifies that Delete removes a key and subsequent Get returns found=false.
 func TestSettingsStore_Delete(t *testing.T) {
 	t.Parallel()
 
@@ -105,8 +101,7 @@ func TestSettingsStore_Delete(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_DeleteMissing verifies that Delete on a non-existent key
-// returns no error (idempotent).
+// TestSettingsStore_DeleteMissing verifies that Delete on a non-existent key returns no error (idempotent).
 func TestSettingsStore_DeleteMissing(t *testing.T) {
 	t.Parallel()
 
@@ -119,8 +114,8 @@ func TestSettingsStore_DeleteMissing(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_ByPrefix verifies that ByPrefix returns only keys with
-// the given prefix, ordered by key, excluding keys outside the prefix.
+// TestSettingsStore_ByPrefix verifies that ByPrefix returns only keys with the given prefix, ordered by key, excluding
+// keys outside the prefix.
 func TestSettingsStore_ByPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -155,9 +150,8 @@ func TestSettingsStore_ByPrefix(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_PersistsAcrossReopen verifies that settings survive a
-// close-and-reopen cycle of the encrypted database (AC: settings persist and
-// survive restart).
+// TestSettingsStore_PersistsAcrossReopen verifies that settings survive a close-and-reopen cycle of the encrypted
+// database (AC: settings persist and survive restart).
 func TestSettingsStore_PersistsAcrossReopen(t *testing.T) {
 	t.Parallel()
 
@@ -208,9 +202,8 @@ func TestSettingsStore_PersistsAcrossReopen(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_Namespace verifies that two SettingsNamespace values with
-// the same logical key name do not collide — their values are stored under
-// distinct prefixed storage keys (AC: subsystems can own their own keys without
+// TestSettingsStore_Namespace verifies that two SettingsNamespace values with the same logical key name do not collide
+// — their values are stored under distinct prefixed storage keys (AC: subsystems can own their own keys without
 // colliding).
 func TestSettingsStore_Namespace(t *testing.T) {
 	t.Parallel()
@@ -246,9 +239,8 @@ func TestSettingsStore_Namespace(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_NamespaceByPrefix verifies that ByPrefix on a namespace
-// returns only the keys within that namespace, with logical (non-prefixed)
-// names exposed to the caller.
+// TestSettingsStore_NamespaceByPrefix verifies that ByPrefix on a namespace returns only the keys within that
+// namespace, with logical (non-prefixed) names exposed to the caller.
 func TestSettingsStore_NamespaceByPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -289,15 +281,13 @@ func TestSettingsStore_NamespaceByPrefix(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_NoMasterKeyAccess documents and verifies that the
-// SettingsStore carries no mechanism to access or persist the master
-// encryption key.  The master key is boot-only config (store.Config.Key) that
-// is never written to the database.
+// TestSettingsStore_NoMasterKeyAccess documents and verifies that the SettingsStore carries no mechanism to access or
+// persist the master encryption key.  The master key is boot-only config (store.Config.Key) that is never written to
+// the database.
 //
-// By construction the accessor is a plain string KV — it has no path to
-// store.Config.Key.  This test is a contract anchor: it asserts the interface
-// carries no MasterKey method and that the master_key is absent from a
-// freshly-opened DB.
+// By construction the accessor is a plain string KV — it has no path to store.Config.Key.  This test is a contract
+// anchor: it asserts the interface carries no MasterKey method and that the master_key is absent from a freshly-opened
+// DB.
 func TestSettingsStore_NoMasterKeyAccess(t *testing.T) {
 	t.Parallel()
 
@@ -305,8 +295,8 @@ func TestSettingsStore_NoMasterKeyAccess(t *testing.T) {
 	ss := s.Settings()
 	ctx := context.Background()
 
-	// The settings store must not implement any hypothetical MasterKeyProvider
-	// interface.  This assertion is a compile-time shape check at test time.
+	// The settings store must not implement any hypothetical MasterKeyProvider interface.  This assertion is a
+	// compile-time shape check at test time.
 	type masterKeyProvider interface{ MasterKey() string }
 	if _, ok := any(ss).(masterKeyProvider); ok {
 		t.Error(
@@ -324,11 +314,9 @@ func TestSettingsStore_NoMasterKeyAccess(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_ByPrefixEscapesWildcards verifies that ByPrefix treats LIKE
-// metacharacters in the prefix literally. Without escaping, the '_' in
-// "model.api_" would match any single character and leak a sibling key
-// ("model.apiXkey") into the result — exactly the cross-key-space bleed that
-// namespacing must prevent.
+// TestSettingsStore_ByPrefixEscapesWildcards verifies that ByPrefix treats LIKE metacharacters in the prefix literally.
+// Without escaping, the '_' in "model.api_" would match any single character and leak a sibling key ("model.apiXkey")
+// into the result — exactly the cross-key-space bleed that namespacing must prevent.
 func TestSettingsStore_ByPrefixEscapesWildcards(t *testing.T) {
 	t.Parallel()
 
@@ -354,10 +342,9 @@ func TestSettingsStore_ByPrefixEscapesWildcards(t *testing.T) {
 	}
 }
 
-// TestSettingsNamespace_EmptyKey_SetGet verifies that Set and Get agree on the
-// storage key when the logical key is empty. Set("", v) must be visible via
-// Get("", …) — the empty key maps to the bare namespace prefix, not a
-// "<prefix>." variant (finding 4).
+// TestSettingsNamespace_EmptyKey_SetGet verifies that Set and Get agree on the storage key when the logical key is
+// empty. Set("", v) must be visible via Get("", …) — the empty key maps to the bare namespace prefix, not a "<prefix>."
+// variant (finding 4).
 func TestSettingsNamespace_EmptyKey_SetGet(t *testing.T) {
 	t.Parallel()
 
@@ -380,11 +367,9 @@ func TestSettingsNamespace_EmptyKey_SetGet(t *testing.T) {
 	}
 }
 
-// TestSettingsNamespace_EmptyKey_ByPrefix verifies that ByPrefix("") within a
-// namespace returns a value that was stored under the empty logical key (finding 4).
-// The fix must make fullKey("") and ByPrefix("") agree: both must use the bare
-// namespace prefix as the storage prefix so a Set("", v) value appears in
-// ByPrefix("").
+// TestSettingsNamespace_EmptyKey_ByPrefix verifies that ByPrefix("") within a namespace returns a value that was stored
+// under the empty logical key (finding 4). The fix must make fullKey("") and ByPrefix("") agree: both must use the bare
+// namespace prefix as the storage prefix so a Set("", v) value appears in ByPrefix("").
 func TestSettingsNamespace_EmptyKey_ByPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -415,9 +400,8 @@ func TestSettingsNamespace_EmptyKey_ByPrefix(t *testing.T) {
 	}
 }
 
-// TestSettingsNamespace_EmptyKey_Delete verifies that Delete routes through the
-// same empty-key convention as Set/Get: Delete("") must remove the value stored
-// under the bare namespace prefix (finding 4 — all of Set/Get/Delete/ByPrefix
+// TestSettingsNamespace_EmptyKey_Delete verifies that Delete routes through the same empty-key convention as Set/Get:
+// Delete("") must remove the value stored under the bare namespace prefix (finding 4 — all of Set/Get/Delete/ByPrefix
 // must agree on the empty logical key).
 func TestSettingsNamespace_EmptyKey_Delete(t *testing.T) {
 	t.Parallel()
@@ -441,11 +425,10 @@ func TestSettingsNamespace_EmptyKey_Delete(t *testing.T) {
 	}
 }
 
-// TestSettingsNamespace_ByPrefix_SiblingIsolation verifies that ByPrefix("") on a
-// namespace does not leak entries from a sibling namespace whose name merely
-// shares the same string prefix (e.g. "model" vs "model_gateway"). The bare-prefix
-// query matches "model_gateway.*" at the storage layer, so ByPrefix must filter to
-// a proper namespace boundary ("<prefix>" or "<prefix>.").
+// TestSettingsNamespace_ByPrefix_SiblingIsolation verifies that ByPrefix("") on a namespace does not leak entries from
+// a sibling namespace whose name merely shares the same string prefix (e.g. "model" vs "model_gateway"). The
+// bare-prefix query matches "model_gateway.*" at the storage layer, so ByPrefix must filter to a proper namespace
+// boundary ("<prefix>" or "<prefix>.").
 func TestSettingsNamespace_ByPrefix_SiblingIsolation(t *testing.T) {
 	t.Parallel()
 
@@ -485,9 +468,8 @@ func TestSettingsNamespace_ByPrefix_SiblingIsolation(t *testing.T) {
 	}
 }
 
-// TestSettingsStore_ScopeGuardExempt verifies that the settings table queries
-// produce no scope-guard violations.  The guard must recognise settings as a
-// system-owned table and exempt all four queries from the user_id predicate
+// TestSettingsStore_ScopeGuardExempt verifies that the settings table queries produce no scope-guard violations.  The
+// guard must recognise settings as a system-owned table and exempt all four queries from the user_id predicate
 // requirement.
 func TestSettingsStore_ScopeGuardExempt(t *testing.T) {
 	t.Parallel()

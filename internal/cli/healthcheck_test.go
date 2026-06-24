@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// TestDialAddr verifies the helper that converts listen addresses to
-// loopback dial addresses.
+// TestDialAddr verifies the helper that converts listen addresses to loopback dial addresses.
 func TestDialAddr(t *testing.T) {
 	t.Parallel()
 
@@ -56,12 +55,11 @@ func TestDialAddr(t *testing.T) {
 	}
 }
 
-// TestHealthcheckCmd exercises newHealthcheckCmd against an httptest.Server
-// to verify the exit behaviour for HTTP 200 (success) and HTTP 503 (error),
-// without requiring a real config file or master key.
+// TestHealthcheckCmd exercises newHealthcheckCmd against an httptest.Server to verify the exit behaviour for HTTP 200
+// (success) and HTTP 503 (error), without requiring a real config file or master key.
 //
-// Not marked t.Parallel() at the top level because the subtests use t.Setenv,
-// which is incompatible with parallel execution.
+// Not marked t.Parallel() at the top level because the subtests use t.Setenv, which is incompatible with parallel
+// execution.
 func TestHealthcheckCmd(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -84,17 +82,16 @@ func TestHealthcheckCmd(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// t.Setenv is incompatible with t.Parallel() — subtests that mutate
-			// environment variables must run sequentially within this test function.
+			// t.Setenv is incompatible with t.Parallel() — subtests that mutate environment variables must run
+			// sequentially within this test function.
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tc.statusCode)
 			}))
 			t.Cleanup(srv.Close)
 
-			// Build the command and point it at the test server address via
-			// QOVIRA_HTTP_ADDR. We also supply a dummy master key so config.Load
-			// passes validation (the healthcheck command calls config.Load to read
+			// Build the command and point it at the test server address via QOVIRA_HTTP_ADDR. We also supply a
+			// dummy master key so config.Load passes validation (the healthcheck command calls config.Load to read
 			// the listen address).
 			t.Setenv("QOVIRA_HTTP_ADDR", srv.Listener.Addr().String())
 			t.Setenv("QOVIRA_MASTER_KEY", "this-is-sixteen-bytes-ok")

@@ -8,9 +8,8 @@ import (
 	"github.com/qovira/qovira/internal/httpx"
 )
 
-// TestSessionTokenFromRequest_CookieFirst verifies that the session cookie takes
-// precedence over the Authorization: Bearer header when both are present, and
-// that viaCookie is true.
+// TestSessionTokenFromRequest_CookieFirst verifies that the session cookie takes precedence over the Authorization:
+// Bearer header when both are present, and that viaCookie is true.
 func TestSessionTokenFromRequest_CookieFirst(t *testing.T) {
 	t.Parallel()
 
@@ -31,8 +30,8 @@ func TestSessionTokenFromRequest_CookieFirst(t *testing.T) {
 	}
 }
 
-// TestSessionTokenFromRequest_BearerFallback verifies that when no session
-// cookie is present, the Bearer token is returned and viaCookie is false.
+// TestSessionTokenFromRequest_BearerFallback verifies that when no session cookie is present, the Bearer token is
+// returned and viaCookie is false.
 func TestSessionTokenFromRequest_BearerFallback(t *testing.T) {
 	t.Parallel()
 
@@ -51,8 +50,8 @@ func TestSessionTokenFromRequest_BearerFallback(t *testing.T) {
 	}
 }
 
-// TestSessionTokenFromRequest_NeitherPresent verifies that when neither cookie
-// nor Bearer header is present, an empty token is returned.
+// TestSessionTokenFromRequest_NeitherPresent verifies that when neither cookie nor Bearer header is present, an empty
+// token is returned.
 func TestSessionTokenFromRequest_NeitherPresent(t *testing.T) {
 	t.Parallel()
 
@@ -68,8 +67,8 @@ func TestSessionTokenFromRequest_NeitherPresent(t *testing.T) {
 	}
 }
 
-// TestSessionTokenFromRequest_EmptyCookieFallsBackToBearer verifies that an
-// empty session cookie value falls back to the Bearer header.
+// TestSessionTokenFromRequest_EmptyCookieFallsBackToBearer verifies that an empty session cookie value falls back to
+// the Bearer header.
 func TestSessionTokenFromRequest_EmptyCookieFallsBackToBearer(t *testing.T) {
 	t.Parallel()
 

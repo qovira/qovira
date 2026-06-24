@@ -6,18 +6,17 @@
  *   /onboarding     (exact match)
  *   /onboarding/*   (any sub-path — boundary-safe: /onboarding-x is NOT exempt)
  *
- * All other routes require an active session; unauthenticated loads are
- * redirected to /login.
+ * All other routes require an active session; unauthenticated loads are redirected to /login.
  */
 
 const EXEMPT_EXACT = new Set(["/login", "/onboarding"]);
 
 /**
- * Returns true when the route is reachable without a session (/login,
- * /onboarding, /onboarding/*). Boundary-safe: /onboarding-x is NOT exempt.
+ * Returns true when the route is reachable without a session (/login, /onboarding, /onboarding/*). Boundary-safe:
+ * /onboarding-x is NOT exempt.
  *
- * Exported so the root layout can render these routes immediately, without
- * waiting for the boot probe — they never depend on auth state either way.
+ * Exported so the root layout can render these routes immediately, without waiting for the boot probe — they never
+ * depend on auth state either way.
  *
  * @param pathname - The current URL pathname (e.g. page.url.pathname)
  */

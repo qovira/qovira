@@ -16,8 +16,7 @@ import (
 // seedTestKey is the encryption key used across admin-seeding tests.
 const seedTestKey = "a-sufficiently-long-passphrase-for-sqlcipher"
 
-// fastSeedParams are low-cost argon2id parameters for tests — real hashing,
-// minimal wall-clock time.
+// fastSeedParams are low-cost argon2id parameters for tests — real hashing, minimal wall-clock time.
 var fastSeedParams = auth.Params{
 	Memory:  64,
 	Time:    1,
@@ -26,8 +25,7 @@ var fastSeedParams = auth.Params{
 	SaltLen: 16,
 }
 
-// openTestStore opens a migrated *store.Store for seed tests that need direct
-// store access after app.New runs.
+// openTestStore opens a migrated *store.Store for seed tests that need direct store access after app.New runs.
 func openTestStore(t *testing.T, dir string) *store.Store {
 	t.Helper()
 	s, err := store.Open(store.Config{
@@ -57,15 +55,14 @@ func newSeedCfg(t *testing.T, dir, adminEmail, adminPassword string) *config.Con
 	}
 }
 
-// seedAuthCtor builds an auth module constructor that uses fastSeedParams so
-// tests run quickly while still exercising the real argon2id code path.
+// seedAuthCtor builds an auth module constructor that uses fastSeedParams so tests run quickly while still exercising
+// the real argon2id code path.
 func seedAuthCtor() func(*store.Store) app.Module {
 	return app.AuthModuleCtor(fastSeedParams, auth.DefaultPolicy, auth.DefaultSessionConfig, discardLogger())
 }
 
-// TestNew_SeedsAdminOnFirstRun verifies that when both QOVIRA_ADMIN_EMAIL and
-// QOVIRA_ADMIN_PASSWORD are set and no users exist, app.New creates exactly one
-// admin user whose password authenticates via auth.Service.Authenticate.
+// TestNew_SeedsAdminOnFirstRun verifies that when both QOVIRA_ADMIN_EMAIL and QOVIRA_ADMIN_PASSWORD are set and no
+// users exist, app.New creates exactly one admin user whose password authenticates via auth.Service.Authenticate.
 func TestNew_SeedsAdminOnFirstRun(t *testing.T) {
 	t.Parallel()
 
@@ -78,8 +75,8 @@ func TestNew_SeedsAdminOnFirstRun(t *testing.T) {
 	}
 	cleanupApp(t, a)
 
-	// Open the same DB directly (app.New has already closed nothing — the App is
-	// still running) and verify the admin user row exists with role "admin".
+	// Open the same DB directly (app.New has already closed nothing — the App is still running) and verify the admin
+	// user row exists with role "admin".
 	s := openTestStore(t, dir)
 	runner := store.NewRunner()
 	// Migrations were applied by app.New; just need a store reference here.
@@ -106,8 +103,8 @@ func TestNew_SeedsAdminOnFirstRun(t *testing.T) {
 	}
 }
 
-// TestNew_NoSeedWhenUsersExist verifies that when a user already exists, app.New
-// does not create a second user even when admin credentials are set.
+// TestNew_NoSeedWhenUsersExist verifies that when a user already exists, app.New does not create a second user even
+// when admin credentials are set.
 func TestNew_NoSeedWhenUsersExist(t *testing.T) {
 	t.Parallel()
 
@@ -143,8 +140,8 @@ func TestNew_NoSeedWhenUsersExist(t *testing.T) {
 	}
 }
 
-// TestNew_NoSeedWhenCredsEmpty verifies that when either or both admin env vars
-// are empty, app.New does not create any user (no error, no user).
+// TestNew_NoSeedWhenCredsEmpty verifies that when either or both admin env vars are empty, app.New does not create any
+// user (no error, no user).
 func TestNew_NoSeedWhenCredsEmpty(t *testing.T) {
 	t.Parallel()
 

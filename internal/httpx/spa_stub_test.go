@@ -19,17 +19,15 @@ import (
 	"testing"
 )
 
-// newStubServerHandler returns the http.Handler from a throwaway server for
-// stub-SPA tests. This compiles only without -tags embed_spa, exercising the
-// in-code stub FS path.
+// newStubServerHandler returns the http.Handler from a throwaway server for stub-SPA tests. This compiles only without
+// -tags embed_spa, exercising the in-code stub FS path.
 func newStubServerHandler(t *testing.T) http.Handler {
 	t.Helper()
 	return newServerHandler(t, "dev")
 }
 
-// TestSPAStub_RootReturns200 verifies that under the default (no embed_spa tag)
-// build, GET / returns 200 and does not panic. This is the primary TDD guard:
-// it must pass without any webdist/ directory on disk.
+// TestSPAStub_RootReturns200 verifies that under the default (no embed_spa tag) build, GET / returns 200 and does not
+// panic. This is the primary TDD guard: it must pass without any webdist/ directory on disk.
 func TestSPAStub_RootReturns200(t *testing.T) {
 	t.Parallel()
 
@@ -44,9 +42,9 @@ func TestSPAStub_RootReturns200(t *testing.T) {
 	}
 }
 
-// TestSPAStub_BodyContainsStubMarkup asserts that the stub index.html served
-// by the default build contains the expected sentinel phrase, confirming we are
-// NOT serving a real SvelteKit build and that the in-code content is wired correctly.
+// TestSPAStub_BodyContainsStubMarkup asserts that the stub index.html served by the default build contains the expected
+// sentinel phrase, confirming we are NOT serving a real SvelteKit build and that the in-code content is wired
+// correctly.
 func TestSPAStub_BodyContainsStubMarkup(t *testing.T) {
 	t.Parallel()
 
@@ -68,16 +66,15 @@ func TestSPAStub_BodyContainsStubMarkup(t *testing.T) {
 		t.Errorf("stub body missing brand name 'Qovira': %q", body)
 	}
 
-	// The stub must indicate the web UI is not embedded, so operators know they
-	// need make build for the real binary.
+	// The stub must indicate the web UI is not embedded, so operators know they need make build for the real binary.
 	lowerBody := strings.ToLower(body)
 	if !strings.Contains(lowerBody, "not embedded") && !strings.Contains(lowerBody, "make build") {
 		t.Errorf("stub body does not indicate the web UI is not embedded: %q", body)
 	}
 }
 
-// TestSPAStub_NoCacheHeader verifies that the stub index.html carries
-// Cache-Control: no-cache, consistent with the production handler behaviour.
+// TestSPAStub_NoCacheHeader verifies that the stub index.html carries Cache-Control: no-cache, consistent with the
+// production handler behaviour.
 func TestSPAStub_NoCacheHeader(t *testing.T) {
 	t.Parallel()
 
@@ -92,8 +89,7 @@ func TestSPAStub_NoCacheHeader(t *testing.T) {
 	}
 }
 
-// TestSPAStub_ContentTypeHTML verifies the stub index.html has the correct
-// Content-Type header.
+// TestSPAStub_ContentTypeHTML verifies the stub index.html has the correct Content-Type header.
 func TestSPAStub_ContentTypeHTML(t *testing.T) {
 	t.Parallel()
 
@@ -109,8 +105,8 @@ func TestSPAStub_ContentTypeHTML(t *testing.T) {
 	}
 }
 
-// TestSPAStub_UnknownPathFallsBack verifies that unknown non-API paths
-// still return the stub index.html (SPA fallback logic unchanged in stub mode).
+// TestSPAStub_UnknownPathFallsBack verifies that unknown non-API paths still return the stub index.html (SPA fallback
+// logic unchanged in stub mode).
 func TestSPAStub_UnknownPathFallsBack(t *testing.T) {
 	t.Parallel()
 
@@ -134,9 +130,8 @@ func TestSPAStub_UnknownPathFallsBack(t *testing.T) {
 	}
 }
 
-// TestSPAStub_NonGETRejected verifies that the 405 guard in spaHandler
-// still fires in stub mode — the method gate is in spa.go (untagged), not
-// in the embed/noembed split.
+// TestSPAStub_NonGETRejected verifies that the 405 guard in spaHandler still fires in stub mode — the method gate is in
+// spa.go (untagged), not in the embed/noembed split.
 func TestSPAStub_NonGETRejected(t *testing.T) {
 	t.Parallel()
 
@@ -151,10 +146,9 @@ func TestSPAStub_NonGETRejected(t *testing.T) {
 	}
 }
 
-// TestSPAStub_ImmutableAssetCacheHeader verifies that the stub sentinel asset
-// under /_app/immutable/ is served with Cache-Control: public, max-age=31536000, immutable.
-// This exercises the handler's immutable-path detection on the stub FS
-// (spa_noembed.go includes _app/immutable/stub.js for this purpose).
+// TestSPAStub_ImmutableAssetCacheHeader verifies that the stub sentinel asset under /_app/immutable/ is served with
+// Cache-Control: public, max-age=31536000, immutable. This exercises the handler's immutable-path detection on the stub
+// FS (spa_noembed.go includes _app/immutable/stub.js for this purpose).
 func TestSPAStub_ImmutableAssetCacheHeader(t *testing.T) {
 	t.Parallel()
 

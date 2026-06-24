@@ -10,57 +10,51 @@ import (
 )
 
 type Querier interface {
-	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler self-reschedules a
-	// recurring job after its handler succeeds: resets status to 'pending', sets run_at
-	// to the next occurrence, clears locked_at, and resets attempt to 0. Only updates
-	// rows with status = 'running' (the job the scheduler just leased) to guard against
-	// a future double-processor. A 0-row result (e.g. the row was deleted by Cancel) is
-	// harmless and silently tolerated by the caller.
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler self-reschedules a recurring job after its handler
+	// succeeds: resets status to 'pending', sets run_at to the next occurrence, clears locked_at, and resets
+	// attempt to 0. Only updates rows with status = 'running' (the job the scheduler just leased) to guard against a
+	// future double-processor. A 0-row result (e.g. the row was deleted by Cancel) is harmless and silently
+	// tolerated by the caller.
 	AdvanceRecurringJob(ctx context.Context, arg AdvanceRecurringJobParams) (int64, error)
 	BumpSessionLastUsedByID(ctx context.Context, arg BumpSessionLastUsedByIDParams) (int64, error)
-	// Returns the count of pending_confirmations rows for a given assistant message
-	// that are NOT in 'expired' status (i.e. 'pending', 'approved', or 'denied').
-	// Used to gate MarkMessageAbandoned: the assistant message is only abandoned when
-	// this count is zero (no siblings remain pending or were resolved by the user).
-	// User-scoped: requires user_id to prevent cross-user information leakage.
+	// Returns the count of pending_confirmations rows for a given assistant message that are NOT in 'expired'
+	// status (i.e. 'pending', 'approved', or 'denied'). Used to gate MarkMessageAbandoned: the assistant message is only
+	// abandoned when this count is zero (no siblings remain pending or were resolved by the user). User-scoped:
+	// requires user_id to prevent cross-user information leakage.
 	CountNonExpiredConfirmationsByMessageID(ctx context.Context, arg CountNonExpiredConfirmationsByMessageIDParams) (int64, error)
-	// Count reminders for a user with optional status and due-window filters.
-	// Uses the same filter predicates as ListReminders so the count is always
-	// consistent with what a list query would return. The result is used by the
-	// list_reminders tool to emit a truncation signal when more than 20 match.
-	// MANDATORY user_id predicate enforced by scope guard.
+	// Count reminders for a user with optional status and due-window filters. Uses the same filter predicates as
+	// ListReminders so the count is always consistent with what a list query would return. The result is used by the
+	// list_reminders tool to emit a truncation signal when more than 20 match. MANDATORY user_id predicate enforced by
+	// scope guard.
 	CountReminders(ctx context.Context, arg CountRemindersParams) (int64, error)
 	// Queries for the sessions table.
-	// sessions is per-user data (it has a user_id column and belongs to individual users), but
-	// some queries operate on a token_hash key (the bearer capability itself) rather than a
-	// user_id predicate.  Those queries carry a per-query scopeguard exemption with an explicit
-	// reason.  The bump query is keyed by id+user_id and needs no annotation.
+	// sessions is per-user data (it has a user_id column and belongs to individual users), but some queries operate on a
+	// token_hash key (the bearer capability itself) rather than a user_id predicate.  Those queries carry a per-query
+	// scopeguard exemption with an explicit reason.  The bump query is keyed by id+user_id and needs no annotation.
 	// INSERT is always scopeguard-exempt.
 	//
 	// Parameters use sqlc named params (@name) per the house convention.
 	CreateSession(ctx context.Context, arg CreateSessionParams) error
 	// Queries for the users identity table.
-	// users is system-owned (no user_id column; it is the identity table from which
-	// per-user scope is derived) and is exempt from the scope guard.  All
-	// SELECT/UPDATE operations are therefore permitted without a user_id predicate.
+	// users is system-owned (no user_id column; it is the identity table from which per-user scope is derived) and is
+	// exempt from the scope guard.  All SELECT/UPDATE operations are therefore permitted without a user_id predicate.
 	//
 	// Parameters use sqlc named params (@name) per the house convention.
 	CreateUser(ctx context.Context, arg CreateUserParams) error
-	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler marks an exhausted job as permanently
-	// failed. Sets status='failed', records last_error, and clears locked_at. The row is intentionally
-	// kept (NOT deleted) so operators can inspect dead-lettered jobs. AND status = 'running' ensures
-	// the update only applies to rows the scheduler actually leased, guarding against a future
-	// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
-	// and silently tolerated by the caller.
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler marks an exhausted job as permanently failed. Sets
+	// status='failed', records last_error, and clears locked_at. The row is intentionally kept (NOT deleted) so
+	// operators can inspect dead-lettered jobs. AND status = 'running' ensures the update only applies to rows the
+	// scheduler actually leased, guarding against a future double-processor. A 0-row result (e.g. the row was
+	// already deleted by Cancel) is harmless and silently tolerated by the caller.
 	DeadLetterJob(ctx context.Context, arg DeadLetterJobParams) (int64, error)
-	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler deletes the row after a handler
-	// succeeds. The scheduler owns the row lifecycle; no user_id predicate is applicable.
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler deletes the row after a handler succeeds. The
+	// scheduler owns the row lifecycle; no user_id predicate is applicable.
 	DeleteJob(ctx context.Context, id string) error
 	DeleteOtherSessionsForUser(ctx context.Context, arg DeleteOtherSessionsForUserParams) (int64, error)
 	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
-	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
-	// itself authorizes access; this path is used for single-session logout and best-effort
-	// delete-on-expiry, both keyed by the bearer token before a user_id is available.
+	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that itself authorizes
+	// access; this path is used for single-session logout and best-effort delete-on-expiry, both keyed by the bearer
+	// token before a user_id is available.
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error)
 	DeleteSessionsForUser(ctx context.Context, userID string) (int64, error)
 	// Delete a setting by key.  No-op when the key does not exist.
@@ -69,34 +63,32 @@ type Querier interface {
 	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
 	GetInstance(ctx context.Context) (Instance, error)
 	// Queries for the jobs table (durable scheduler queue).
-	// The scheduler accesses jobs cross-user: the claim selects due jobs across ALL users and
-	// resolves scope per-row. This is intentionally unscoped -- each query below carries an
-	// explicit scopeguard annotation with the reason.
+	// The scheduler accesses jobs cross-user: the claim selects due jobs across ALL users and resolves scope per-row.
+	// This is intentionally unscoped -- each query below carries an explicit scopeguard annotation with the reason.
 	//
 	// Parameters use sqlc named params (@name) per the house convention.
 	//
-	// NOTE: Several operations use raw SQL via s.Writer() rather than sqlc queries, because
-	// sqlc's SQLite ANTLR parser cannot model the required shapes:
+	// NOTE: Several operations use raw SQL via s.Writer() rather than sqlc queries, because sqlc's SQLite ANTLR
+	// parser cannot model the required shapes:
 	//   1. INSERT ... ON CONFLICT(key) DO NOTHING: the upsert clause is not supported.
 	//   2. UPDATE ... WHERE id IN (SELECT ... LIMIT @batch) RETURNING ...: compound UPDATE.
 	// These are executed as s.Writer().ExecContext / QueryContext in internal/scheduler.
-	// scopeguard:allow-unscoped: cross-user lookup by idempotency key. The scheduler resolves
-	// the existing job id when ON CONFLICT(key) DO NOTHING suppresses the insert.
+	// scopeguard:allow-unscoped: cross-user lookup by idempotency key. The scheduler resolves the existing job id
+	// when ON CONFLICT(key) DO NOTHING suppresses the insert.
 	GetJobIDByKey(ctx context.Context, key sql.NullString) (string, error)
-	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler reads the status of any job
-	// regardless of owner to implement Cancel/Reschedule atomicity. Called inside a transaction
-	// on the write pool to provide a consistent read-then-write with no TOCTOU window.
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler reads the status of any job regardless of owner to
+	// implement Cancel/Reschedule atomicity. Called inside a transaction on the write pool to provide a consistent
+	// read-then-write with no TOCTOU window.
 	GetJobStatus(ctx context.Context, id string) (string, error)
 	GetPendingConfirmation(ctx context.Context, arg GetPendingConfirmationParams) (PendingConfirmation, error)
 	GetReminder(ctx context.Context, arg GetReminderParams) (Reminder, error)
-	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
-	// itself authorizes access; a session is resolved before any Principal exists, so no user_id
-	// predicate is possible or meaningful at this lookup stage.
+	// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that itself authorizes
+	// access; a session is resolved before any Principal exists, so no user_id predicate is possible or meaningful at
+	// this lookup stage.
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (Session, error)
-	// scopeguard:allow-unscoped: resolved before any Principal exists, keyed by the bearer
-	// token_hash capability; no user_id predicate is possible at this pre-auth lookup stage.
-	// The JOIN to users retrieves the role in one read so the middleware can construct a
-	// store.Principal without a second DB round-trip.
+	// scopeguard:allow-unscoped: resolved before any Principal exists, keyed by the bearer token_hash capability; no
+	// user_id predicate is possible at this pre-auth lookup stage. The JOIN to users retrieves the role in one read so
+	// the middleware can construct a store.Principal without a second DB round-trip.
 	GetSessionWithUserByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionWithUserByTokenHashRow, error)
 	// Retrieve a single setting row by its exact key.
 	GetSetting(ctx context.Context, settingKey string) (Setting, error)
@@ -104,150 +96,125 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserData(ctx context.Context, arg GetUserDataParams) (UserDatum, error)
 	// Queries for the messages table.
-	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
-	// belongs to the bound Scope. Parameters use sqlc named params (@name).
+	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always belongs to the bound Scope.
+	// Parameters use sqlc named params (@name).
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (InsertMessageRow, error)
 	// Queries for the pending_confirmations table.
-	// Every SELECT/UPDATE includes a user_id predicate so the row always
-	// belongs to the bound Scope. Parameters use sqlc named params (@name).
+	// Every SELECT/UPDATE includes a user_id predicate so the row always belongs to the bound Scope.
+	// Parameters use sqlc named params (@name).
 	InsertPendingConfirmation(ctx context.Context, arg InsertPendingConfirmationParams) (PendingConfirmation, error)
 	// Scoped queries for the reminders table.
-	// reminders is user-owned: every SELECT/UPDATE/DELETE includes a user_id
-	// predicate so rows are always confined to the bound Scope.  The CI scope
-	// guard (TestScopeGuard_RealQueries) enforces this at build time.
+	// reminders is user-owned: every SELECT/UPDATE/DELETE includes a user_id predicate so rows are always
+	// confined to the bound Scope.  The CI scope guard (TestScopeGuard_RealQueries) enforces this at build time.
 	//
 	// Parameters use sqlc named params (@name) per the house convention.
 	InsertReminder(ctx context.Context, arg InsertReminderParams) error
 	// Scoped queries for the user_data exemplar table.
-	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
-	// comes from and is limited to the bound Scope. This pattern is the template
-	// that real domain tables must follow; the CI guard in scopeguard.go enforces
-	// it at build time.
+	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always comes from and is limited to the
+	// bound Scope. This pattern is the template that real domain tables must follow; the CI guard in scopeguard.go
+	// enforces it at build time.
 	//
-	// Parameters use sqlc named params (@name) per the house convention; the
-	// generated Params structs carry typed fields (ID, UserID, Value).
+	// Parameters use sqlc named params (@name) per the house convention; the generated Params structs carry typed
+	// fields (ID, UserID, Value).
 	InsertUserData(ctx context.Context, arg InsertUserDataParams) error
-	// scopeguard:allow-unscoped: the outer SELECT carries c.user_id = @user_id
-	// (conversations is fully scoped), and the messages derived table carries
-	// m.user_id = @user_id independently. The scope guard fails closed on any JOIN
-	// or SELECT-inside-SELECT; this reviewed exemption documents that both target
-	// tables are correctly user-scoped.
+	// scopeguard:allow-unscoped: the outer SELECT carries c.user_id = @user_id (conversations is fully scoped), and the
+	// messages derived table carries m.user_id = @user_id independently. The scope guard fails closed on any JOIN or
+	// SELECT-inside-SELECT; this reviewed exemption documents that both target tables are correctly user-scoped.
 	//
-	// List conversations for a user, keyset-paginated on (updated_at DESC, id DESC)
-	// so the most-recently-active conversation appears first. Fetches limit+1 rows so
-	// the caller can detect whether a next page exists.
+	// List conversations for a user, keyset-paginated on (updated_at DESC, id DESC) so the most-recently-active
+	// conversation appears first. Fetches limit+1 rows so the caller can detect whether a next page exists.
 	//
-	// preview is the conversation's first user message, derived in a LEFT JOIN to a
-	// per-conversation derived table rather than the obvious correlated subquery in
-	// the projection. sqlc's SQLite parser rejects a bound parameter inside a
-	// projection subquery (it substitutes positional placeholders and re-parses, and
-	// such a placeholder inside that subquery is invalid to its grammar), and it has
-	// no window-function support, so a ROW_NUMBER ranking is out too. The derived
-	// table instead groups by conversation and relies on SQLite's documented rule
-	// that, with exactly one MIN in the SELECT, the remaining bare columns are taken
-	// from the row holding that minimum. The MIN key is created_at concatenated with
-	// id; created_at is a fixed-width ISO-8601 string, so that key sorts identically
-	// to ordering by created_at then id, making fm.content the earliest user message
-	// deterministically with ties broken by id, exactly as the previous
-	// ORDER BY m.created_at, m.id LIMIT 1 did. m.user_id = @user_id keeps messages
-	// user-scoped independently of the join (defense in depth; the conversation_id +
-	// user_id FK already ties each message's user_id to its conversation's owner).
+	// preview is the conversation's first user message, derived in a LEFT JOIN to a per-conversation derived table
+	// rather than the obvious correlated subquery in the projection. sqlc's SQLite parser rejects a bound parameter
+	// inside a projection subquery (it substitutes positional placeholders and re-parses, and such a placeholder
+	// inside that subquery is invalid to its grammar), and it has no window-function support, so a ROW_NUMBER
+	// ranking is out too. The derived table instead groups by conversation and relies on SQLite's documented rule
+	// that, with exactly one MIN in the SELECT, the remaining bare columns are taken from the row holding that
+	// minimum. The MIN key is created_at concatenated with id; created_at is a fixed-width ISO-8601 string, so that
+	// key sorts identically to ordering by created_at then id, making fm.content the earliest user message
+	// deterministically with ties broken by id, exactly as the previous ORDER BY m.created_at, m.id LIMIT 1 did.
+	// m.user_id = @user_id keeps messages user-scoped independently of the join (defense in depth; the conversation_id
+	// + user_id FK already ties each message's user_id to its conversation's owner).
 	//
-	// The keyset predicate uses the expanded tuple form (required because sqlc's SQLite
-	// parser does not support row-value syntax): the cursor marks the last seen
-	// (updated_at, id) pair and we skip rows that sort before it in the DESC order.
-	// Equivalent to: (updated_at, id) < (cursor_updated_at, cursor_id) in DESC order,
-	// which expands to:
+	// The keyset predicate uses the expanded tuple form (required because sqlc's SQLite parser does not support
+	// row-value syntax): the cursor marks the last seen (updated_at, id) pair and we skip rows that sort before it in the
+	// DESC order. Equivalent to: (updated_at, id) < (cursor_updated_at, cursor_id) in DESC order, which expands to:
 	//   updated_at < cursor OR (updated_at = cursor AND id < cursor_id).
 	ListConversations(ctx context.Context, arg ListConversationsParams) ([]ListConversationsRow, error)
-	// scopeguard:allow-unscoped: SYSTEM-HOUSEKEEPING cross-user sweep. The scheduler
-	// calls SweepExpiredConfirmations across all users by TTL cutoff, so no single
-	// user_id predicate is applicable. Each returned row carries its own user_id so
-	// the caller can scope per-row operations (abandon message, emit per-user event).
+	// scopeguard:allow-unscoped: SYSTEM-HOUSEKEEPING cross-user sweep. The scheduler calls SweepExpiredConfirmations
+	// across all users by TTL cutoff, so no single user_id predicate is applicable. Each returned row carries its own
+	// user_id so the caller can scope per-row operations (abandon message, emit per-user event).
 	ListLapsedConfirmations(ctx context.Context, now string) ([]PendingConfirmation, error)
 	ListMessages(ctx context.Context, arg ListMessagesParams) ([]ListMessagesRow, error)
-	// List reminders for a user with optional status and due-window filters,
-	// keyset-paginated on (due_at, id).  Fetches limit+1 rows so the caller can
-	// detect whether a next page exists.
+	// List reminders for a user with optional status and due-window filters, keyset-paginated on (due_at, id).  Fetches
+	// limit+1 rows so the caller can detect whether a next page exists.
 	//
-	// Optional filters use sqlc.narg so absent values are NULL and the predicate
-	// becomes a no-op.  The keyset predicate uses the expanded form of the tuple
-	// comparison (due_at, id) > (cursor_due, cursor_id), which is logically
-	// identical: skip rows that sort before the cursor.  Both forms produce the
-	// same result set; the expanded form is required because sqlc's SQLite parser
-	// does not recognise the row-value syntax (col, col) > (?, ?).
+	// Optional filters use sqlc.narg so absent values are NULL and the predicate becomes a no-op.  The keyset
+	// predicate uses the expanded form of the tuple comparison (due_at, id) > (cursor_due, cursor_id), which is
+	// logically identical: skip rows that sort before the cursor.  Both forms produce the same result set; the
+	// expanded form is required because sqlc's SQLite parser does not recognise the row-value syntax (col, col) > (?, ?).
 	//
-	// The query is served by the reminders_user_due index on (user_id, due_at, id).
-	// That index satisfies ORDER BY due_at, id directly from the index-ordered stream
-	// for both the no-status path and the status-filtered path (status is a residual
-	// predicate).  No USE TEMP B-TREE FOR ORDER BY occurs in either case, verified
-	// by EXPLAIN QUERY PLAN in TestListReminders_IndexPlan.
+	// The query is served by the reminders_user_due index on (user_id, due_at, id). That index satisfies
+	// ORDER BY due_at, id directly from the index-ordered stream for both the no-status path and the status-filtered
+	// path (status is a residual predicate).  No USE TEMP B-TREE FOR ORDER BY occurs in either case, verified by
+	// EXPLAIN QUERY PLAN in TestListReminders_IndexPlan.
 	ListReminders(ctx context.Context, arg ListRemindersParams) ([]Reminder, error)
-	// List all settings whose key starts with @prefix, ordered by key. The caller
-	// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
-	// those escapes literal, so a prefix containing '_' or '%' matches literally
-	// rather than as a wildcard.
+	// List all settings whose key starts with @prefix, ordered by key. The caller must escape LIKE metacharacters
+	// (\, %, _) in @prefix; ESCAPE '\' then makes those escapes literal, so a prefix containing '_' or '%' matches
+	// literally rather than as a wildcard.
 	ListSettingsByPrefix(ctx context.Context, prefix sql.NullString) ([]Setting, error)
 	ListUserData(ctx context.Context, userID string) ([]UserDatum, error)
-	// Atomic CAS: transitions a pending row to expired only when still pending.
-	// Used by both the lazy check (user-scoped, includes user_id) and the sweep
-	// (system-scope, but calls this per-row with the row's user_id from ListLapsedConfirmations).
+	// Atomic CAS: transitions a pending row to expired only when still pending. Used by both the lazy check
+	// (user-scoped, includes user_id) and the sweep (system-scope, but calls this per-row with the row's user_id from
+	// ListLapsedConfirmations).
 	MarkConfirmationExpired(ctx context.Context, arg MarkConfirmationExpiredParams) (int64, error)
 	MarkMessageAbandoned(ctx context.Context, arg MarkMessageAbandonedParams) (int64, error)
-	// scopeguard:allow-unscoped: system housekeeping; the scheduler purges across all users by
-	// TTL cutoffs (idle and absolute), so there is no meaningful user context available and a
-	// user_id predicate would prevent cross-user expiry from working.
+	// scopeguard:allow-unscoped: system housekeeping; the scheduler purges across all users by TTL cutoffs (idle and
+	// absolute), so there is no meaningful user context available and a user_id predicate would prevent cross-user
+	// expiry from working.
 	PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error)
-	// scopeguard:allow-unscoped: SYSTEM ENGINE -- cross-user reclaim sweep. The scheduler reclaims
-	// running rows whose locked_at is older than the lease threshold, returning them to pending so
-	// they can be re-leased. This fires on boot (to recover rows orphaned by a prior process crash)
-	// and on each poll tick (to recover wedged-but-alive workers that ignore cancellation). The
-	// locked_at comparison uses RFC3339 UTC strings, which are lexicographically ordered, matching
-	// the pattern used by the claim query's run_at comparison. attempt is deliberately NOT reset:
-	// the retry ceiling must still apply to reclaimed jobs.
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- cross-user reclaim sweep. The scheduler reclaims running rows
+	// whose locked_at is older than the lease threshold, returning them to pending so they can be re-leased. This
+	// fires on boot (to recover rows orphaned by a prior process crash) and on each poll tick (to recover
+	// wedged-but-alive workers that ignore cancellation). The locked_at comparison uses RFC3339 UTC strings, which are
+	// lexicographically ordered, matching the pattern used by the claim query's run_at comparison. attempt is
+	// deliberately NOT reset: the retry ceiling must still apply to reclaimed jobs.
 	ReclaimStaleJobs(ctx context.Context, arg ReclaimStaleJobsParams) (int64, error)
-	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler moves run_at for any pending job.
-	// Only updates rows with status='pending'; returns 0 rows affected when the job is not pending
-	// (running or absent today; 'failed'/dead-letter is a later slice). The caller interprets a
-	// non-pending status as ErrJobRunning or ErrJobNotFound
-	// after reading the status inside the enclosing transaction.
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler moves run_at for any pending job. Only updates rows
+	// with status='pending'; returns 0 rows affected when the job is not pending (running or absent today;
+	// 'failed'/dead-letter is a later slice). The caller interprets a non-pending status as ErrJobRunning or
+	// ErrJobNotFound after reading the status inside the enclosing transaction.
 	RescheduleJob(ctx context.Context, arg RescheduleJobParams) (int64, error)
-	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler re-arms a failed job row for retry
-	// with a backoff run_at. Sets status='pending', clears locked_at, and advances run_at so the
-	// job re-enters the claim queue at the calculated backoff time. AND status = 'running' ensures
-	// the update only applies to rows the scheduler actually leased, guarding against a future
-	// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
-	// and silently tolerated by the caller.
+	// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler re-arms a failed job row for retry with a backoff
+	// run_at. Sets status='pending', clears locked_at, and advances run_at so the job re-enters the claim queue at
+	// the calculated backoff time. AND status = 'running' ensures the update only applies to rows the scheduler
+	// actually leased, guarding against a future double-processor. A 0-row result (e.g. the row was already
+	// deleted by Cancel) is harmless and silently tolerated by the caller.
 	RetryJob(ctx context.Context, arg RetryJobParams) (int64, error)
 	SetReminderFireJobID(ctx context.Context, arg SetReminderFireJobIDParams) (int64, error)
 	StampFiredAutoComplete(ctx context.Context, arg StampFiredAutoCompleteParams) (int64, error)
 	StampFiredKeepActive(ctx context.Context, arg StampFiredKeepActiveParams) (int64, error)
-	// Advances a recurring reminder after each fire: stamps last_fired_at, advances
-	// due_at to the next occurrence, and keeps status=active. Only the fire handler
-	// calls this; UpdateReminder intentionally excludes last_fired_at.
+	// Advances a recurring reminder after each fire: stamps last_fired_at, advances due_at to the next occurrence, and
+	// keeps status=active. Only the fire handler calls this; UpdateReminder intentionally excludes last_fired_at.
 	StampFiredRecurring(ctx context.Context, arg StampFiredRecurringParams) (int64, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePendingConfirmationStatusIfCurrent(ctx context.Context, arg UpdatePendingConfirmationStatusIfCurrentParams) (int64, error)
-	// Writes all mutable columns for a single reminder row.
-	// last_fired_at is intentionally excluded: the fire handler is its sole writer.
-	// fire_job_id is included so Service owns all fire-job lifecycle transitions.
+	// Writes all mutable columns for a single reminder row. last_fired_at is intentionally excluded: the fire
+	// handler is its sole writer. fire_job_id is included so Service owns all fire-job lifecycle transitions.
 	// MANDATORY user_id predicate enforced by scope guard.
 	UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (int64, error)
 	// Queries for the conversations table.
-	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
-	// belongs to the bound Scope. Parameters use sqlc named params (@name).
-	// Insert-if-new only. The store wrapper (conversations.go) enforces ownership by
-	// calling GetConversation immediately after: if the INSERT no-opped because the id
-	// belongs to another user, GetConversation (user-scoped) returns sql.ErrNoRows,
-	// which is mapped to ErrConversationNotOwned. When the caller re-posts to their
-	// own conversation, GetConversation finds the row and TouchConversation bumps
-	// updated_at. This three-step protocol is safe because the write pool is capped at
-	// one connection, serialising all writes and eliminating TOCTOU races.
+	// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always belongs to the bound Scope.
+	// Parameters use sqlc named params (@name).
+	// Insert-if-new only. The store wrapper (conversations.go) enforces ownership by calling GetConversation
+	// immediately after: if the INSERT no-opped because the id belongs to another user, GetConversation (user-scoped)
+	// returns sql.ErrNoRows, which is mapped to ErrConversationNotOwned. When the caller re-posts to their own
+	// conversation, GetConversation finds the row and TouchConversation bumps updated_at. This three-step protocol is
+	// safe because the write pool is capped at one connection, serialising all writes and eliminating TOCTOU races.
 	UpsertConversation(ctx context.Context, arg UpsertConversationParams) error
-	// Upsert a setting by key.  Inserts a new row or replaces value and
-	// updated_at when the key already exists.
+	// Upsert a setting by key.  Inserts a new row or replaces value and updated_at when the key already exists.
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error
 }
 

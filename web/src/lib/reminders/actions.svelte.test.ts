@@ -1,9 +1,8 @@
 // Tests for reminder optimistic-update actions (quick-add, complete, edit).
 //
 // Rune environment: node + Svelte compiler (vitest project "runes").
-// Tests the apply/confirm/revert steps of each optimistic flow against the real
-// reminders store, with a mocked Api. This is the highest-value test target per
-// the issue: the reconcile logic must be deterministic and proven correct.
+// Tests the apply/confirm/revert steps of each optimistic flow against the real reminders store, with a mocked Api.
+// This is the highest-value test target per the issue: the reconcile logic must be deterministic and proven correct.
 //
 // Pattern for each flow:
 //   1. Setup initial store state.
@@ -248,8 +247,8 @@ describe("buildNextDueAt", () => {
   });
 
   it("returns a past-ISO string for an empty input (fallback)", () => {
-    // An empty string cannot produce a valid date — we return an empty string
-    // which callers treat as "no dueAt provided" (caller validates before submit)
+    // An empty string cannot produce a valid date — we return an empty string which callers treat as "no dueAt
+    // provided" (caller validates before submit)
     const result = buildNextDueAt("");
     expect(result).toBe("");
   });
@@ -288,10 +287,9 @@ describe("dueAtToLocal", () => {
   });
 
   it("round-trips with buildNextDueAt: dueAtToLocal(buildNextDueAt(x)) === x", () => {
-    // A well-formed datetime-local value with zero seconds/millis (so no
-    // information is lost in the round-trip — the input is already at minute
-    // precision, which is what buildNextDueAt → toISOString → dueAtToLocal
-    // preserves when reconstructed in local time).
+    // A well-formed datetime-local value with zero seconds/millis (so no information is lost in the round-trip — the
+    // input is already at minute precision, which is what buildNextDueAt → toISOString → dueAtToLocal preserves when
+    // reconstructed in local time).
     const input = "2030-06-15T09:00";
     const utc = buildNextDueAt(input);
     expect(utc).not.toBe("");
@@ -457,16 +455,15 @@ describe("makeReminderPatchBody", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Fix #4: dueAt comparison must use instant equality (getTime()), not raw
-  // string equality. The server stores second-truncated RFC3339 ("...:00Z")
-  // while buildNextDueAt produces full ISO ("...:00.000Z"). These represent
-  // the same instant but differ as strings, causing a spurious patch on every
-  // save even when the user did not change the due date.
+  // Fix #4: dueAt comparison must use instant equality (getTime()), not raw string equality. The server stores
+  // second-truncated RFC3339 ("...:00Z") while buildNextDueAt produces full ISO ("...:00.000Z"). These represent the
+  // same instant but differ as strings, causing a spurious patch on every save even when the user did not change the
+  // due date.
   // ---------------------------------------------------------------------------
 
   it("does NOT include dueAt when server RFC3339 and client ISO represent the same instant", () => {
-    // Server stores second-truncated RFC3339; client holds .toISOString() form.
-    // Both represent 2030-01-01 12:00:00 UTC but differ as strings.
+    // Server stores second-truncated RFC3339; client holds .toISOString() form. Both represent 2030-01-01 12:00:00 UTC
+    // but differ as strings.
     const serverStored = "2030-01-01T12:00:00Z"; // e.g. what the server returns
     const clientForm = "2030-01-01T12:00:00.000Z"; // what new Date(serverStored).toISOString() produces
     const original = makeReminder({ id: "p-dueAt-same-instant", dueAt: serverStored });

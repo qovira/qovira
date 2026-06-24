@@ -1,8 +1,7 @@
 package harness
 
-// prompt_window_test.go — white-box unit tests for the system-prompt composition
-// and sliding-window trim logic. These test unexported functions directly and are
-// therefore in package harness (not harness_test).
+// prompt_window_test.go — white-box unit tests for the system-prompt composition and sliding-window trim logic.
+// These test unexported functions directly and are therefore in package harness (not harness_test).
 
 import (
 	"encoding/json"
@@ -83,8 +82,8 @@ func TestSegmentGroups_SingleGroup(t *testing.T) {
 func TestSegmentGroups_WithToolCalls(t *testing.T) {
 	t.Parallel()
 
-	// user → assistant(tool_calls) → tool → assistant is ONE group
-	// (everything from the first user until the next user).
+	// user → assistant(tool_calls) → tool → assistant is ONE group (everything from the first user until the next
+	// user).
 	msgs := []gateway.Message{
 		{Role: "user", Content: "use the tool"},
 		{Role: "assistant", Content: "", ToolCalls: []gateway.ToolCall{{ID: "c1", Name: "t", Arguments: json.RawMessage(`{}`)}}},
@@ -241,8 +240,7 @@ func TestTrimToWindowBudget_NeverOrphansToolGroup(t *testing.T) {
 	// Budget = 5 tokens — much less than group 0 uses, so group 0 must be dropped.
 	result := trimToWindowBudget(msgs, 5, 0)
 
-	// BOUNDARY RULE: no tool message should be in the result without its
-	// matching assistant tool_calls message.
+	// BOUNDARY RULE: no tool message should be in the result without its matching assistant tool_calls message.
 	for i, m := range result {
 		if m.Role != "tool" {
 			continue
@@ -307,8 +305,7 @@ func TestBuildSystemPrompt_ContainsRequiredFields(t *testing.T) {
 
 	prompt := buildSystemPrompt(fixedNow, profile)
 
-	// AC-1: must contain current time in the user's IANA timezone.
-	// New York is UTC-4 in June, so 10:30 UTC = 06:30 EDT.
+	// AC-1: must contain current time in the user's IANA timezone. New York is UTC-4 in June, so 10:30 UTC = 06:30 EDT.
 	if !strings.Contains(prompt, "2026") {
 		t.Error("system prompt does not contain current year")
 	}
@@ -335,15 +332,14 @@ func TestBuildSystemPrompt_ContainsRequiredFields(t *testing.T) {
 		t.Fatal("memory slot marker not found")
 	}
 	afterMarker := after
-	// The section after the marker should start immediately with whitespace/newline
-	// — no actual content injected in v0.1.
+	// The section after the marker should start immediately with whitespace/newline — no actual content injected in
+	// v0.1.
 	trimmed := strings.TrimSpace(afterMarker)
-	// trimmed may be empty or start a new section header; it must NOT start with
-	// content that looks like memory entries (we consider anything not a section
-	// header to be injected content).
+	// trimmed may be empty or start a new section header; it must NOT start with content that looks like memory
+	// entries (we consider anything not a section header to be injected content).
 	if len(trimmed) > 0 && !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "---") {
-		// Accept that there might be a closing section indicator — just ensure
-		// there's no substantial injected content on the line directly after the marker.
+		// Accept that there might be a closing section indicator — just ensure there's no substantial injected content
+		// on the line directly after the marker.
 		firstLine := strings.SplitN(trimmed, "\n", 2)[0]
 		if len(strings.TrimSpace(firstLine)) > 0 &&
 			!strings.HasPrefix(firstLine, "#") &&
@@ -353,22 +349,19 @@ func TestBuildSystemPrompt_ContainsRequiredFields(t *testing.T) {
 	}
 }
 
-// TestTrimToWindowBudget_DropsLeadingNonUserGroup verifies that when the
-// trimmed window starts with a non-user group (an orphaned assistant/tool run
-// with no user message anywhere in history), trimToWindowBudget drops those
-// leading messages so the returned window always starts with a user-role
-// message (or is empty).
+// TestTrimToWindowBudget_DropsLeadingNonUserGroup verifies that when the trimmed window starts with a non-user
+// group (an orphaned assistant/tool run with no user message anywhere in history), trimToWindowBudget drops those
+// leading messages so the returned window always starts with a user-role message (or is empty).
 //
-// This covers the case the doc comment calls "structurally impossible" but
-// which can occur when the ENTIRE persisted history is a leading assistant/tool
-// sequence (e.g. a legacy conversation that begins with an assistant message).
+// This covers the case the doc comment calls "structurally impossible" but which can occur when the ENTIRE
+// persisted history is a leading assistant/tool sequence (e.g. a legacy conversation that begins with an assistant
+// message).
 func TestTrimToWindowBudget_DropsLeadingNonUserGroup(t *testing.T) {
 	t.Parallel()
 
-	// Case 1: history is ONLY [assistant(tool_calls), tool] — no user at all.
-	// segmentGroups puts everything in ONE group (no user to start a new one).
-	// trimToWindowBudget keeps that single group (the newest) as-is today —
-	// the fix must then drop it because it doesn't start with "user".
+	// Case 1: history is ONLY [assistant(tool_calls), tool] — no user at all. segmentGroups puts everything in ONE
+	// group (no user to start a new one). trimToWindowBudget keeps that single group (the newest) as-is today — the
+	// fix must then drop it because it doesn't start with "user".
 	tcs := []gateway.ToolCall{{ID: "tc1", Name: "t", Arguments: json.RawMessage(`{}`)}}
 	onlyAssistant := []gateway.Message{
 		{Role: "assistant", Content: "tool round", ToolCalls: tcs},
@@ -381,9 +374,8 @@ func TestTrimToWindowBudget_DropsLeadingNonUserGroup(t *testing.T) {
 			got[0].Role, roleNames(got))
 	}
 
-	// Case 2: [assistant, tool, user, assistant] — the first group is the
-	// orphaned assistant/tool prefix; the second group starts with user.
-	// After trimming to budget that fits both groups the result is returned
+	// Case 2: [assistant, tool, user, assistant] — the first group is the orphaned assistant/tool prefix; the
+	// second group starts with user. After trimming to budget that fits both groups the result is returned
 	// verbatim; the fix must drop the leading non-user group.
 	mixed := []gateway.Message{
 		{Role: "assistant", Content: "preamble"},

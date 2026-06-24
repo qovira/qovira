@@ -1,16 +1,15 @@
 // SSE client — one persistent connection per session.
 //
-// Opens a fetch-based ReadableStream connection to /events (root path, same-origin
-// session cookie). Fans events to the typed router. Reconnects with exponential
-// backoff on connection drops. On every (re)connect, reconciles the visible live
-// collections by refetching from the REST API.
+// Opens a fetch-based ReadableStream connection to /events (root path, same-origin session cookie). Fans events to the
+// typed router. Reconnects with exponential backoff on connection drops. On every (re)connect, reconciles the visible
+// live collections by refetching from the REST API.
 //
 // Lifecycle:
 //   openSseConnection()  — called after session is confirmed (onSessionReady hook)
 //   closeSseConnection() — called on logout / 401 (onTearDown hook)
 //
-// The SSE endpoint is /events (root path, NOT /api/v1/events). Auth is ambient
-// cookie (HttpOnly session cookie). No Authorization header is needed or sent.
+// The SSE endpoint is /events (root path, NOT /api/v1/events). Auth is ambient cookie (HttpOnly session cookie). No
+// Authorization header is needed or sent.
 //
 // Backoff: 500ms initial, 2× per attempt, max 30s, jittered ±20% (clamped after jitter).
 
@@ -57,9 +56,8 @@ let _active = false;
 
 // ---------------------------------------------------------------------------
 // Handler bag wired to stores
-// The bag is constructed once at open time; all mutation flows through it.
-// Stub handlers for events owned by future surface slices are intentionally
-// empty; eslint-disable comments suppress the no-empty-function rule on them.
+// The bag is constructed once at open time; all mutation flows through it. Stub handlers for events owned by future
+// surface slices are intentionally empty; eslint-disable comments suppress the no-empty-function rule on them.
 // ---------------------------------------------------------------------------
 
 /** Exported for unit-testing the reminder.fired dispatch seam. */
@@ -74,11 +72,9 @@ export function makeHandlers(): RouterHandlers {
         }
         return;
       }
-      // reminder.fired carries FiredEventPayload (no full Reminder body).
-      // Raise an in-app toast and (when permitted) an OS notification.
-      // Store patching for the reminders list is handled by the reminders-live-list
-      // issue; this branch is additive — do not remove the created/updated/completed/deleted
-      // handling below.
+      // reminder.fired carries FiredEventPayload (no full Reminder body). Raise an in-app toast and (when permitted) an
+      // OS notification. Store patching for the reminders list is handled by the reminders-live-list issue; this
+      // branch is additive — do not remove the created/updated/completed/deleted handling below.
       if (eventName === "reminder.fired") {
         const fp = payload as { reminderId: string; title: string; dueAt: string; firedAt: string };
         if (
@@ -99,8 +95,8 @@ export function makeHandlers(): RouterHandlers {
     },
 
     onMessageDelta(conversationId: string, text: string): void {
-      // Only apply if this event belongs to the currently-open conversation.
-      // The server sends no messageId on deltas — only conversationId + text.
+      // Only apply if this event belongs to the currently-open conversation. The server sends no messageId on deltas
+      // — only conversationId + text.
       if (conversationId !== getActiveConversationId()) {
         return;
       }
@@ -112,22 +108,20 @@ export function makeHandlers(): RouterHandlers {
       if (conversationId !== getActiveConversationId()) {
         return;
       }
-      // CompletedPayload carries messageId and finishReason; no authoritative content
-      // field — the server does not re-send full content on completed. Keep delta text.
+      // CompletedPayload carries messageId and finishReason; no authoritative content field — the server does not
+      // re-send full content on completed. Keep delta text.
       finalizeStreamingMessage(messageId, undefined, finishReason);
-      // Retag all tool-call entries from the streaming sentinel to the real messageId so
-      // the cards remain visible and clickable after the streaming slot finalizes.
+      // Retag all tool-call entries from the streaming sentinel to the real messageId so the cards remain visible and
+      // clickable after the streaming slot finalizes.
       finalizeToolCallsForMessage(STREAMING_SENTINEL_ID, messageId);
-      // Retag confirmation cards from the streaming sentinel to the real messageId
-      // so the cards persist inline under the finalized assistant turn.
+      // Retag confirmation cards from the streaming sentinel to the real messageId so the cards persist inline under
+      // the finalized assistant turn.
       finalizeConfirmationsForMessage(STREAMING_SENTINEL_ID, messageId);
-      // Heal any deltas the client missed. The completed assistant message is now
-      // persisted server-side, so refetch the conversation and replace history with
-      // server truth. This is what makes a mid-turn reload lose nothing: after a
-      // reload the new SSE connection misses the deltas already streamed to the old
-      // connection, leaving only a partial slot — the reconcile restores the full
-      // text (reload-resilience, journey 5). Fire-and-forget: a failure here must
-      // not disrupt the live stream; reconcileConversationHistory swallows its own errors.
+      // Heal any deltas the client missed. The completed assistant message is now persisted server-side, so refetch the
+      // conversation and replace history with server truth. This is what makes a mid-turn reload lose nothing: after a
+      // reload the new SSE connection misses the deltas already streamed to the old connection, leaving only a partial
+      // slot — the reconcile restores the full text (reload-resilience, journey 5). Fire-and-forget: a failure here
+      // must not disrupt the live stream; reconcileConversationHistory swallows its own errors.
       void reconcileConversationHistory();
     },
 
@@ -158,9 +152,8 @@ export function makeHandlers(): RouterHandlers {
       if (payload.conversationId !== getActiveConversationId()) {
         return;
       }
-      // A destructive tool can suspend a turn that streamed no preceding text, so
-      // open an in-flight assistant slot if none exists — the card (tagged with
-      // STREAMING_SENTINEL_ID) needs a rendered message to hang under.
+      // A destructive tool can suspend a turn that streamed no preceding text, so open an in-flight assistant slot if
+      // none exists — the card (tagged with STREAMING_SENTINEL_ID) needs a rendered message to hang under.
       ensureStreamingSlot();
       confirmationRequired(payload);
     },
@@ -182,8 +175,8 @@ export function makeHandlers(): RouterHandlers {
 // ---------------------------------------------------------------------------
 // Reconcile — refetch live collections to heal a connection gap
 //
-// Runs on every successful (re)connect. A transient error here must NOT abort
-// the live SSE stream — log/swallow so the stream continues.
+// Runs on every successful (re)connect. A transient error here must NOT abort the live SSE stream — log/swallow so the
+// stream continues.
 // ---------------------------------------------------------------------------
 
 async function reconcile(): Promise<void> {
@@ -211,8 +204,8 @@ async function reconcile(): Promise<void> {
       //     also covers problem+json errors (thrown by the middleware and wrapped
       //     into { error: ProblemError } by the `wrap()` helper in api/index.ts).
       //
-      // Both paths must bail so a transient server error never silently wipes
-      // the reminders store. Guard on BOTH to cover both openapi-fetch branches.
+      // Both paths must bail so a transient server error never silently wipes the reminders store. Guard on BOTH to
+      // cover both openapi-fetch branches.
       if (result.error !== undefined || !result.response.ok) {
         console.warn("[sse] reconcile: reminders page error", result.error ?? result.response.status);
         return;
@@ -242,12 +235,11 @@ async function reconcile(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// reconcileConversationHistory — refetch the open conversation from the server
-// and replace the local history with server truth.
+// reconcileConversationHistory — refetch the open conversation from the server and replace the local history with
+// server truth.
 //
-// Used on (re)connect (gap healing) and on message.completed (to recover any
-// deltas missed when a mid-turn reload reconnected after early deltas had
-// already streamed — reload-resilience). A no-op when no conversation is open.
+// Used on (re)connect (gap healing) and on message.completed (to recover any deltas missed when a mid-turn reload
+// reconnected after early deltas had already streamed — reload-resilience). A no-op when no conversation is open.
 // Swallows its own errors so a transient failure never disrupts the live stream.
 // ---------------------------------------------------------------------------
 
@@ -288,15 +280,13 @@ export async function readStream(
         break;
       }
 
-      // Normalize CRLF → LF before boundary scanning so that a spec-compliant
-      // proxy rewriting to CRLF (\r\n\r\n) doesn't prevent frame dispatch.
-      // parser.ts already does this normalization internally; mirror it here so
-      // the frame-boundary scan (lastIndexOf("\n\n")) and the remainder slice
-      // both operate on a consistent LF-only buffer.
+      // Normalize CRLF → LF before boundary scanning so that a spec-compliant proxy rewriting to CRLF (\r\n\r\n)
+      // doesn't prevent frame dispatch. parser.ts already does this normalization internally; mirror it here so the
+      // frame-boundary scan (lastIndexOf("\n\n")) and the remainder slice both operate on a consistent LF-only buffer.
       buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
-      // Extract complete frames from the buffer. After parsing, retain only
-      // the portion after the last "\n\n" — that is the incomplete frame tail.
+      // Extract complete frames from the buffer. After parsing, retain only the portion after the last "\n\n" — that
+      // is the incomplete frame tail.
       const lastDoubleLF = buffer.lastIndexOf("\n\n");
       if (lastDoubleLF !== -1) {
         const completeChunk = buffer.slice(0, lastDoubleLF + 2);
@@ -337,11 +327,10 @@ async function connectionLoop(): Promise<void> {
 
       if (!response.ok) {
         if (response.status === 401) {
-          // 401 means the session has been revoked on the server. Deactivate the
-          // loop and invoke the centralised unauthorised handler — the same
-          // authority the REST path uses — so the session is torn down and the
-          // user is redirected to /login. The bare fetch() here bypasses
-          // openapi-fetch middleware, so we call the seam explicitly.
+          // 401 means the session has been revoked on the server. Deactivate the loop and invoke the centralised
+          // unauthorised handler — the same authority the REST path uses — so the session is torn down and the user is
+          // redirected to /login. The bare fetch() here bypasses openapi-fetch middleware, so we call the seam
+          // explicitly.
           _active = false;
           await Promise.resolve(callUnauthorizedHandler());
           return;
@@ -354,12 +343,12 @@ async function connectionLoop(): Promise<void> {
         throw new Error("SSE response has no body");
       }
 
-      // Connection established — reset backoff immediately on a successful connection,
-      // BEFORE reconcile so a transient reconcile failure never inflates the backoff.
+      // Connection established — reset backoff immediately on a successful connection, BEFORE reconcile so a transient
+      // reconcile failure never inflates the backoff.
       backoffMs = BACKOFF_INITIAL_MS;
 
-      // Reconcile live collections. A failure here must NOT abort the live stream —
-      // reconcile() swallows its own errors.
+      // Reconcile live collections. A failure here must NOT abort the live stream — reconcile() swallows its own
+      // errors.
       await reconcile();
 
       // Consume the stream until it closes or the signal is aborted.
@@ -413,9 +402,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Open the SSE connection and begin the reconnect loop.
- * Called once after the session is confirmed (onSessionReady hook).
- * No-op if already open.
+ * Open the SSE connection and begin the reconnect loop. Called once after the session is confirmed (onSessionReady
+ * hook). No-op if already open.
  */
 export function openSseConnection(): void {
   if (_active) {
@@ -427,8 +415,7 @@ export function openSseConnection(): void {
 }
 
 /**
- * Close the SSE connection and stop the reconnect loop.
- * Called on logout or when a 401 is received (onTearDown hook).
+ * Close the SSE connection and stop the reconnect loop. Called on logout or when a 401 is received (onTearDown hook).
  * Safe to call when already closed.
  */
 export function closeSseConnection(): void {

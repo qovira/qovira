@@ -1,7 +1,7 @@
 // ConversationSwitcher stories — replaces the hand-copied loadPage state machine.
 //
-// Renders the REAL ConversationSwitcher component with Api.GET mocked to return
-// controlled fixtures for each scenario. Asserts against the rendered DOM:
+// Renders the REAL ConversationSwitcher component with Api.GET mocked to return controlled fixtures for each
+// scenario. Asserts against the rendered DOM:
 //
 //   SuccessWithList   — API returns conversations → list renders
 //   EmptyState        — API returns zero rows → empty-state text, NOT error-state
@@ -9,9 +9,8 @@
 //   LoadMore          — second page appends to list (handleLoadMore guard)
 //   ResetOnOpen       — closing and re-opening the panel clears state and reloads
 //
-// CSF 3 format (not Svelte CSF) because vi.mock requires the module-level hoisting
-// available in a plain .ts story file; Svelte CSF's <script module> block
-// doesn't support vi.mock hoisting.
+// CSF 3 format (not Svelte CSF) because vi.mock requires the module-level hoisting available in a plain .ts
+// story file; Svelte CSF's <script module> block doesn't support vi.mock hoisting.
 
 import { vi } from "vitest";
 import type { Meta, StoryObj } from "@storybook/sveltekit";
@@ -21,8 +20,8 @@ import ConversationSwitcher from "./ConversationSwitcher.svelte";
 
 // ---------------------------------------------------------------------------
 // Module mocks — hoisted above all imports by Vitest.
-// We mock Api so the component doesn't make real network calls.
-// We also mock the stores the component calls on close so they don't error.
+// We mock Api so the component doesn't make real network calls. We also mock the stores the component calls on
+// close so they don't error.
 // ---------------------------------------------------------------------------
 
 vi.mock("$lib/api/index.js", async (importActual) => {
@@ -222,16 +221,13 @@ export const LoadMore: Story = {
 };
 
 // ---------------------------------------------------------------------------
-// InitialLoadOnOpen — the $effect fires once when open=true on mount and loads
-// the first page. Verifies the happy path: panel mounts open → GET called once
-// → list renders.
+// InitialLoadOnOpen — the $effect fires once when open=true on mount and loads the first page. Verifies the
+// happy path: panel mounts open → GET called once → list renders.
 //
-// NOTE: This story does NOT exercise the reset-on-open path (clearing
-// conversations/nextCursor/hasMore before the reload, lines 73–76 of
-// ConversationSwitcher.svelte). Testing reset-on-open requires driving
-// open=false→open=true via a controlled parent; that is covered by integration
-// tests rather than a Storybook play function, which cannot rerender the
-// component by toggling args.open mid-play in the current setup.
+// NOTE: This story does NOT exercise the reset-on-open path (clearing conversations/nextCursor/hasMore before
+// the reload, lines 73–76 of ConversationSwitcher.svelte). Testing reset-on-open requires driving
+// open=false→open=true via a controlled parent; that is covered by integration tests rather than a Storybook
+// play function, which cannot rerender the component by toggling args.open mid-play in the current setup.
 // ---------------------------------------------------------------------------
 export const InitialLoadOnOpen: Story = {
   beforeEach: () => {
@@ -249,8 +245,8 @@ export const InitialLoadOnOpen: Story = {
 };
 
 // ---------------------------------------------------------------------------
-// LoadMoreGuard — clicking Load More a second time while in-flight is ignored
-// (handleLoadMore guard: nextCursor === null || loadingMore)
+// LoadMoreGuard — clicking Load More a second time while in-flight is ignored (handleLoadMore guard:
+// nextCursor === null || loadingMore)
 // ---------------------------------------------------------------------------
 export const LoadMoreGuard: Story = {
   beforeEach: () => {
@@ -290,9 +286,9 @@ export const LoadMoreGuard: Story = {
     // Api.GET should have been called exactly twice total (first page + one load-more).
     await expect(vi.mocked(Api.GET)).toHaveBeenCalledTimes(2);
 
-    // Now attempt a concurrent second click via fireEvent to bypass the disabled
-    // attribute and reach handleLoadMore() directly — the JS guard
-    // `if (nextCursor === null || loadingMore) return;` must prevent a third GET call.
+    // Now attempt a concurrent second click via fireEvent to bypass the disabled attribute and reach
+    // handleLoadMore() directly — the JS guard `if (nextCursor === null || loadingMore) return;` must prevent
+    // a third GET call.
     await fireEvent.click(loadMoreBtn);
 
     // Call count must still be 2 — the loadingMore guard returned early.

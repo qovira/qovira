@@ -1,8 +1,7 @@
 package httpx_test
 
-// Tests for spaHandler behaviour that apply regardless of build tag (i.e. the
-// method gate in spa.go, which is untagged). Build-tag-specific tests live in
-// spa_stub_test.go (!embed_spa) or the embed variant.
+// Tests for spaHandler behaviour that apply regardless of build tag (i.e. the method gate in spa.go, which is
+// untagged). Build-tag-specific tests live in spa_stub_test.go (!embed_spa) or the embed variant.
 
 import (
 	"encoding/json"
@@ -12,10 +11,9 @@ import (
 	"testing"
 )
 
-// TestSPAFallback_405IsProblemJSON verifies that a non-GET/HEAD request to an
-// unknown non-API path returns a problem+json 405 response, not the plain-text
-// "method not allowed" body that http.Error would produce. The error shape must
-// be consistent with the rest of the API's problem+json contract.
+// TestSPAFallback_405IsProblemJSON verifies that a non-GET/HEAD request to an unknown non-API path returns a
+// problem+json 405 response, not the plain-text "method not allowed" body that http.Error would produce. The error
+// shape must be consistent with the rest of the API's problem+json contract.
 func TestSPAFallback_405IsProblemJSON(t *testing.T) {
 	t.Parallel()
 

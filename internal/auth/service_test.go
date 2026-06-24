@@ -16,9 +16,8 @@ import (
 
 const serviceTestKey = "a-sufficiently-long-passphrase-for-sqlcipher"
 
-// fastParams is a low-cost set of argon2id parameters suitable for tests. The
-// memory and iteration values are intentionally minimal so hashing is fast while
-// still exercising the real code path.
+// fastParams is a low-cost set of argon2id parameters suitable for tests. The memory and iteration values are
+// intentionally minimal so hashing is fast while still exercising the real code path.
 var fastParams = auth.Params{
 	Memory:  64,
 	Time:    1,
@@ -27,14 +26,12 @@ var fastParams = auth.Params{
 	SaltLen: 16,
 }
 
-// fastPolicy is a narrow policy used for most service tests: min 8, max 64
-// runes — avoids generating very long test passwords while still exercising
-// the policy.
+// fastPolicy is a narrow policy used for most service tests: min 8, max 64 runes — avoids generating very long
+// test passwords while still exercising the policy.
 var fastPolicy = auth.Policy{MinLen: 8, MaxLen: 64}
 
-// openServiceStore opens a migrated SQLCipher store in a temp directory and
-// returns both the store and a ready-to-use Service.  Cleanup is registered
-// with t.Cleanup.
+// openServiceStore opens a migrated SQLCipher store in a temp directory and returns both the store and a
+// ready-to-use Service.  Cleanup is registered with t.Cleanup.
 func openServiceStore(t *testing.T) (*store.Store, *auth.Service) {
 	t.Helper()
 	dir := t.TempDir()
@@ -62,8 +59,7 @@ func openServiceStore(t *testing.T) (*store.Store, *auth.Service) {
 	return s, svc
 }
 
-// newUser returns a valid NewUser for the given email, filling in sensible
-// defaults for every other field.
+// newUser returns a valid NewUser for the given email, filling in sensible defaults for every other field.
 func newUser(email string) auth.NewUser {
 	return auth.NewUser{
 		Email:       email,
@@ -78,10 +74,9 @@ func newUser(email string) auth.NewUser {
 
 // ── AC1: Migration creates users table ───────────────────────────────────────
 
-// TestMigration_UsersTableExists verifies that the users table is created by the
-// migration.  Covered structurally: openServiceStore calls runner.Up, and the
-// INSERT in CreateUser would fail with "no such table" if the table were absent.
-// We additionally assert the table via sqlite_master for explicitness.
+// TestMigration_UsersTableExists verifies that the users table is created by the migration.  Covered
+// structurally: openServiceStore calls runner.Up, and the INSERT in CreateUser would fail with "no such table"
+// if the table were absent.  We additionally assert the table via sqlite_master for explicitness.
 func TestMigration_UsersTableExists(t *testing.T) {
 	t.Parallel()
 
@@ -100,8 +95,8 @@ func TestMigration_UsersTableExists(t *testing.T) {
 
 // ── AC2: Email normalisation and duplicate detection ─────────────────────────
 
-// TestCreateUser_EmailNormalization verifies that the stored email is trimmed
-// and lower-cased regardless of the input form.
+// TestCreateUser_EmailNormalization verifies that the stored email is trimmed and lower-cased regardless of the
+// input form.
 func TestCreateUser_EmailNormalization(t *testing.T) {
 	t.Parallel()
 
@@ -119,8 +114,8 @@ func TestCreateUser_EmailNormalization(t *testing.T) {
 	}
 }
 
-// TestCreateUser_DuplicateEmail_Exact verifies that inserting the same
-// (already-normalised) email a second time returns ErrEmailTaken.
+// TestCreateUser_DuplicateEmail_Exact verifies that inserting the same (already-normalised) email a second time
+// returns ErrEmailTaken.
 func TestCreateUser_DuplicateEmail_Exact(t *testing.T) {
 	t.Parallel()
 
@@ -137,8 +132,8 @@ func TestCreateUser_DuplicateEmail_Exact(t *testing.T) {
 	}
 }
 
-// TestCreateUser_DuplicateEmail_CaseDiffers verifies that "ADA@x.com" (upper-case)
-// conflicts with the previously-created "ada@x.com" after normalisation.
+// TestCreateUser_DuplicateEmail_CaseDiffers verifies that "ADA@x.com" (upper-case) conflicts with the
+// previously-created "ada@x.com" after normalisation.
 func TestCreateUser_DuplicateEmail_CaseDiffers(t *testing.T) {
 	t.Parallel()
 
@@ -155,8 +150,8 @@ func TestCreateUser_DuplicateEmail_CaseDiffers(t *testing.T) {
 	}
 }
 
-// TestCreateUser_DuplicateEmail_WithWhitespace verifies that " ada@x.com " (with
-// surrounding whitespace) conflicts with the previously-created "ada@x.com".
+// TestCreateUser_DuplicateEmail_WithWhitespace verifies that " ada@x.com " (with surrounding whitespace)
+// conflicts with the previously-created "ada@x.com".
 func TestCreateUser_DuplicateEmail_WithWhitespace(t *testing.T) {
 	t.Parallel()
 
@@ -173,8 +168,8 @@ func TestCreateUser_DuplicateEmail_WithWhitespace(t *testing.T) {
 	}
 }
 
-// TestCreateUser_DuplicateEmail_MixedCaseAndWhitespace combines both variations
-// to exercise a real-world case: "  ADA@X.COM  " must conflict with "ada@x.com".
+// TestCreateUser_DuplicateEmail_MixedCaseAndWhitespace combines both variations to exercise a real-world case:
+// "  ADA@X.COM  " must conflict with "ada@x.com".
 func TestCreateUser_DuplicateEmail_MixedCaseAndWhitespace(t *testing.T) {
 	t.Parallel()
 
@@ -193,8 +188,8 @@ func TestCreateUser_DuplicateEmail_MixedCaseAndWhitespace(t *testing.T) {
 
 // ── AC3: Password policy and hash storage ────────────────────────────────────
 
-// TestCreateUser_PolicyViolation_TooShort verifies that a password shorter than
-// Policy.MinLen is rejected BEFORE any DB work (no row should be inserted).
+// TestCreateUser_PolicyViolation_TooShort verifies that a password shorter than Policy.MinLen is rejected BEFORE
+// any DB work (no row should be inserted).
 func TestCreateUser_PolicyViolation_TooShort(t *testing.T) {
 	t.Parallel()
 
@@ -216,8 +211,7 @@ func TestCreateUser_PolicyViolation_TooShort(t *testing.T) {
 	}
 }
 
-// TestCreateUser_PolicyViolation_TooLong verifies that a password exceeding
-// Policy.MaxLen is rejected.
+// TestCreateUser_PolicyViolation_TooLong verifies that a password exceeding Policy.MaxLen is rejected.
 func TestCreateUser_PolicyViolation_TooLong(t *testing.T) {
 	t.Parallel()
 
@@ -233,17 +227,15 @@ func TestCreateUser_PolicyViolation_TooLong(t *testing.T) {
 	}
 }
 
-// TestCreateUser_PasswordHashedAsArgon2id verifies that the password stored in
-// the database is an argon2id PHC string and NOT the plaintext password.
+// TestCreateUser_PasswordHashedAsArgon2id verifies that the password stored in the database is an argon2id PHC
+// string and NOT the plaintext password.
 //
-// We exercise this by looking up the stored password_hash via a separate query
-// path: create the user, then use GetUserByEmail (which does NOT expose the hash
-// through the public User type) — we instead verify the hash indirectly through
-// Verify, because the hash is not exported on User.
+// We exercise this by looking up the stored password_hash via a separate query path: create the user, then use
+// GetUserByEmail (which does NOT expose the hash through the public User type) — we instead verify the hash
+// indirectly through Verify, because the hash is not exported on User.
 //
-// We also verify that the PHC format is correct by checking that CreateUser
-// succeeds and the returned User fields are correct, trusting the store test that
-// verifies the column is present.
+// We also verify that the PHC format is correct by checking that CreateUser succeeds and the returned User
+// fields are correct, trusting the store test that verifies the column is present.
 func TestCreateUser_PasswordHashedAsArgon2id(t *testing.T) {
 	t.Parallel()
 
@@ -258,26 +250,24 @@ func TestCreateUser_PasswordHashedAsArgon2id(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	// The returned User must not contain the plaintext or the hash.
-	// (User type has no PasswordHash field — this is structural enforcement.)
+	// The returned User must not contain the plaintext or the hash. (User type has no PasswordHash field — this
+	// is structural enforcement.)
 	if user.Email != "hash-check@example.com" {
 		t.Errorf("email = %q, want %q", user.Email, "hash-check@example.com")
 	}
 
-	// Verify the hash round-trip: we can still authenticate using Verify
-	// against the hash stored in DB (accessed through the internal store layer
-	// in the store integration test below). Here we confirm through behaviour:
-	// creating a duplicate must fail with ErrEmailTaken (the INSERT ran with a
-	// valid PHC, not plaintext — otherwise the column check would have failed
-	// or a second insert with the same email would have succeeded for a wrong reason).
+	// Verify the hash round-trip: we can still authenticate using Verify against the hash stored in DB (accessed
+	// through the internal store layer in the store integration test below). Here we confirm through behaviour:
+	// creating a duplicate must fail with ErrEmailTaken (the INSERT ran with a valid PHC, not plaintext —
+	// otherwise the column check would have failed or a second insert with the same email would have succeeded
+	// for a wrong reason).
 	_, dupErr := svc.CreateUser(ctx, in)
 	if !errors.Is(dupErr, auth.ErrEmailTaken) {
 		t.Errorf("second create same email = %v, want ErrEmailTaken", dupErr)
 	}
 }
 
-// TestCreateUser_InvalidRole verifies that an unrecognised Role string is
-// rejected with ErrInvalidRole.
+// TestCreateUser_InvalidRole verifies that an unrecognised Role string is rejected with ErrInvalidRole.
 func TestCreateUser_InvalidRole(t *testing.T) {
 	t.Parallel()
 
@@ -295,9 +285,8 @@ func TestCreateUser_InvalidRole(t *testing.T) {
 
 // ── AC4: Get by email / get by ID ────────────────────────────────────────────
 
-// TestGetUserByEmail_NormalisedLookup verifies that GetUserByEmail normalises
-// the lookup key — searching for "  ADA@EXAMPLE.COM  " finds the user created
-// as "ada@example.com".
+// TestGetUserByEmail_NormalisedLookup verifies that GetUserByEmail normalises the lookup key — searching for
+// "  ADA@EXAMPLE.COM  " finds the user created as "ada@example.com".
 func TestGetUserByEmail_NormalisedLookup(t *testing.T) {
 	t.Parallel()
 
@@ -317,8 +306,8 @@ func TestGetUserByEmail_NormalisedLookup(t *testing.T) {
 	}
 }
 
-// TestGetUserByEmail_NotFound verifies that GetUserByEmail returns ErrUserNotFound
-// for an email that has never been inserted.
+// TestGetUserByEmail_NotFound verifies that GetUserByEmail returns ErrUserNotFound for an email that has never
+// been inserted.
 func TestGetUserByEmail_NotFound(t *testing.T) {
 	t.Parallel()
 
@@ -331,8 +320,8 @@ func TestGetUserByEmail_NotFound(t *testing.T) {
 	}
 }
 
-// TestGetUserByID_FullRecord verifies that GetUserByID returns a record with
-// all expected public fields populated.
+// TestGetUserByID_FullRecord verifies that GetUserByID returns a record with all expected public fields
+// populated.
 func TestGetUserByID_FullRecord(t *testing.T) {
 	t.Parallel()
 
@@ -379,8 +368,7 @@ func TestGetUserByID_FullRecord(t *testing.T) {
 	}
 }
 
-// TestGetUserByID_NotFound verifies that GetUserByID returns ErrUserNotFound for
-// an unknown ID.
+// TestGetUserByID_NotFound verifies that GetUserByID returns ErrUserNotFound for an unknown ID.
 func TestGetUserByID_NotFound(t *testing.T) {
 	t.Parallel()
 
@@ -395,8 +383,8 @@ func TestGetUserByID_NotFound(t *testing.T) {
 
 // ── AC5: Profile update and password-hash update ─────────────────────────────
 
-// TestUpdateProfile_ChangesFieldsAndBumpsUpdatedAt verifies that UpdateProfile
-// changes exactly the four profile fields and bumps updated_at.
+// TestUpdateProfile_ChangesFieldsAndBumpsUpdatedAt verifies that UpdateProfile changes exactly the four profile
+// fields and bumps updated_at.
 func TestUpdateProfile_ChangesFieldsAndBumpsUpdatedAt(t *testing.T) {
 	t.Parallel()
 
@@ -431,9 +419,8 @@ func TestUpdateProfile_ChangesFieldsAndBumpsUpdatedAt(t *testing.T) {
 		t.Errorf("Language = %q, want %q", got.Language, "fr")
 	}
 
-	// updated_at must have changed (or at least be non-empty; RFC 3339 strings
-	// compare lexicographically so >= is valid here, but equality is also
-	// accepted when the clock resolution is coarse).
+	// updated_at must have changed (or at least be non-empty; RFC 3339 strings compare lexicographically so >= is
+	// valid here, but equality is also accepted when the clock resolution is coarse).
 	if got.UpdatedAt < created.UpdatedAt {
 		t.Errorf("UpdatedAt regressed: was %q, now %q", created.UpdatedAt, got.UpdatedAt)
 	}
@@ -447,11 +434,9 @@ func TestUpdateProfile_ChangesFieldsAndBumpsUpdatedAt(t *testing.T) {
 	}
 }
 
-// TestUpdatePasswordHash_ReplacesHash verifies that UpdatePasswordHash replaces
-// the stored PHC string and bumps updated_at.  We verify the new hash indirectly
-// through the Hasher.Verify round-trip by generating a new PHC and then
-// confirming that GetUserByID still works (i.e. the row is intact) and that
-// updated_at was bumped.
+// TestUpdatePasswordHash_ReplacesHash verifies that UpdatePasswordHash replaces the stored PHC string and bumps
+// updated_at.  We verify the new hash indirectly through the Hasher.Verify round-trip by generating a new PHC
+// and then confirming that GetUserByID still works (i.e. the row is intact) and that updated_at was bumped.
 func TestUpdatePasswordHash_ReplacesHash(t *testing.T) {
 	t.Parallel()
 
@@ -491,8 +476,8 @@ func TestUpdatePasswordHash_ReplacesHash(t *testing.T) {
 	}
 }
 
-// TestUpdateProfile_NotFound verifies that UpdateProfile returns ErrUserNotFound
-// when the supplied userID does not exist in the database (0 rows affected).
+// TestUpdateProfile_NotFound verifies that UpdateProfile returns ErrUserNotFound when the supplied userID does
+// not exist in the database (0 rows affected).
 func TestUpdateProfile_NotFound(t *testing.T) {
 	t.Parallel()
 
@@ -520,8 +505,8 @@ func TestUpdateProfile_NotFound(t *testing.T) {
 	}
 }
 
-// TestUpdateProfile_ExistingUser_ReturnsNil verifies that UpdateProfile on an
-// existing user returns nil and the row is actually mutated.
+// TestUpdateProfile_ExistingUser_ReturnsNil verifies that UpdateProfile on an existing user returns nil and the
+// row is actually mutated.
 func TestUpdateProfile_ExistingUser_ReturnsNil(t *testing.T) {
 	t.Parallel()
 
@@ -550,8 +535,8 @@ func TestUpdateProfile_ExistingUser_ReturnsNil(t *testing.T) {
 	}
 }
 
-// TestUpdatePasswordHash_NotFound verifies that UpdatePasswordHash returns
-// ErrUserNotFound when the supplied userID does not exist (0 rows affected).
+// TestUpdatePasswordHash_NotFound verifies that UpdatePasswordHash returns ErrUserNotFound when the supplied
+// userID does not exist (0 rows affected).
 func TestUpdatePasswordHash_NotFound(t *testing.T) {
 	t.Parallel()
 
@@ -585,8 +570,8 @@ func TestUpdatePasswordHash_NotFound(t *testing.T) {
 	}
 }
 
-// TestUpdatePasswordHash_ExistingUser_ReturnsNil verifies that UpdatePasswordHash
-// on an existing user returns nil and bumps updated_at.
+// TestUpdatePasswordHash_ExistingUser_ReturnsNil verifies that UpdatePasswordHash on an existing user returns
+// nil and bumps updated_at.
 func TestUpdatePasswordHash_ExistingUser_ReturnsNil(t *testing.T) {
 	t.Parallel()
 
@@ -643,8 +628,8 @@ func TestCreateUser_AdminRole(t *testing.T) {
 	}
 }
 
-// TestCreateUser_MultipleUsers_IsolatedIDs verifies that two distinct users
-// receive different IDs and that each can be retrieved independently.
+// TestCreateUser_MultipleUsers_IsolatedIDs verifies that two distinct users receive different IDs and that each
+// can be retrieved independently.
 func TestCreateUser_MultipleUsers_IsolatedIDs(t *testing.T) {
 	t.Parallel()
 
@@ -690,16 +675,14 @@ func TestCreateUser_MultipleUsers_IsolatedIDs(t *testing.T) {
 	}
 }
 
-// TestPasswordHash_IsArgon2idPHC is an integration test that directly asserts
-// the format of the stored password_hash by: creating a user, then computing
-// what a PHC string looks like, and confirming Verify works against whatever
-// was stored — using the service's internal behaviour as evidence.
+// TestPasswordHash_IsArgon2idPHC is an integration test that directly asserts the format of the stored
+// password_hash by: creating a user, then computing what a PHC string looks like, and confirming Verify works
+// against whatever was stored — using the service's internal behaviour as evidence.
 //
-// Since the public User does not expose PasswordHash, we verify indirectly:
-// we know CreateUser called Hasher.Hash and stored the result.  We verify by
-// re-hashing with the same hasher and checking that both outputs share the same
-// $argon2id$ prefix and parameter segment (confirming the params used), and that
-// Verify would accept the original plaintext.
+// Since the public User does not expose PasswordHash, we verify indirectly: we know CreateUser called
+// Hasher.Hash and stored the result.  We verify by re-hashing with the same hasher and checking that both
+// outputs share the same $argon2id$ prefix and parameter segment (confirming the params used), and that Verify
+// would accept the original plaintext.
 func TestPasswordHash_IsArgon2idPHC(t *testing.T) {
 	t.Parallel()
 
@@ -716,9 +699,8 @@ func TestPasswordHash_IsArgon2idPHC(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	// We cannot read PasswordHash through the public API, but we can verify the
-	// round-trip via UpdatePasswordHash: write a known PHC, then verify Verify
-	// works (login path will use this).
+	// We cannot read PasswordHash through the public API, but we can verify the round-trip via UpdatePasswordHash:
+	// write a known PHC, then verify Verify works (login path will use this).
 	u, err := svc.GetUserByEmail(ctx, in.Email)
 	if err != nil {
 		t.Fatalf("GetUserByEmail: %v", err)
@@ -751,9 +733,9 @@ func TestPasswordHash_IsArgon2idPHC(t *testing.T) {
 
 // ── AC7: Authenticate ─────────────────────────────────────────────────────────
 
-// TestAuthenticate_UnknownEmail_ReturnsErrInvalidCredentials verifies that
-// Authenticate returns ErrInvalidCredentials (not ErrUserNotFound) for an email
-// that has never been registered, preventing user enumeration.
+// TestAuthenticate_UnknownEmail_ReturnsErrInvalidCredentials verifies that Authenticate returns
+// ErrInvalidCredentials (not ErrUserNotFound) for an email that has never been registered, preventing user
+// enumeration.
 func TestAuthenticate_UnknownEmail_ReturnsErrInvalidCredentials(t *testing.T) {
 	t.Parallel()
 
@@ -766,9 +748,9 @@ func TestAuthenticate_UnknownEmail_ReturnsErrInvalidCredentials(t *testing.T) {
 	}
 }
 
-// TestAuthenticate_WrongPassword_ReturnsErrInvalidCredentials verifies that a
-// correct email but wrong password returns ErrInvalidCredentials — the same
-// sentinel as the unknown-email path so callers cannot distinguish the two.
+// TestAuthenticate_WrongPassword_ReturnsErrInvalidCredentials verifies that a correct email but wrong password
+// returns ErrInvalidCredentials — the same sentinel as the unknown-email path so callers cannot distinguish the
+// two.
 func TestAuthenticate_WrongPassword_ReturnsErrInvalidCredentials(t *testing.T) {
 	t.Parallel()
 
@@ -785,9 +767,8 @@ func TestAuthenticate_WrongPassword_ReturnsErrInvalidCredentials(t *testing.T) {
 	}
 }
 
-// TestAuthenticate_CorrectCredentials_ReturnsUser verifies that Authenticate
-// returns the safe User record (no PasswordHash) when the email and password
-// are correct.
+// TestAuthenticate_CorrectCredentials_ReturnsUser verifies that Authenticate returns the safe User record (no
+// PasswordHash) when the email and password are correct.
 func TestAuthenticate_CorrectCredentials_ReturnsUser(t *testing.T) {
 	t.Parallel()
 
@@ -816,12 +797,10 @@ func TestAuthenticate_CorrectCredentials_ReturnsUser(t *testing.T) {
 	}
 }
 
-// TestAuthenticate_UnknownEmail_ErrorIsUniform verifies that Authenticate
-// returns ErrInvalidCredentials for an unknown email regardless of the password
-// supplied — short, typical, or very long.  This asserts the no-enumeration
-// property: the caller cannot distinguish "email not found" from "wrong
-// password" by inspecting the error, and the sentinel is stable across all
-// input shapes.
+// TestAuthenticate_UnknownEmail_ErrorIsUniform verifies that Authenticate returns ErrInvalidCredentials for an
+// unknown email regardless of the password supplied — short, typical, or very long.  This asserts the
+// no-enumeration property: the caller cannot distinguish "email not found" from "wrong password" by inspecting
+// the error, and the sentinel is stable across all input shapes.
 func TestAuthenticate_UnknownEmail_ErrorIsUniform(t *testing.T) {
 	t.Parallel()
 
@@ -840,27 +819,23 @@ func TestAuthenticate_UnknownEmail_ErrorIsUniform(t *testing.T) {
 	}
 }
 
-// TestAuthenticate_RehashOnLogin_UpgradesWeakHash verifies that when the stored
-// hash uses weaker parameters than the current Hasher, Authenticate succeeds AND
-// transparently upgrades the stored PHC to the current parameters.
+// TestAuthenticate_RehashOnLogin_UpgradesWeakHash verifies that when the stored hash uses weaker parameters than
+// the current Hasher, Authenticate succeeds AND transparently upgrades the stored PHC to the current parameters.
 //
-// The critical assertion is that the raw PasswordHash row in the database is
-// rewritten to encode the stronger params after the first Authenticate call.  We
-// verify this by reading the raw db.User row before and after login and
-// confirming that:
+// The critical assertion is that the raw PasswordHash row in the database is rewritten to encode the stronger
+// params after the first Authenticate call.  We verify this by reading the raw db.User row before and after
+// login and confirming that:
 //   - Before login: strongHasher.NeedsRehash(row.PasswordHash) == true  (weak params stored)
 //   - After login:  strongHasher.NeedsRehash(row.PasswordHash) == false (strong params stored)
 //
-// This test FAILS if the opportunistic rehash block in service.go:395-399 is
-// removed or bypassed, because the stored hash would remain at weak params and
-// the post-login NeedsRehash check would still return true.
+// This test FAILS if the opportunistic rehash block in service.go:395-399 is removed or bypassed, because the
+// stored hash would remain at weak params and the post-login NeedsRehash check would still return true.
 func TestAuthenticate_RehashOnLogin_UpgradesWeakHash(t *testing.T) {
 	t.Parallel()
 
-	// Build a store with two Services: one using weak params (simulates an old
-	// stored hash) and one using the test-standard params. We create the user
-	// with the weak-param hasher, then authenticate using the stronger-param
-	// hasher and verify the hash was upgraded.
+	// Build a store with two Services: one using weak params (simulates an old stored hash) and one using the
+	// test-standard params. We create the user with the weak-param hasher, then authenticate using the
+	// stronger-param hasher and verify the hash was upgraded.
 	dir := t.TempDir()
 	s, err := store.Open(store.Config{
 		Path:         dir + "/rehash.db",
@@ -891,8 +866,7 @@ func TestAuthenticate_RehashOnLogin_UpgradesWeakHash(t *testing.T) {
 		t.Fatalf("CreateUser (weak): %v", err)
 	}
 
-	// Now authenticate with the current (stronger) hasher. fastParams > weakParams
-	// so NeedsRehash should trigger.
+	// Now authenticate with the current (stronger) hasher. fastParams > weakParams so NeedsRehash should trigger.
 	strongHasher := auth.NewHasher(fastParams)
 	strongSvc := auth.NewService(s, strongHasher, fastPolicy)
 
@@ -914,9 +888,9 @@ func TestAuthenticate_RehashOnLogin_UpgradesWeakHash(t *testing.T) {
 		t.Errorf("User.ID mismatch after rehash: got %q, want %q", got.ID, created.ID)
 	}
 
-	// Read the raw hash AFTER login.  The rehash must have been written back.
-	// If the rehash block in service.go is removed this assertion will fail because
-	// NeedsRehash will still return true (the weak hash is unchanged).
+	// Read the raw hash AFTER login.  The rehash must have been written back.  If the rehash block in service.go
+	// is removed this assertion will fail because NeedsRehash will still return true (the weak hash is
+	// unchanged).
 	rowAfter, err := rawQ.GetUserByID(context.Background(), created.ID)
 	if err != nil {
 		t.Fatalf("GetUserByID (after rehash): %v", err)

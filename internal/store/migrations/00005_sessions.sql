@@ -1,9 +1,8 @@
 -- +goose Up
 -- +goose StatementBegin
--- sessions stores opaque bearer session tokens (as sha256 hashes) for authenticated Qovira
--- users.  The plaintext token is never stored; only the sha256 digest is kept as the lookup
--- key.  Expiry is computed from created_at (absolute cap) and last_used_at (sliding idle
--- window) at validation time — no expiry column is needed, so a TTL change requires no
+-- sessions stores opaque bearer session tokens (as sha256 hashes) for authenticated Qovira users.  The plaintext token
+-- is never stored; only the sha256 digest is kept as the lookup key.  Expiry is computed from created_at (absolute cap)
+-- and last_used_at (sliding idle window) at validation time — no expiry column is needed, so a TTL change requires no
 -- migration.  ON DELETE CASCADE ensures sessions are removed when the owning user is deleted.
 CREATE TABLE sessions (
   id           TEXT NOT NULL PRIMARY KEY,  -- ULID

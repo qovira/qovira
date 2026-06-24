@@ -18,9 +18,8 @@ func (f *fakeUserExister) HasAnyUser(_ context.Context) (bool, error) {
 	return f.hasAny, f.err
 }
 
-// fakeAccountCreator is an in-package fake for the AccountCreator seam.
-// It records every CreateAdmin call so tests can assert exactly how many were
-// made and with what arguments.
+// fakeAccountCreator is an in-package fake for the AccountCreator seam. It records every CreateAdmin call so tests can
+// assert exactly how many were made and with what arguments.
 type fakeAccountCreator struct {
 	calls []createAdminCall
 	err   error
@@ -36,8 +35,8 @@ func (f *fakeAccountCreator) CreateAdmin(_ context.Context, email, password stri
 	return f.err
 }
 
-// fakeSettingsReader is an in-package fake for the SettingsReader seam.
-// It holds a map of key→value; absent keys are treated as not-found.
+// fakeSettingsReader is an in-package fake for the SettingsReader seam. It holds a map of key→value; absent keys are
+// treated as not-found.
 type fakeSettingsReader struct {
 	data map[string]string
 	err  error
@@ -146,10 +145,8 @@ func TestNeedsOnboarding(t *testing.T) {
 	}
 }
 
-// TestNeedsOnboardingIsIndependentOfAdminExistence verifies that
-// NeedsOnboarding reflects only the model-endpoint setting, not whether any
-// admin account was created. A seeded admin must not change the onboarding
-// state on its own.
+// TestNeedsOnboardingIsIndependentOfAdminExistence verifies that NeedsOnboarding reflects only the model-endpoint
+// setting, not whether any admin account was created. A seeded admin must not change the onboarding state on its own.
 func TestNeedsOnboardingIsIndependentOfAdminExistence(t *testing.T) {
 	t.Parallel()
 
@@ -256,9 +253,8 @@ func TestMaybeSeedAdmin(t *testing.T) {
 	}
 }
 
-// TestSeededAdminStillNeedsOnboarding verifies the explicit requirement that
-// calling MaybeSeedAdmin does NOT write any settings, so NeedsOnboarding
-// remains true until the model endpoint is configured separately.
+// TestSeededAdminStillNeedsOnboarding verifies the explicit requirement that calling MaybeSeedAdmin does NOT write any
+// settings, so NeedsOnboarding remains true until the model endpoint is configured separately.
 func TestSeededAdminStillNeedsOnboarding(t *testing.T) {
 	t.Parallel()
 

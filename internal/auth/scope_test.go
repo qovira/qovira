@@ -14,9 +14,8 @@ import (
 
 // ── ScopeFromPrincipal ────────────────────────────────────────────────────────
 
-// TestScopeFromPrincipal_YieldsUserScope verifies that the Scope produced by
-// ScopeFromPrincipal is accepted as a user scope (IsSystem=false) and carries
-// the correct UserID.
+// TestScopeFromPrincipal_YieldsUserScope verifies that the Scope produced by ScopeFromPrincipal is accepted as a
+// user scope (IsSystem=false) and carries the correct UserID.
 func TestScopeFromPrincipal_YieldsUserScope(t *testing.T) {
 	t.Parallel()
 
@@ -31,8 +30,8 @@ func TestScopeFromPrincipal_YieldsUserScope(t *testing.T) {
 	}
 }
 
-// TestScopeFromPrincipal_AdminPrincipal_YieldsUserScope verifies that an admin
-// Principal still yields a user scope (not a system scope).
+// TestScopeFromPrincipal_AdminPrincipal_YieldsUserScope verifies that an admin Principal still yields a user
+// scope (not a system scope).
 func TestScopeFromPrincipal_AdminPrincipal_YieldsUserScope(t *testing.T) {
 	t.Parallel()
 
@@ -49,8 +48,8 @@ func TestScopeFromPrincipal_AdminPrincipal_YieldsUserScope(t *testing.T) {
 
 // ── RequireAdmin ──────────────────────────────────────────────────────────────
 
-// TestRequireAdmin_NonAdmin_Returns403 verifies that a request with a member
-// Principal in context is rejected with 403 and code "forbidden".
+// TestRequireAdmin_NonAdmin_Returns403 verifies that a request with a member Principal in context is rejected
+// with 403 and code "forbidden".
 func TestRequireAdmin_NonAdmin_Returns403(t *testing.T) {
 	t.Parallel()
 
@@ -77,8 +76,7 @@ func TestRequireAdmin_NonAdmin_Returns403(t *testing.T) {
 	}
 }
 
-// TestRequireAdmin_Admin_PassesThrough verifies that an admin Principal passes
-// through RequireAdmin unchanged.
+// TestRequireAdmin_Admin_PassesThrough verifies that an admin Principal passes through RequireAdmin unchanged.
 func TestRequireAdmin_Admin_PassesThrough(t *testing.T) {
 	t.Parallel()
 
@@ -101,9 +99,8 @@ func TestRequireAdmin_Admin_PassesThrough(t *testing.T) {
 	}
 }
 
-// TestRequireAdmin_NoPrincipal_Returns403 verifies that when no Principal is
-// in context (e.g. an unauthenticated path that somehow reached this handler),
-// the request is rejected with 403.
+// TestRequireAdmin_NoPrincipal_Returns403 verifies that when no Principal is in context (e.g. an unauthenticated
+// path that somehow reached this handler), the request is rejected with 403.
 func TestRequireAdmin_NoPrincipal_Returns403(t *testing.T) {
 	t.Parallel()
 

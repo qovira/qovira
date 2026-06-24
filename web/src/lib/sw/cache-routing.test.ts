@@ -1,8 +1,8 @@
 /**
  * Tests for the SW cache-routing decision helper.
  *
- * The helper is a pure function extracted from the service worker so it can be
- * unit-tested without the $service-worker ambient module or a real SW context.
+ * The helper is a pure function extracted from the service worker so it can be unit-tested without the $service-worker
+ * ambient module or a real SW context.
  */
 
 import { describe, expect, it } from "vitest";
@@ -88,8 +88,8 @@ describe("shouldCache", () => {
   });
 
   // --- branch: no selfOrigin provided (fallback to parsed.origin) ---
-  // When selfOrigin is omitted, the function defaults to parsed.origin, so
-  // same-origin paths are always cacheable (no cross-origin rejection).
+  // When selfOrigin is omitted, the function defaults to parsed.origin, so same-origin paths are always cacheable (no
+  // cross-origin rejection).
   it("returns true when selfOrigin is omitted and the URL is same-origin", () => {
     expect(shouldCache(`${ORIGIN}/index.html`, "GET")).toBe(true);
   });

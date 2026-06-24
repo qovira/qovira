@@ -26,11 +26,10 @@ type CountRemindersParams struct {
 	DueBefore interface{}
 }
 
-// Count reminders for a user with optional status and due-window filters.
-// Uses the same filter predicates as ListReminders so the count is always
-// consistent with what a list query would return. The result is used by the
-// list_reminders tool to emit a truncation signal when more than 20 match.
-// MANDATORY user_id predicate enforced by scope guard.
+// Count reminders for a user with optional status and due-window filters. Uses the same filter predicates as
+// ListReminders so the count is always consistent with what a list query would return. The result is used by the
+// list_reminders tool to emit a truncation signal when more than 20 match. MANDATORY user_id predicate enforced by
+// scope guard.
 func (q *Queries) CountReminders(ctx context.Context, arg CountRemindersParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countReminders,
 		arg.UserID,
@@ -129,9 +128,8 @@ type InsertReminderParams struct {
 }
 
 // Scoped queries for the reminders table.
-// reminders is user-owned: every SELECT/UPDATE/DELETE includes a user_id
-// predicate so rows are always confined to the bound Scope.  The CI scope
-// guard (TestScopeGuard_RealQueries) enforces this at build time.
+// reminders is user-owned: every SELECT/UPDATE/DELETE includes a user_id predicate so rows are always
+// confined to the bound Scope.  The CI scope guard (TestScopeGuard_RealQueries) enforces this at build time.
 //
 // Parameters use sqlc named params (@name) per the house convention.
 func (q *Queries) InsertReminder(ctx context.Context, arg InsertReminderParams) error {
@@ -180,22 +178,18 @@ type ListRemindersParams struct {
 	Limit     int64
 }
 
-// List reminders for a user with optional status and due-window filters,
-// keyset-paginated on (due_at, id).  Fetches limit+1 rows so the caller can
-// detect whether a next page exists.
+// List reminders for a user with optional status and due-window filters, keyset-paginated on (due_at, id).  Fetches
+// limit+1 rows so the caller can detect whether a next page exists.
 //
-// Optional filters use sqlc.narg so absent values are NULL and the predicate
-// becomes a no-op.  The keyset predicate uses the expanded form of the tuple
-// comparison (due_at, id) > (cursor_due, cursor_id), which is logically
-// identical: skip rows that sort before the cursor.  Both forms produce the
-// same result set; the expanded form is required because sqlc's SQLite parser
-// does not recognise the row-value syntax (col, col) > (?, ?).
+// Optional filters use sqlc.narg so absent values are NULL and the predicate becomes a no-op.  The keyset
+// predicate uses the expanded form of the tuple comparison (due_at, id) > (cursor_due, cursor_id), which is
+// logically identical: skip rows that sort before the cursor.  Both forms produce the same result set; the
+// expanded form is required because sqlc's SQLite parser does not recognise the row-value syntax (col, col) > (?, ?).
 //
-// The query is served by the reminders_user_due index on (user_id, due_at, id).
-// That index satisfies ORDER BY due_at, id directly from the index-ordered stream
-// for both the no-status path and the status-filtered path (status is a residual
-// predicate).  No USE TEMP B-TREE FOR ORDER BY occurs in either case, verified
-// by EXPLAIN QUERY PLAN in TestListReminders_IndexPlan.
+// The query is served by the reminders_user_due index on (user_id, due_at, id). That index satisfies
+// ORDER BY due_at, id directly from the index-ordered stream for both the no-status path and the status-filtered
+// path (status is a residual predicate).  No USE TEMP B-TREE FOR ORDER BY occurs in either case, verified by
+// EXPLAIN QUERY PLAN in TestListReminders_IndexPlan.
 func (q *Queries) ListReminders(ctx context.Context, arg ListRemindersParams) ([]Reminder, error) {
 	rows, err := q.db.QueryContext(ctx, listReminders,
 		arg.UserID,
@@ -347,9 +341,8 @@ type StampFiredRecurringParams struct {
 	UserID      string
 }
 
-// Advances a recurring reminder after each fire: stamps last_fired_at, advances
-// due_at to the next occurrence, and keeps status=active. Only the fire handler
-// calls this; UpdateReminder intentionally excludes last_fired_at.
+// Advances a recurring reminder after each fire: stamps last_fired_at, advances due_at to the next occurrence, and
+// keeps status=active. Only the fire handler calls this; UpdateReminder intentionally excludes last_fired_at.
 func (q *Queries) StampFiredRecurring(ctx context.Context, arg StampFiredRecurringParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, stampFiredRecurring,
 		arg.LastFiredAt,
@@ -393,9 +386,8 @@ type UpdateReminderParams struct {
 	UserID       string
 }
 
-// Writes all mutable columns for a single reminder row.
-// last_fired_at is intentionally excluded: the fire handler is its sole writer.
-// fire_job_id is included so Service owns all fire-job lifecycle transitions.
+// Writes all mutable columns for a single reminder row. last_fired_at is intentionally excluded: the fire
+// handler is its sole writer. fire_job_id is included so Service owns all fire-job lifecycle transitions.
 // MANDATORY user_id predicate enforced by scope guard.
 func (q *Queries) UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateReminder,

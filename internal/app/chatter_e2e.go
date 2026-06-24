@@ -4,13 +4,12 @@ package app
 
 // chatter_e2e.go — Chatter selection for the E2E test build (//go:build e2e).
 //
-// When QOVIRA_E2E_SCRIPT_PATH is set, newChatter constructs a *gateway.ScriptedChatter
-// from the fixture at that path instead of the real *gateway.Gateway.  When the
-// env var is absent, the real gateway is used as a fallback (so the e2e binary
-// can also run against a live model endpoint when no fixture is supplied).
+// When QOVIRA_E2E_SCRIPT_PATH is set, newChatter constructs a *gateway.ScriptedChatter from the fixture at that path
+// instead of the real *gateway.Gateway.  When the env var is absent, the real gateway is used as a fallback (so the e2e
+// binary can also run against a live model endpoint when no fixture is supplied).
 //
-// This file is physically absent from the default binary — the build tag ensures
-// it is compiled ONLY when -tags e2e is passed.
+// This file is physically absent from the default binary — the build tag ensures it is compiled ONLY when -tags e2e is
+// passed.
 
 import (
 	"log/slog"
@@ -24,8 +23,8 @@ import (
 // envScriptPath is the environment variable that supplies the fixture file path.
 const envScriptPath = "QOVIRA_E2E_SCRIPT_PATH"
 
-// newChatter returns a *gateway.ScriptedChatter when QOVIRA_E2E_SCRIPT_PATH is
-// set to a non-empty path, otherwise falls back to the real *gateway.Gateway.
+// newChatter returns a *gateway.ScriptedChatter when QOVIRA_E2E_SCRIPT_PATH is set to a non-empty path, otherwise falls
+// back to the real *gateway.Gateway.
 func newChatter(ss *store.SettingsStore) harness.Chatter {
 	path := os.Getenv(envScriptPath)
 	if path == "" {

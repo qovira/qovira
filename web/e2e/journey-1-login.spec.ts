@@ -1,11 +1,11 @@
 /**
  * Journey 1 — Login → land home.
  *
- * Navigates to /login as an unauthenticated user, fills in the credentials,
- * submits the form, and asserts landing on the root chat surface (`/`).
+ * Navigates to /login as an unauthenticated user, fills in the credentials, submits the form, and asserts
+ * landing on the root chat surface (`/`).
  *
- * This is the only journey that exercises the login UI itself; all other
- * journeys reuse the stored auth state and start already authenticated.
+ * This is the only journey that exercises the login UI itself; all other journeys reuse the stored auth state
+ * and start already authenticated.
  */
 
 import { test, expect } from "@playwright/test";

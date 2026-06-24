@@ -1,6 +1,5 @@
-// Internal test package — tests live in package events so they can be
-// compiled and run from the worktree directory without needing a resolvable
-// external import. All behavior is exercised via the exported Bus interface.
+// Internal test package — tests live in package events so they can be compiled and run from the worktree directory
+// without needing a resolvable external import. All behavior is exercised via the exported Bus interface.
 package events
 
 import (
@@ -9,15 +8,13 @@ import (
 	"time"
 )
 
-// newTestBus returns a fresh Bus for each test, typed as Bus so tests exercise
-// the interface, not the concrete type.
+// newTestBus returns a fresh Bus for each test, typed as Bus so tests exercise the interface, not the concrete type.
 func newTestBus(t *testing.T) Bus {
 	t.Helper()
 	return NewBus()
 }
 
-// recvEvent drains one event from ch or fails the test if nothing arrives
-// within the deadline.
+// recvEvent drains one event from ch or fails the test if nothing arrives within the deadline.
 func recvEvent(t *testing.T, ch <-chan Event) Event {
 	t.Helper()
 	select {
@@ -29,8 +26,8 @@ func recvEvent(t *testing.T, ch <-chan Event) Event {
 	}
 }
 
-// TestFanOut verifies criterion 1: Publish fans out to every connection
-// subscribed for that user and does NOT deliver to another user's connection.
+// TestFanOut verifies criterion 1: Publish fans out to every connection subscribed for that user and does NOT deliver
+// to another user's connection.
 func TestFanOut(t *testing.T) {
 	t.Parallel()
 
@@ -69,8 +66,8 @@ func TestFanOut(t *testing.T) {
 	}
 }
 
-// TestNonBlockingPublish verifies criterion 2: Publish returns quickly even
-// when every subscribed consumer is slow (i.e. never reads).
+// TestNonBlockingPublish verifies criterion 2: Publish returns quickly even when every subscribed consumer is slow
+// (i.e. never reads).
 func TestNonBlockingPublish(t *testing.T) {
 	t.Parallel()
 
@@ -78,8 +75,8 @@ func TestNonBlockingPublish(t *testing.T) {
 
 	const user = "slow-user"
 
-	// Fill the buffer to capacity so the next send would block a naive
-	// implementation. chanCap is the package constant (32).
+	// Fill the buffer to capacity so the next send would block a naive implementation. chanCap is the package
+	// constant (32).
 	ch, cancel := b.Subscribe(user)
 	t.Cleanup(cancel)
 
@@ -115,9 +112,8 @@ func TestNonBlockingPublish(t *testing.T) {
 	}
 }
 
-// TestSlowConsumerEviction verifies criterion 3: when a consumer's buffer is
-// full and Publish overflows it, the connection is evicted and the channel is
-// closed so the consumer can detect disconnection via ok==false.
+// TestSlowConsumerEviction verifies criterion 3: when a consumer's buffer is full and Publish overflows it, the
+// connection is evicted and the channel is closed so the consumer can detect disconnection via ok==false.
 func TestSlowConsumerEviction(t *testing.T) {
 	t.Parallel()
 
@@ -150,8 +146,8 @@ func TestSlowConsumerEviction(t *testing.T) {
 	}
 }
 
-// TestCancelRemovesConnection verifies criterion 4 (part A): after cancel() is
-// called a subsequent Publish does not deliver to the cancelled channel.
+// TestCancelRemovesConnection verifies criterion 4 (part A): after cancel() is called a subsequent Publish does not
+// deliver to the cancelled channel.
 func TestCancelRemovesConnection(t *testing.T) {
 	t.Parallel()
 
@@ -177,8 +173,7 @@ func TestCancelRemovesConnection(t *testing.T) {
 	}
 }
 
-// TestCancelIdempotent verifies that calling cancel multiple times does not
-// panic (no double-close).
+// TestCancelIdempotent verifies that calling cancel multiple times does not panic (no double-close).
 func TestCancelIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -192,8 +187,8 @@ func TestCancelIdempotent(t *testing.T) {
 	cancel()
 }
 
-// TestConcurrent verifies criterion 4 (part B): many goroutines
-// subscribing, publishing, and cancelling concurrently are race-clean.
+// TestConcurrent verifies criterion 4 (part B): many goroutines subscribing, publishing, and cancelling concurrently
+// are race-clean.
 // Run with: go test -race ./internal/events/...
 func TestConcurrent(t *testing.T) {
 	t.Parallel()

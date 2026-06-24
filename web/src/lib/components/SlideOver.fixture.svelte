@@ -1,6 +1,6 @@
 <script lang="ts">
-  // SlideOver fixture — a minimal wrapper that manages the open state via $state
-  // so Storybook story snippets can bind to it. Used only by SlideOver.stories.svelte.
+  // SlideOver fixture — a minimal wrapper that manages the open state via $state so Storybook story snippets can
+  // bind to it. Used only by SlideOver.stories.svelte.
 
   import SlideOver from "./SlideOver.svelte";
 

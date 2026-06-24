@@ -23,14 +23,12 @@ var heartbeatInterval = 10 * time.Second
 // The handler:
 //   - Rejects non-GET with 405 (the mux route is a bare all-methods pattern).
 //   - Fails closed on auth: no principal in context, or empty UserID → 401.
-//   - Subscribes to bus for the principal's UserID and streams events as SSE frames
-//     until the client disconnects, the request context is cancelled, or the bus
-//     closes/evicts the subscription (slow-consumer eviction).
+//   - Subscribes to bus for the principal's UserID and streams events as SSE frames until the client disconnects, the
+//     request context is cancelled, or the bus closes/evicts the subscription (slow-consumer eviction).
 //   - Emits a ping frame every heartbeatInterval to keep proxies open.
 //   - Uses http.ResponseController.Flush (never the http.Flusher type assertion).
-//   - Event id is a per-connection monotonic counter starting at 1 — sufficient
-//     for client-side deduplication; there is no server replay buffer so the id
-//     need not be globally unique.
+//   - Event id is a per-connection monotonic counter starting at 1 — sufficient for client-side deduplication; there is
+//     no server replay buffer so the id need not be globally unique.
 func eventsHandler(bus events.Bus) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Guard the method — the mux pattern is bare (all methods), so we enforce GET here. HEAD could be treated as
@@ -47,8 +45,8 @@ func eventsHandler(bus events.Bus) http.HandlerFunc {
 		}
 
 		// Fail closed on auth: the auth middleware must have run and placed a principal with a non-empty UserID in
-		// context. If not, return 401. This is what makes the "requires Authorization: Bearer" criterion hold — there is
-		// no URL-credential fallback.
+		// context. If not, return 401. This is what makes the "requires Authorization: Bearer" criterion hold — there
+		// is no URL-credential fallback.
 		principal, ok := PrincipalFromContext(r.Context())
 		if !ok || principal.UserID == "" {
 			WriteProblem(w, r, Problem{
@@ -60,7 +58,8 @@ func eventsHandler(bus events.Bus) http.HandlerFunc {
 			return
 		}
 
-		// Subscribe before writing any response so that if the ResponseController cannot flush we can still clean up cleanly.
+		// Subscribe before writing any response so that if the ResponseController cannot flush we can still clean up
+		// cleanly.
 		stream, cancel := bus.Subscribe(principal.UserID)
 		defer cancel()
 
@@ -84,9 +83,9 @@ func eventsHandler(bus events.Bus) http.HandlerFunc {
 			return
 		}
 
-		// Disable the per-response write deadline so the SSE stream can outlive the server's global WriteTimeout (60 s).
-		// The server timeout is correct for normal request/response handlers; this streaming route is the deliberate
-		// exception that opts out by clearing the deadline to zero.
+		// Disable the per-response write deadline so the SSE stream can outlive the server's global
+		// WriteTimeout (60 s). The server timeout is correct for normal request/response handlers; this streaming
+		// route is the deliberate exception that opts out by clearing the deadline to zero.
 		if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, errors.ErrUnsupported) {
 			// A writer that can't clear its deadline can't sustain a long-lived stream; log and end gracefully rather
 			// than getting force-closed at the server's WriteTimeout.

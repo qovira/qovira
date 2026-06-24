@@ -1,20 +1,17 @@
 // Pure bucketing logic for the Reminders view.
 //
-// Groups a flat ReminderItem[] into five time buckets, computed against a given
-// reference timestamp (`now`). No side-effects, no imports from Svelte stores —
-// fully testable as a plain function.
+// Groups a flat ReminderItem[] into five time buckets, computed against a given reference timestamp (`now`). No
+// side-effects, no imports from Svelte stores — fully testable as a plain function.
 //
 // Bucket boundary choice (ISO-week / Monday-based):
 //
 //   Overdue:    dueAt < now
 //   Today:      now <= dueAt < next local midnight (i.e. 00:00 tomorrow local)
 //   This week:  next local midnight <= dueAt < next Monday 00:00 local
-//               Rationale: use ISO calendar week (Mon = first day). "This week"
-//               covers the remaining days of the *current* local calendar week
-//               after today. When now is already Mon–Sun, the upper boundary is
-//               the *upcoming* Monday at 00:00 local (could be 1–6 days away).
-//               If today is Monday, "this week" covers Tue–Sun of the same week.
-//               Everything from next Monday onward is "Later".
+//               Rationale: use ISO calendar week (Mon = first day). "This week" covers the remaining days of the
+//               *current* local calendar week after today. When now is already Mon–Sun, the upper boundary is the
+//               *upcoming* Monday at 00:00 local (could be 1–6 days away). If today is Monday, "this week" covers
+//               Tue–Sun of the same week. Everything from next Monday onward is "Later".
 //   Later:      dueAt >= next Monday 00:00 local
 //   Done:       status === "completed", sorted descending by completedAt (fallback dueAt)
 
@@ -42,8 +39,7 @@ export interface BucketedReminders {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns a Date representing 00:00:00.000 local time on the day after `now`
- * (i.e. start of tomorrow local).
+ * Returns a Date representing 00:00:00.000 local time on the day after `now` (i.e. start of tomorrow local).
  */
 function nextMidnight(now: Date): Date {
   const d = new Date(now);
@@ -53,11 +49,11 @@ function nextMidnight(now: Date): Date {
 }
 
 /**
- * Returns a Date representing 00:00:00.000 local time on the next Monday
- * (the start of the following ISO calendar week).
+ * Returns a Date representing 00:00:00.000 local time on the next Monday (the start of the following ISO calendar
+ * week).
  *
- * If `now` falls on a Monday, returns *next* Monday (7 days away) so the
- * current Monday stays in "Today" and Tue–Sun fall into "This week".
+ * If `now` falls on a Monday, returns *next* Monday (7 days away) so the current Monday stays in "Today" and Tue–Sun
+ * fall into "This week".
  */
 function nextMonday(now: Date): Date {
   const d = new Date(now);
@@ -89,16 +85,12 @@ function descByCompletedAt(a: ReminderItem, b: ReminderItem): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns true only when the reminders page empty-state placeholder should be
- * shown — i.e. there are absolutely no reminders (no active ones and no
- * completed ones). When there are zero active reminders but at least one
- * completed reminder, the Done section will still show content, so the
- * placeholder must be suppressed.
+ * Returns true only when the reminders page empty-state placeholder should be shown — i.e. there are absolutely no
+ * reminders (no active ones and no completed ones). When there are zero active reminders but at least one completed
+ * reminder, the Done section will still show content, so the placeholder must be suppressed.
  *
- * @param hasNoActive - True when all four active buckets (overdue/today/this
- *                      week/later) are empty.
- * @param doneCount   - The number of completed reminders currently in the
- *                      Done bucket.
+ * @param hasNoActive - True when all four active buckets (overdue/today/this week/later) are empty.
+ * @param doneCount   - The number of completed reminders currently in the Done bucket.
  */
 export function shouldShowPlaceholder(hasNoActive: boolean, doneCount: number): boolean {
   return hasNoActive && doneCount === 0;
@@ -108,8 +100,8 @@ export function shouldShowPlaceholder(hasNoActive: boolean, doneCount: number): 
  * Bucket a flat list of reminders into Overdue / Today / This week / Later / Done.
  *
  * @param reminders - The full reminder list (mixed active + completed).
- * @param now       - The reference timestamp. Use `new Date()` in the browser;
- *                    pass a fixed Date in tests for determinism.
+ * @param now       - The reference timestamp. Use `new Date()` in the browser; pass a fixed Date in tests for
+ *                    determinism.
  * @returns A BucketedReminders object with sorted, non-overlapping slices.
  */
 export function bucketReminders(reminders: ReminderItem[], now: Date): BucketedReminders {

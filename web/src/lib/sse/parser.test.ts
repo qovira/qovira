@@ -101,8 +101,8 @@ describe("parseFrames()", () => {
   });
 });
 
-// Satisfy the SseFrame type import so the compiler doesn't prune it.
-// We verify the shape here to confirm the exported interface is correct.
+// Satisfy the SseFrame type import so the compiler doesn't prune it. We verify the shape here to confirm the exported
+// interface is correct.
 describe("SseFrame type shape", () => {
   it("is assignable from a partial object", () => {
     const frame: SseFrame = { data: "x" };

@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// directive returns the source-list of the named CSP directive (e.g. the part
-// after "script-src " up to the next ";"), or "" if absent.
+// directive returns the source-list of the named CSP directive (e.g. the part after "script-src " up to the next ";"),
+// or "" if absent.
 func directive(csp, name string) string {
 	for part := range strings.SplitSeq(csp, ";") {
 		part = strings.TrimSpace(part)
@@ -19,8 +19,8 @@ func directive(csp, name string) string {
 	return ""
 }
 
-// token is the CSP source token a browser expects for the given inline script
-// body — the independent oracle the extraction is checked against.
+// token is the CSP source token a browser expects for the given inline script body — the independent oracle the
+// extraction is checked against.
 func token(inner string) string {
 	sum := sha256.Sum256([]byte(inner))
 	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
@@ -29,8 +29,8 @@ func token(inner string) string {
 func TestInlineScriptHashes_VerbatimContent(t *testing.T) {
 	t.Parallel()
 
-	// Note the exact whitespace inside the element — it is part of the hashed
-	// content, so the extractor must capture it byte-for-byte.
+	// Note the exact whitespace inside the element — it is part of the hashed content, so the extractor must capture it
+	// byte-for-byte.
 	inner := "\n      console.log('boot');\n    "
 	html := "<html><head>\n    <script>" + inner + "</script>\n  </head></html>"
 
@@ -104,8 +104,8 @@ func TestCSPForSPA_Shape(t *testing.T) {
 		t.Errorf("empty CSP = %q", got)
 	}
 
-	// With an inline script, its hash is admitted on script-src — and the script
-	// axis must NEVER fall back to 'unsafe-inline' (only style may).
+	// With an inline script, its hash is admitted on script-src — and the script axis must NEVER fall back to
+	// 'unsafe-inline' (only style may).
 	html := []byte(`<head><script>x()</script></head>`)
 	got := cspForSPA(html)
 	if !strings.Contains(got, "script-src 'self' "+token("x()")) {

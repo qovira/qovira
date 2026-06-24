@@ -1,7 +1,6 @@
-// Tests for the reminder-fired notification helper.
-// Environment: runes (node + Svelte compiler) — included via src/**/*.svelte.test.ts.
-// The module uses $state for _promptPending, which requires the Svelte compiler
-// transform that the runes project provides.
+// Tests for the reminder-fired notification helper. Environment: runes (node + Svelte compiler) — included via
+// src/**/*.svelte.test.ts. The module uses $state for _promptPending, which requires the Svelte compiler transform that
+// the runes project provides.
 //
 // Coverage:
 //   AC1: toast.info() is called every time reminder.fired arrives.
@@ -48,10 +47,9 @@ async function freshModule() {
 // ---------------------------------------------------------------------------
 // Notification stub helpers.
 //
-// The Web Notification API is a constructable global. To avoid ESLint's
-// no-extraneous-class / no-useless-constructor errors, we build the stub as a
-// plain function (satisfies `new` semantics in JS) with the necessary static
-// properties attached. TypeScript sees a newable function via the cast.
+// The Web Notification API is a constructable global. To avoid ESLint's no-extraneous-class / no-useless-constructor
+// errors, we build the stub as a plain function (satisfies `new` semantics in JS) with the necessary static properties
+// attached. TypeScript sees a newable function via the cast.
 // ---------------------------------------------------------------------------
 
 interface NotificationLike {
@@ -183,8 +181,8 @@ describe("notifyReminderFired — OS notification (AC2)", () => {
 
     expect(calls).toHaveLength(1);
     const body = calls[0]?.[1]?.body ?? "";
-    // The raw ISO format contains a "T" time-separator and a "Z" suffix.
-    // After formatting via Intl.DateTimeFormat those are gone.
+    // The raw ISO format contains a "T" time-separator and a "Z" suffix. After formatting via Intl.DateTimeFormat
+    // those are gone.
     expect(body).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/);
     // The body must be non-empty (the message function produced something).
     expect(body.length).toBeGreaterThan(0);

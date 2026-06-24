@@ -14,17 +14,16 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// testSessionConfig is a small-TTL config for deterministic tests. Since now is
-// injected into every method, real sleeps are never needed — just advance now by
-// the appropriate TTL delta.
+// testSessionConfig is a small-TTL config for deterministic tests. Since now is injected into every method,
+// real sleeps are never needed — just advance now by the appropriate TTL delta.
 var testSessionConfig = auth.SessionConfig{
 	IdleTTL:      1 * time.Hour,
 	AbsoluteTTL:  24 * time.Hour,
 	BumpInterval: 5 * time.Minute,
 }
 
-// openSessionsStore opens a migrated SQLCipher store + auth.Service + Sessions.
-// Cleanup is registered with t.Cleanup.
+// openSessionsStore opens a migrated SQLCipher store + auth.Service + Sessions.  Cleanup is registered with
+// t.Cleanup.
 func openSessionsStore(t *testing.T) (*store.Store, *auth.Service, *auth.Sessions) {
 	t.Helper()
 	dir := t.TempDir()
@@ -65,8 +64,8 @@ func createTestUser(t *testing.T, svc *auth.Service, email string) auth.User {
 
 // ── AC1: Mint token format and DB storage ────────────────────────────────────
 
-// TestMint_TokenFormat verifies that Mint returns a "qov_"-prefixed token of the
-// correct length and that the DB stores only sha256(token), never the plaintext.
+// TestMint_TokenFormat verifies that Mint returns a "qov_"-prefixed token of the correct length and that the DB
+// stores only sha256(token), never the plaintext.
 func TestMint_TokenFormat(t *testing.T) {
 	t.Parallel()
 
@@ -85,8 +84,8 @@ func TestMint_TokenFormat(t *testing.T) {
 		t.Errorf("token = %q: must start with qov_", token)
 	}
 
-	// 256 bits of random = 32 bytes; base64.RawURLEncoding encodes 32 bytes as
-	// 43 characters (ceil(32*8/6) = 43, no padding). With "qov_" prefix: 47 chars.
+	// 256 bits of random = 32 bytes; base64.RawURLEncoding encodes 32 bytes as 43 characters (ceil(32*8/6) = 43,
+	// no padding). With "qov_" prefix: 47 chars.
 	const wantLen = 47
 	if len(token) != wantLen {
 		t.Errorf("token length = %d, want %d", len(token), wantLen)
@@ -105,31 +104,28 @@ func TestMint_TokenFormat(t *testing.T) {
 		t.Errorf("expiresAt = %v is not after now = %v", expiresAt, now)
 	}
 
-	// DB must store sha256(token) as token_hash, NOT the plaintext.
-	// Look up the session by the hash and confirm the hash matches.
+	// DB must store sha256(token) as token_hash, NOT the plaintext.  Look up the session by the hash and confirm
+	// the hash matches.
 	found, err := sessions.Lookup(ctx, token)
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
 
 	expectedHash := sha256.Sum256([]byte(token))
-	// The Session returned from Lookup must not carry token or token_hash.
-	// We can verify the hash is correct by looking at the raw DB row via the
-	// store directly — but the public Session type must NOT expose token_hash.
-	// We verify indirectly: the session was found by the hash lookup, proving
-	// only sha256(token) was stored.
+	// The Session returned from Lookup must not carry token or token_hash.  We can verify the hash is correct by
+	// looking at the raw DB row via the store directly — but the public Session type must NOT expose token_hash.
+	// We verify indirectly: the session was found by the hash lookup, proving only sha256(token) was stored.
 	if found.ID != sess.ID {
 		t.Errorf("Lookup returned session ID %q, want %q", found.ID, sess.ID)
 	}
 
-	// Confirm the token string itself does not appear anywhere in the returned
-	// Session struct (plaintext must not leak).
+	// Confirm the token string itself does not appear anywhere in the returned Session struct (plaintext must not
+	// leak).
 	_ = expectedHash // used for documentation; we trust the DB query uses the hash
 }
 
-// TestMint_OnlyHashStoredNotPlaintext verifies that two different tokens for the
-// same user produce different hashes (probabilistic uniqueness) and that the
-// Session struct has no token field.
+// TestMint_OnlyHashStoredNotPlaintext verifies that two different tokens for the same user produce different
+// hashes (probabilistic uniqueness) and that the Session struct has no token field.
 func TestMint_OnlyHashStoredNotPlaintext(t *testing.T) {
 	t.Parallel()
 
@@ -159,8 +155,7 @@ func TestMint_OnlyHashStoredNotPlaintext(t *testing.T) {
 
 // ── AC2: Dual-timeout boundary ───────────────────────────────────────────────
 
-// TestValid_WithinBothWindows verifies that a session is valid when within both
-// the idle and absolute TTLs.
+// TestValid_WithinBothWindows verifies that a session is valid when within both the idle and absolute TTLs.
 func TestValid_WithinBothWindows(t *testing.T) {
 	t.Parallel()
 
@@ -181,8 +176,8 @@ func TestValid_WithinBothWindows(t *testing.T) {
 	}
 }
 
-// TestValid_ExpiredByIdleTTL verifies that a session past the idle window is
-// reported expired even if it's within the absolute cap.
+// TestValid_ExpiredByIdleTTL verifies that a session past the idle window is reported expired even if it's
+// within the absolute cap.
 func TestValid_ExpiredByIdleTTL(t *testing.T) {
 	t.Parallel()
 
@@ -203,8 +198,8 @@ func TestValid_ExpiredByIdleTTL(t *testing.T) {
 	}
 }
 
-// TestValid_ExpiredByAbsoluteTTL verifies that a session inside the idle window
-// but past the absolute cap is reported expired.
+// TestValid_ExpiredByAbsoluteTTL verifies that a session inside the idle window but past the absolute cap is
+// reported expired.
 func TestValid_ExpiredByAbsoluteTTL(t *testing.T) {
 	t.Parallel()
 
@@ -225,8 +220,8 @@ func TestValid_ExpiredByAbsoluteTTL(t *testing.T) {
 		t.Fatalf("Mint: %v", err)
 	}
 
-	// Advance past the absolute TTL but simulate recent activity (last_used_at close to now).
-	// Because we are testing validity logic (pure function), we can just pass a now beyond absolute.
+	// Advance past the absolute TTL but simulate recent activity (last_used_at close to now). Because we are
+	// testing validity logic (pure function), we can just pass a now beyond absolute.
 	pastAbsolute := now.Add(cfg.AbsoluteTTL + time.Second)
 	// Even though idle window (72h) has not been exceeded by pastAbsolute relative to last_used_at:
 	// pastAbsolute - lastUsedAt = 24h + 1s < 72h (idle not exceeded)
@@ -236,8 +231,7 @@ func TestValid_ExpiredByAbsoluteTTL(t *testing.T) {
 	}
 }
 
-// TestExpiresAt verifies that ExpiresAt returns the earlier of (lastUsedAt+IdleTTL)
-// and (createdAt+AbsoluteTTL).
+// TestExpiresAt verifies that ExpiresAt returns the earlier of (lastUsedAt+IdleTTL) and (createdAt+AbsoluteTTL).
 func TestExpiresAt(t *testing.T) {
 	t.Parallel()
 
@@ -275,8 +269,8 @@ func TestExpiresAt(t *testing.T) {
 
 // ── AC3: Throttled bump ───────────────────────────────────────────────────────
 
-// TestBump_WithinInterval_NoWrite verifies that a bump within the BumpInterval
-// does NOT issue a write (bumped = false).
+// TestBump_WithinInterval_NoWrite verifies that a bump within the BumpInterval does NOT issue a write (bumped =
+// false).
 func TestBump_WithinInterval_NoWrite(t *testing.T) {
 	t.Parallel()
 
@@ -310,8 +304,8 @@ func TestBump_WithinInterval_NoWrite(t *testing.T) {
 	}
 }
 
-// TestBump_AfterInterval_WritesAndExtendsValidity verifies that a bump after the
-// BumpInterval issues a write (bumped = true) and slides the idle window.
+// TestBump_AfterInterval_WritesAndExtendsValidity verifies that a bump after the BumpInterval issues a write
+// (bumped = true) and slides the idle window.
 func TestBump_AfterInterval_WritesAndExtendsValidity(t *testing.T) {
 	t.Parallel()
 
@@ -335,8 +329,8 @@ func TestBump_AfterInterval_WritesAndExtendsValidity(t *testing.T) {
 		t.Error("Bump after BumpInterval = false, want true")
 	}
 
-	// LastUsedAt in DB must reflect the new time (truncated to second precision,
-	// matching the RFC 3339 storage format).
+	// LastUsedAt in DB must reflect the new time (truncated to second precision, matching the RFC 3339 storage
+	// format).
 	found, err := sessions.Lookup(ctx, token)
 	if err != nil {
 		t.Fatalf("Lookup after bump: %v", err)
@@ -346,27 +340,24 @@ func TestBump_AfterInterval_WritesAndExtendsValidity(t *testing.T) {
 		t.Errorf("LastUsedAt after bump = %v, want %v", found.LastUsedAt, wantLastUsedAt)
 	}
 
-	// The idle window must now be extended: a point past the original idle deadline
-	// (now + IdleTTL + 1s) but within the new window (bumpNow + IdleTTL - 1s) must
-	// be valid.
+	// The idle window must now be extended: a point past the original idle deadline (now + IdleTTL + 1s) but
+	// within the new window (bumpNow + IdleTTL - 1s) must be valid.
 	extendedCheck := bumpNow.Add(testSessionConfig.IdleTTL - time.Second)
 	if !sessions.Valid(found, extendedCheck) {
 		t.Error("Session invalid within extended idle window after bump")
 	}
 }
 
-// TestBump_ZeroRows_ReturnsFalseNil verifies that a Bump call on a session that
-// was deleted between the throttle check and the UPDATE returns (false, nil) —
-// not an error.
+// TestBump_ZeroRows_ReturnsFalseNil verifies that a Bump call on a session that was deleted between the throttle
+// check and the UPDATE returns (false, nil) — not an error.
 //
-// This exercises the "zero-rows-matched" branch in sessions.go (Bump returns
-// n > 0 — when n == 0 it returns false, nil).  The session is minted, then
-// deleted via DeleteByToken; the stale Session value is then passed to Bump with
-// now advanced past BumpInterval.  A database error on a missing row is NOT
-// expected here: the UPDATE simply touches zero rows and returns normally.
+// This exercises the "zero-rows-matched" branch in sessions.go (Bump returns n > 0 — when n == 0 it returns
+// false, nil).  The session is minted, then deleted via DeleteByToken; the stale Session value is then passed to
+// Bump with now advanced past BumpInterval.  A database error on a missing row is NOT expected here: the UPDATE
+// simply touches zero rows and returns normally.
 //
-// This test FAILS if Bump treats a zero-row UPDATE as an error (e.g. returns
-// a non-nil err for RowsAffected == 0).
+// This test FAILS if Bump treats a zero-row UPDATE as an error (e.g. returns a non-nil err for RowsAffected ==
+// 0).
 func TestBump_ZeroRows_ReturnsFalseNil(t *testing.T) {
 	t.Parallel()
 
@@ -399,8 +390,8 @@ func TestBump_ZeroRows_ReturnsFalseNil(t *testing.T) {
 
 // ── AC4: Revocation ──────────────────────────────────────────────────────────
 
-// TestDeleteByToken_RemovesSingleSession verifies that DeleteByToken removes
-// exactly one session and others remain.
+// TestDeleteByToken_RemovesSingleSession verifies that DeleteByToken removes exactly one session and others
+// remain.
 func TestDeleteByToken_RemovesSingleSession(t *testing.T) {
 	t.Parallel()
 
@@ -441,8 +432,8 @@ func TestDeleteByToken_RemovesSingleSession(t *testing.T) {
 	_ = sess1 // used only to satisfy the linter
 }
 
-// TestDeleteAllForUser_RemovesAllSessions verifies that DeleteAllForUser removes
-// every session for the given user.
+// TestDeleteAllForUser_RemovesAllSessions verifies that DeleteAllForUser removes every session for the given
+// user.
 func TestDeleteAllForUser_RemovesAllSessions(t *testing.T) {
 	t.Parallel()
 
@@ -472,8 +463,8 @@ func TestDeleteAllForUser_RemovesAllSessions(t *testing.T) {
 	}
 }
 
-// TestDeleteAllOtherForUser_KeepsNamedSession verifies that DeleteAllOtherForUser
-// removes all sessions except the one with the given ID.
+// TestDeleteAllOtherForUser_KeepsNamedSession verifies that DeleteAllOtherForUser removes all sessions except
+// the one with the given ID.
 func TestDeleteAllOtherForUser_KeepsNamedSession(t *testing.T) {
 	t.Parallel()
 
@@ -520,8 +511,8 @@ func TestDeleteAllOtherForUser_KeepsNamedSession(t *testing.T) {
 
 // ── AC5: PurgeExpired ────────────────────────────────────────────────────────
 
-// TestPurgeExpired_RemovesExpiredLeavesValid verifies that PurgeExpired deletes
-// rows past either TTL and leaves valid rows.
+// TestPurgeExpired_RemovesExpiredLeavesValid verifies that PurgeExpired deletes rows past either TTL and leaves
+// valid rows.
 func TestPurgeExpired_RemovesExpiredLeavesValid(t *testing.T) {
 	t.Parallel()
 
@@ -571,8 +562,8 @@ func TestPurgeExpired_RemovesExpiredLeavesValid(t *testing.T) {
 	}
 }
 
-// TestPurgeExpired_IdleExpired verifies that PurgeExpired also removes sessions
-// expired only by the idle TTL (last_used_at is old, created_at is recent).
+// TestPurgeExpired_IdleExpired verifies that PurgeExpired also removes sessions expired only by the idle TTL
+// (last_used_at is old, created_at is recent).
 func TestPurgeExpired_IdleExpired(t *testing.T) {
 	t.Parallel()
 
@@ -611,8 +602,8 @@ func TestPurgeExpired_IdleExpired(t *testing.T) {
 
 // ── AC5/AC1 extra: ON DELETE CASCADE ─────────────────────────────────────────
 
-// TestCascadeDelete_RemovesSessionsWhenUserDeleted verifies that deleting a user
-// removes their sessions via ON DELETE CASCADE.
+// TestCascadeDelete_RemovesSessionsWhenUserDeleted verifies that deleting a user removes their sessions via ON
+// DELETE CASCADE.
 func TestCascadeDelete_RemovesSessionsWhenUserDeleted(t *testing.T) {
 	t.Parallel()
 
@@ -646,8 +637,8 @@ func TestCascadeDelete_RemovesSessionsWhenUserDeleted(t *testing.T) {
 
 // ── AC6: Concurrency / race safety ───────────────────────────────────────────
 
-// TestConcurrentMintLookupBumpDelete exercises Mint/Lookup/Bump/Delete concurrently
-// and must pass under -race without data races or deadlocks.
+// TestConcurrentMintLookupBumpDelete exercises Mint/Lookup/Bump/Delete concurrently and must pass under -race
+// without data races or deadlocks.
 func TestConcurrentMintLookupBumpDelete(t *testing.T) {
 	t.Parallel()
 
@@ -709,8 +700,7 @@ func TestConcurrentMintLookupBumpDelete(t *testing.T) {
 	wg.Wait()
 }
 
-// TestLookup_NotFound verifies that Lookup returns ErrSessionNotFound for an
-// unknown token.
+// TestLookup_NotFound verifies that Lookup returns ErrSessionNotFound for an unknown token.
 func TestLookup_NotFound(t *testing.T) {
 	t.Parallel()
 
@@ -725,15 +715,13 @@ func TestLookup_NotFound(t *testing.T) {
 
 // ── AC7: UTC timestamp enforcement (finding 6) ────────────────────────────────
 
-// TestLookup_NonUTCTimestamp_Errors verifies that a session row whose
-// created_at or last_used_at carries a non-zero UTC offset (e.g. "+02:00")
-// is rejected by Lookup with an error rather than silently accepted.
+// TestLookup_NonUTCTimestamp_Errors verifies that a session row whose created_at or last_used_at carries a
+// non-zero UTC offset (e.g. "+02:00") is rejected by Lookup with an error rather than silently accepted.
 //
-// Background: parseSessionTimes previously called .UTC() which normalised the
-// in-memory value for Valid/ExpiresAt math, but PurgeExpired compares raw
-// stored strings lexicographically in SQL. A row written with "+02:00" would
-// Resolve correctly yet sort wrong in the purge query. The guard makes the
-// contract (stored timestamps must be UTC "...Z") enforced at read time.
+// Background: parseSessionTimes previously called .UTC() which normalised the in-memory value for
+// Valid/ExpiresAt math, but PurgeExpired compares raw stored strings lexicographically in SQL. A row written
+// with "+02:00" would Resolve correctly yet sort wrong in the purge query. The guard makes the contract (stored
+// timestamps must be UTC "...Z") enforced at read time.
 func TestLookup_NonUTCTimestamp_Errors(t *testing.T) {
 	t.Parallel()
 
@@ -748,8 +736,8 @@ func TestLookup_NonUTCTimestamp_Errors(t *testing.T) {
 		t.Fatalf("Mint: %v", err)
 	}
 
-	// Corrupt the stored created_at to a non-UTC offset, simulating a row that
-	// was written by an external tool or a previous code path without the guard.
+	// Corrupt the stored created_at to a non-UTC offset, simulating a row that was written by an external tool or
+	// a previous code path without the guard.
 	nonUTCTime := now.Truncate(time.Second).In(time.FixedZone("Europe/Berlin", 2*60*60))
 	nonUTCStr := nonUTCTime.Format(time.RFC3339) // produces "...+02:00"
 
@@ -771,8 +759,7 @@ func TestLookup_NonUTCTimestamp_Errors(t *testing.T) {
 	}
 }
 
-// TestLookup_NonUTCLastUsedAt_Errors verifies the same guard applies to
-// last_used_at.
+// TestLookup_NonUTCLastUsedAt_Errors verifies the same guard applies to last_used_at.
 func TestLookup_NonUTCLastUsedAt_Errors(t *testing.T) {
 	t.Parallel()
 
@@ -806,8 +793,8 @@ func TestLookup_NonUTCLastUsedAt_Errors(t *testing.T) {
 	}
 }
 
-// TestLookup_UTCTimestamp_Succeeds verifies that a canonical UTC "Z" timestamp
-// continues to resolve normally after the guard is added.
+// TestLookup_UTCTimestamp_Succeeds verifies that a canonical UTC "Z" timestamp continues to resolve normally
+// after the guard is added.
 func TestLookup_UTCTimestamp_Succeeds(t *testing.T) {
 	t.Parallel()
 
@@ -830,8 +817,8 @@ func TestLookup_UTCTimestamp_Succeeds(t *testing.T) {
 	}
 }
 
-// TestResolve_NonUTCTimestamp_Errors verifies the same UTC guard via the
-// Resolve path (which uses sessionFromJoinRow → parseSessionTimes).
+// TestResolve_NonUTCTimestamp_Errors verifies the same UTC guard via the Resolve path (which uses
+// sessionFromJoinRow → parseSessionTimes).
 func TestResolve_NonUTCTimestamp_Errors(t *testing.T) {
 	t.Parallel()
 

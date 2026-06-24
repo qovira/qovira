@@ -1,6 +1,6 @@
 // Tests for the reminders store rune logic.
-// Rune environment: node + Svelte compiler (vitest project "runes").
-// Uses flushSync to drain $derived updates synchronously.
+// Rune environment: node + Svelte compiler (vitest project "runes"). Uses flushSync to drain $derived updates
+// synchronously.
 import { flushSync } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
 

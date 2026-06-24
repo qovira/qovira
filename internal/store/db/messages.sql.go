@@ -42,8 +42,8 @@ type InsertMessageRow struct {
 }
 
 // Queries for the messages table.
-// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
-// belongs to the bound Scope. Parameters use sqlc named params (@name).
+// Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always belongs to the bound Scope.
+// Parameters use sqlc named params (@name).
 func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (InsertMessageRow, error) {
 	row := q.db.QueryRowContext(ctx, insertMessage,
 		arg.ID,

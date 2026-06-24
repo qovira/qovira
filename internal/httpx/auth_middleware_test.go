@@ -1,8 +1,7 @@
 package httpx_test
 
-// Tests for the cookie-first extraction and CSRF double-submit check added to
-// AuthMiddleware. These tests complement the existing
-// middleware_test.go which covers the Bearer-only path.
+// Tests for the cookie-first extraction and CSRF double-submit check added to AuthMiddleware. These tests complement
+// the existing middleware_test.go which covers the Bearer-only path.
 
 import (
 	"net/http"
@@ -15,8 +14,8 @@ import (
 
 // ── Cookie-first extraction ───────────────────────────────────────────────────
 
-// TestAuthMiddleware_CookieToken_SetsPrincipal verifies that a session cookie
-// alone (no Authorization header) authenticates the request.
+// TestAuthMiddleware_CookieToken_SetsPrincipal verifies that a session cookie alone (no Authorization header)
+// authenticates the request.
 func TestAuthMiddleware_CookieToken_SetsPrincipal(t *testing.T) {
 	t.Parallel()
 
@@ -49,8 +48,8 @@ func TestAuthMiddleware_CookieToken_SetsPrincipal(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_CookieWinsOverBearer verifies that when both a session
-// cookie and an Authorization: Bearer header are present, the cookie wins.
+// TestAuthMiddleware_CookieWinsOverBearer verifies that when both a session cookie and an Authorization: Bearer header
+// are present, the cookie wins.
 func TestAuthMiddleware_CookieWinsOverBearer(t *testing.T) {
 	t.Parallel()
 
@@ -83,8 +82,8 @@ func TestAuthMiddleware_CookieWinsOverBearer(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_BearerFallback verifies that when there is no session
-// cookie, the Bearer token is used as a fallback.
+// TestAuthMiddleware_BearerFallback verifies that when there is no session cookie, the Bearer token is used as a
+// fallback.
 func TestAuthMiddleware_BearerFallback(t *testing.T) {
 	t.Parallel()
 
@@ -114,8 +113,8 @@ func TestAuthMiddleware_BearerFallback(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_NeitherCookieNorBearer_Returns401 verifies that when
-// neither a session cookie nor a Bearer token is present, the response is 401.
+// TestAuthMiddleware_NeitherCookieNorBearer_Returns401 verifies that when neither a session cookie nor a Bearer token
+// is present, the response is 401.
 func TestAuthMiddleware_NeitherCookieNorBearer_Returns401(t *testing.T) {
 	t.Parallel()
 
@@ -135,8 +134,8 @@ func TestAuthMiddleware_NeitherCookieNorBearer_Returns401(t *testing.T) {
 
 // ── CSRF double-submit ────────────────────────────────────────────────────────
 
-// TestAuthMiddleware_CSRF_CookieUnsafeMethod_MissingHeader_Returns403 verifies
-// that a POST authenticated via cookie with no CSRF-Token header returns 403.
+// TestAuthMiddleware_CSRF_CookieUnsafeMethod_MissingHeader_Returns403 verifies that a POST authenticated via cookie
+// with no CSRF-Token header returns 403.
 func TestAuthMiddleware_CSRF_CookieUnsafeMethod_MissingHeader_Returns403(t *testing.T) {
 	t.Parallel()
 
@@ -165,8 +164,8 @@ func TestAuthMiddleware_CSRF_CookieUnsafeMethod_MissingHeader_Returns403(t *test
 	}
 }
 
-// TestAuthMiddleware_CSRF_CookieUnsafeMethod_MismatchedHeader_Returns403 verifies
-// that a POST authenticated via cookie with a wrong CSRF-Token header returns 403.
+// TestAuthMiddleware_CSRF_CookieUnsafeMethod_MismatchedHeader_Returns403 verifies that a POST authenticated via cookie
+// with a wrong CSRF-Token header returns 403.
 func TestAuthMiddleware_CSRF_CookieUnsafeMethod_MismatchedHeader_Returns403(t *testing.T) {
 	t.Parallel()
 
@@ -192,8 +191,8 @@ func TestAuthMiddleware_CSRF_CookieUnsafeMethod_MismatchedHeader_Returns403(t *t
 	}
 }
 
-// TestAuthMiddleware_CSRF_CookieUnsafeMethod_MatchingHeader_Passes verifies
-// that a POST authenticated via cookie with a matching CSRF-Token header passes.
+// TestAuthMiddleware_CSRF_CookieUnsafeMethod_MatchingHeader_Passes verifies that a POST authenticated via cookie with a
+// matching CSRF-Token header passes.
 func TestAuthMiddleware_CSRF_CookieUnsafeMethod_MatchingHeader_Passes(t *testing.T) {
 	t.Parallel()
 
@@ -228,8 +227,8 @@ func TestAuthMiddleware_CSRF_CookieUnsafeMethod_MatchingHeader_Passes(t *testing
 	}
 }
 
-// TestAuthMiddleware_CSRF_BearerUnsafeMethod_NoCSRFRequired verifies that a
-// POST authenticated via Bearer (not cookie) does NOT require a CSRF header.
+// TestAuthMiddleware_CSRF_BearerUnsafeMethod_NoCSRFRequired verifies that a POST authenticated via Bearer (not cookie)
+// does NOT require a CSRF header.
 func TestAuthMiddleware_CSRF_BearerUnsafeMethod_NoCSRFRequired(t *testing.T) {
 	t.Parallel()
 
@@ -262,8 +261,8 @@ func TestAuthMiddleware_CSRF_BearerUnsafeMethod_NoCSRFRequired(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_CSRF_CookieGetMethod_Exempt verifies that a GET request
-// authenticated via cookie is NOT subject to CSRF (safe method exemption).
+// TestAuthMiddleware_CSRF_CookieGetMethod_Exempt verifies that a GET request authenticated via cookie is NOT subject to
+// CSRF (safe method exemption).
 func TestAuthMiddleware_CSRF_CookieGetMethod_Exempt(t *testing.T) {
 	t.Parallel()
 
@@ -296,8 +295,8 @@ func TestAuthMiddleware_CSRF_CookieGetMethod_Exempt(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_CSRF_UnsafeMethods verifies that POST, PATCH, and DELETE
-// all require CSRF when authenticated via cookie.
+// TestAuthMiddleware_CSRF_UnsafeMethods verifies that POST, PATCH, and DELETE all require CSRF when authenticated via
+// cookie.
 func TestAuthMiddleware_CSRF_UnsafeMethods(t *testing.T) {
 	t.Parallel()
 
@@ -366,10 +365,9 @@ func TestCSRFHeaderName_IsExported(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_CSRF_PUT_RequiresCSRF verifies that PUT — an unsafe,
-// state-changing method — requires CSRF validation when the request is
-// authenticated via a session cookie. Previously PUT was absent from
-// isUnsafeMethod so it slipped through without a CSRF check.
+// TestAuthMiddleware_CSRF_PUT_RequiresCSRF verifies that PUT — an unsafe, state-changing method — requires CSRF
+// validation when the request is authenticated via a session cookie. Previously PUT was absent from isUnsafeMethod so
+// it slipped through without a CSRF check.
 func TestAuthMiddleware_CSRF_PUT_RequiresCSRF(t *testing.T) {
 	t.Parallel()
 
@@ -411,8 +409,8 @@ func TestAuthMiddleware_CSRF_PUT_RequiresCSRF(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_CSRF_SafeMethods_ExemptFromCSRF verifies that GET, HEAD,
-// and OPTIONS remain exempt from CSRF even when authenticated via cookie.
+// TestAuthMiddleware_CSRF_SafeMethods_ExemptFromCSRF verifies that GET, HEAD, and OPTIONS remain exempt from CSRF even
+// when authenticated via cookie.
 func TestAuthMiddleware_CSRF_SafeMethods_ExemptFromCSRF(t *testing.T) {
 	t.Parallel()
 

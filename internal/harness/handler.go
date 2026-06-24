@@ -19,10 +19,10 @@ type confirmationDecision struct {
 //
 //   - GET  /api/v1/conversations           — paginated conversation list (most-recently-active).
 //   - GET  /api/v1/conversations/{id}      — full conversation history (chronological messages).
-//   - POST /api/v1/conversations/{id}/messages — persist the user message and
-//     kick off the async turn, returning 202 with the persisted message.
-//   - POST /api/v1/conversations/{id}/confirmations/{callId} — approve or deny a
-//     pending confirmation and resume the suspended turn, returning 202.
+//   - POST /api/v1/conversations/{id}/messages — persist the user message and kick off the async turn, returning 202
+//     with the persisted message.
+//   - POST /api/v1/conversations/{id}/confirmations/{callId} — approve or deny a pending confirmation and resume the
+//     suspended turn, returning 202.
 func (h *Harness) Routes(r interface {
 	HandleFunc(pattern string, handler http.HandlerFunc)
 }) {
@@ -71,13 +71,11 @@ func (h *Harness) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	scope := store.UserScope(principal)
 	sq := h.store.ForUser(scope)
 
-	// Upsert the conversation: create it if this is the first message, bump
-	// updated_at if it already belongs to this user, or reject (404) if the id
-	// is owned by a different user.
+	// Upsert the conversation: create it if this is the first message, bump updated_at if it already belongs to this
+	// user, or reject (404) if the id is owned by a different user.
 	if err := sq.UpsertConversation(r.Context(), convID); err != nil {
 		if errors.Is(err, store.ErrConversationNotOwned) {
-			// Return 404 so the response does not reveal that another user's
-			// conversation exists at this id.
+			// Return 404 so the response does not reveal that another user's conversation exists at this id.
 			httpx.WriteProblem(w, r, httpx.Problem{
 				Title:  "Conversation not found",
 				Status: http.StatusNotFound,
@@ -213,10 +211,9 @@ func (h *Harness) handlePostConfirmation(w http.ResponseWriter, r *http.Request)
 				Code:   "confirmation_already_resolved",
 			})
 		case errors.Is(err, ErrConfirmationExpired):
-			// 409 Conflict: same status family as already-resolved (both block execution),
-			// but a distinct code so the client can distinguish "too late — it expired"
-			// from "someone else already answered it". The row is now status='expired'
-			// and the assistant message is abandoned; no model round is spawned.
+			// 409 Conflict: same status family as already-resolved (both block execution), but a distinct code so the
+			// client can distinguish "too late — it expired" from "someone else already answered it". The row is now
+			// status='expired' and the assistant message is abandoned; no model round is spawned.
 			httpx.WriteProblem(w, r, httpx.Problem{
 				Title:  "Confirmation expired",
 				Status: http.StatusConflict,

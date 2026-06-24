@@ -1,11 +1,10 @@
 -- Scoped queries for the user_data exemplar table.
--- Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always
--- comes from and is limited to the bound Scope. This pattern is the template
--- that real domain tables must follow; the CI guard in scopeguard.go enforces
--- it at build time.
+-- Every SELECT/UPDATE/DELETE includes a user_id predicate so the row always comes from and is limited to the
+-- bound Scope. This pattern is the template that real domain tables must follow; the CI guard in scopeguard.go
+-- enforces it at build time.
 --
--- Parameters use sqlc named params (@name) per the house convention; the
--- generated Params structs carry typed fields (ID, UserID, Value).
+-- Parameters use sqlc named params (@name) per the house convention; the generated Params structs carry typed
+-- fields (ID, UserID, Value).
 
 -- name: InsertUserData :exec
 INSERT INTO user_data (id, user_id, value)

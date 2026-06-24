@@ -42,10 +42,9 @@ type CreateSessionParams struct {
 }
 
 // Queries for the sessions table.
-// sessions is per-user data (it has a user_id column and belongs to individual users), but
-// some queries operate on a token_hash key (the bearer capability itself) rather than a
-// user_id predicate.  Those queries carry a per-query scopeguard exemption with an explicit
-// reason.  The bump query is keyed by id+user_id and needs no annotation.
+// sessions is per-user data (it has a user_id column and belongs to individual users), but some queries operate on a
+// token_hash key (the bearer capability itself) rather than a user_id predicate.  Those queries carry a per-query
+// scopeguard exemption with an explicit reason.  The bump query is keyed by id+user_id and needs no annotation.
 // INSERT is always scopeguard-exempt.
 //
 // Parameters use sqlc named params (@name) per the house convention.
@@ -84,9 +83,9 @@ DELETE FROM sessions
 WHERE token_hash = ?1
 `
 
-// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
-// itself authorizes access; this path is used for single-session logout and best-effort
-// delete-on-expiry, both keyed by the bearer token before a user_id is available.
+// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that itself authorizes
+// access; this path is used for single-session logout and best-effort delete-on-expiry, both keyed by the bearer
+// token before a user_id is available.
 func (q *Queries) DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteSessionByTokenHash, tokenHash)
 	if err != nil {
@@ -114,9 +113,9 @@ FROM sessions
 WHERE token_hash = ?1
 `
 
-// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that
-// itself authorizes access; a session is resolved before any Principal exists, so no user_id
-// predicate is possible or meaningful at this lookup stage.
+// scopeguard:allow-unscoped: token_hash is the sha256 of a 256-bit bearer capability that itself authorizes
+// access; a session is resolved before any Principal exists, so no user_id predicate is possible or meaningful at
+// this lookup stage.
 func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (Session, error) {
 	row := q.db.QueryRowContext(ctx, getSessionByTokenHash, tokenHash)
 	var i Session
@@ -145,10 +144,9 @@ type GetSessionWithUserByTokenHashRow struct {
 	Role       string
 }
 
-// scopeguard:allow-unscoped: resolved before any Principal exists, keyed by the bearer
-// token_hash capability; no user_id predicate is possible at this pre-auth lookup stage.
-// The JOIN to users retrieves the role in one read so the middleware can construct a
-// store.Principal without a second DB round-trip.
+// scopeguard:allow-unscoped: resolved before any Principal exists, keyed by the bearer token_hash capability; no
+// user_id predicate is possible at this pre-auth lookup stage. The JOIN to users retrieves the role in one read so
+// the middleware can construct a store.Principal without a second DB round-trip.
 func (q *Queries) GetSessionWithUserByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionWithUserByTokenHashRow, error) {
 	row := q.db.QueryRowContext(ctx, getSessionWithUserByTokenHash, tokenHash)
 	var i GetSessionWithUserByTokenHashRow
@@ -173,9 +171,9 @@ type PurgeExpiredSessionsParams struct {
 	AbsoluteCutoff string
 }
 
-// scopeguard:allow-unscoped: system housekeeping; the scheduler purges across all users by
-// TTL cutoffs (idle and absolute), so there is no meaningful user context available and a
-// user_id predicate would prevent cross-user expiry from working.
+// scopeguard:allow-unscoped: system housekeeping; the scheduler purges across all users by TTL cutoffs (idle and
+// absolute), so there is no meaningful user context available and a user_id predicate would prevent cross-user
+// expiry from working.
 func (q *Queries) PurgeExpiredSessions(ctx context.Context, arg PurgeExpiredSessionsParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, purgeExpiredSessions, arg.IdleCutoff, arg.AbsoluteCutoff)
 	if err != nil {

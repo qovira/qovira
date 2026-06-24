@@ -223,11 +223,10 @@ func TestClassifyResponse_RateLimited_RetryAfterHTTPDate(t *testing.T) {
 	}
 }
 
-// TestClassifyResponse_RateLimited_RetryAfterHTTPDatePast verifies the clamp
-// branch: when the HTTP-date in Retry-After is already in the past,
-// time.Until(t) is negative and the parser must clamp it to exactly 0 (not a
-// negative duration). This is the case the max(time.Until(t), 0) expression
-// exists to handle; a future-only test never exercises it.
+// TestClassifyResponse_RateLimited_RetryAfterHTTPDatePast verifies the clamp branch: when the HTTP-date in Retry-After
+// is already in the past, time.Until(t) is negative and the parser must clamp it to exactly 0 (not a negative
+// duration). This is the case the max(time.Until(t), 0) expression exists to handle; a future-only test never
+// exercises it.
 func TestClassifyResponse_RateLimited_RetryAfterHTTPDatePast(t *testing.T) {
 	t.Parallel()
 
@@ -242,8 +241,8 @@ func TestClassifyResponse_RateLimited_RetryAfterHTTPDatePast(t *testing.T) {
 	if !errors.As(err, &rle) {
 		t.Fatalf("expected *RateLimitedError; got %T", err)
 	}
-	// A parseable but already-past date must yield a non-nil RetryAfter clamped
-	// to exactly zero — not a negative duration.
+	// A parseable but already-past date must yield a non-nil RetryAfter clamped to exactly zero — not a negative
+	// duration.
 	if rle.RetryAfter == nil {
 		t.Fatal("RetryAfter should be non-nil for a parseable HTTP-date Retry-After (even if past)")
 	}
@@ -299,9 +298,8 @@ func TestClassifyResponse_ContextLength_DistinctFrom4xx(t *testing.T) {
 	}
 }
 
-// TestClassifyResponse_FalsePositiveGuards locks in the tolerant "fall back to
-// generic on ambiguity" contract: bodies whose wording is adjacent to a specific
-// signal but actually denote a different failure must classify as ErrUpstream,
+// TestClassifyResponse_FalsePositiveGuards locks in the tolerant "fall back to generic on ambiguity" contract: bodies
+// whose wording is adjacent to a specific signal but actually denote a different failure must classify as ErrUpstream,
 // not be mistaken for context-length or model-not-found.
 func TestClassifyResponse_FalsePositiveGuards(t *testing.T) {
 	t.Parallel()
@@ -342,9 +340,8 @@ func TestClassifyResponse_FalsePositiveGuards(t *testing.T) {
 	}
 }
 
-// TestClassifyResponse_RateLimited_RetryAfterOutOfRange verifies that non-finite
-// and absurdly large Retry-After values yield a nil delay rather than overflowing
-// time.Duration into a negative backoff.
+// TestClassifyResponse_RateLimited_RetryAfterOutOfRange verifies that non-finite and absurdly large Retry-After values
+// yield a nil delay rather than overflowing time.Duration into a negative backoff.
 func TestClassifyResponse_RateLimited_RetryAfterOutOfRange(t *testing.T) {
 	t.Parallel()
 
@@ -370,8 +367,8 @@ func TestClassifyResponse_RateLimited_RetryAfterOutOfRange(t *testing.T) {
 func TestSentinels_ErrorsIs(t *testing.T) {
 	t.Parallel()
 
-	// Each sentinel must be identifiable via errors.Is from the value returned
-	// by ClassifyResponse, not just by direct equality.
+	// Each sentinel must be identifiable via errors.Is from the value returned by ClassifyResponse, not just by
+	// direct equality.
 
 	tests := []struct {
 		name       string
@@ -427,8 +424,8 @@ func TestSentinels_ErrorsIs(t *testing.T) {
 func TestSentinels_TimeoutAndProtocolAreComparable(t *testing.T) {
 	t.Parallel()
 
-	// These sentinels are returned by the call/parse path, not by ClassifyResponse.
-	// Verify they are valid errors and work with errors.Is.
+	// These sentinels are returned by the call/parse path, not by ClassifyResponse. Verify they are valid errors and
+	// work with errors.Is.
 	if !errors.Is(gateway.ErrTimeout, gateway.ErrTimeout) {
 		t.Error("errors.Is(ErrTimeout, ErrTimeout) must be true")
 	}

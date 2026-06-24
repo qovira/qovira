@@ -1,7 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
--- conversations holds one row per conversation thread, owned by a specific user.
--- summary stays NULL for this slice (populated by a later summarisation feature).
+-- conversations holds one row per conversation thread, owned by a specific user. summary stays NULL for this slice
+-- (populated by a later summarisation feature).
 CREATE TABLE conversations (
     id         TEXT NOT NULL PRIMARY KEY,  -- ULID TEXT(26)
     user_id    TEXT NOT NULL,              -- owner; references users(id) logically

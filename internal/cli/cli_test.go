@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// runCmd builds a fresh root command, sets args, captures stdout+stderr, and
-// returns (stdout, stderr, error). It is a test helper shared by all table
-// rows.
+// runCmd builds a fresh root command, sets args, captures stdout+stderr, and returns (stdout, stderr, error). It is a
+// test helper shared by all table rows.
 func runCmd(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 
@@ -22,8 +21,7 @@ func runCmd(t *testing.T, args ...string) (string, string, error) {
 	return outBuf.String(), errBuf.String(), err
 }
 
-// TestRootHelp verifies that "qovira --help" lists all five top-level
-// commands.
+// TestRootHelp verifies that "qovira --help" lists all five top-level commands.
 func TestRootHelp(t *testing.T) {
 	t.Parallel()
 
@@ -41,8 +39,7 @@ func TestRootHelp(t *testing.T) {
 	}
 }
 
-// TestMigrateHelp verifies that "qovira migrate --help" lists up, status, and
-// down subcommands.
+// TestMigrateHelp verifies that "qovira migrate --help" lists up, status, and down subcommands.
 func TestMigrateHelp(t *testing.T) {
 	t.Parallel()
 
@@ -57,12 +54,10 @@ func TestMigrateHelp(t *testing.T) {
 	}
 }
 
-// TestVersionOutput verifies that "qovira version" prints each piece of
-// injected build metadata.
+// TestVersionOutput verifies that "qovira version" prints each piece of injected build metadata.
 //
-// This test mutates package-level vars so it must NOT be marked t.Parallel()
-// at the top level; the subtests only read the captured output string and are
-// safe to run in parallel with each other.
+// This test mutates package-level vars so it must NOT be marked t.Parallel() at the top level; the subtests only read
+// the captured output string and are safe to run in parallel with each other.
 func TestVersionOutput(t *testing.T) {
 	// Restore the package-level vars when the test and all its subtests finish.
 	origVersion, origCommit, origDate := version, commit, date
@@ -98,8 +93,8 @@ func TestVersionOutput(t *testing.T) {
 	}
 }
 
-// TestVersionDefaults verifies that when build vars are not overridden the
-// default sentinel values appear in the output.
+// TestVersionDefaults verifies that when build vars are not overridden the default sentinel values appear in the
+// output.
 //
 // Mutates package-level vars — must NOT be marked t.Parallel().
 func TestVersionDefaults(t *testing.T) {
@@ -122,8 +117,8 @@ func TestVersionDefaults(t *testing.T) {
 	}
 }
 
-// TestCommandWiring is a table-driven test that checks each command path
-// returns the expected exit behaviour (success or a known error string).
+// TestCommandWiring is a table-driven test that checks each command path returns the expected exit behaviour (success
+// or a known error string).
 func TestCommandWiring(t *testing.T) {
 	t.Parallel()
 
@@ -139,9 +134,8 @@ func TestCommandWiring(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			// Without QOVIRA_MASTER_KEY set the config loader fails fast with
-			// an aggregated validation error before reaching the "not yet
-			// implemented" sentinel — that is the desired fail-fast behaviour.
+			// Without QOVIRA_MASTER_KEY set the config loader fails fast with an aggregated validation error before
+			// reaching the "not yet implemented" sentinel — that is the desired fail-fast behaviour.
 			name:    "serve without master key returns config error",
 			args:    []string{"serve"},
 			wantErr: true,
@@ -155,8 +149,8 @@ func TestCommandWiring(t *testing.T) {
 			errMsg:  "master_key",
 		},
 		{
-			// Without QOVIRA_MASTER_KEY set the config loader fails fast with
-			// an aggregated validation error before any migration runs.
+			// Without QOVIRA_MASTER_KEY set the config loader fails fast with an aggregated validation error before
+			// any migration runs.
 			name:    "migrate up without master key returns config error",
 			args:    []string{"migrate", "up"},
 			wantErr: true,
@@ -195,9 +189,8 @@ func TestCommandWiring(t *testing.T) {
 	}
 }
 
-// TestExecuteExitCode verifies that execute() returns 0 for success and 1 for
-// a command error, AND that a failing command writes a diagnostic to stderr
-// (the root sets SilenceErrors, so execute() must print it — otherwise every
+// TestExecuteExitCode verifies that execute() returns 0 for success and 1 for a command error, AND that a failing
+// command writes a diagnostic to stderr (the root sets SilenceErrors, so execute() must print it — otherwise every
 // command, including the real bodies added later, would fail silently).
 func TestExecuteExitCode(t *testing.T) {
 	t.Parallel()

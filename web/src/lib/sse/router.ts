@@ -1,12 +1,10 @@
 // Typed SSE event router.
 //
-// Dispatches incoming SSE events by name to the correct handler. Unknown event
-// names are ignored safely. JSON parse errors are caught and suppressed — a
-// malformed server event must not bring down the connection.
+// Dispatches incoming SSE events by name to the correct handler. Unknown event names are ignored safely. JSON parse
+// errors are caught and suppressed — a malformed server event must not bring down the connection.
 //
-// The router is pure: it takes an event name, raw data string, and a handler
-// bag. The caller (the SSE client) supplies the handler bag, which is wired
-// to the reminders and conversation stores.
+// The router is pure: it takes an event name, raw data string, and a handler bag. The caller (the SSE client) supplies
+// the handler bag, which is wired to the reminders and conversation stores.
 //
 // Event taxonomy (from harness.go payload structs + reminders/reminders.go):
 //   reminder.*           → onReminderEvent  (reminder store)
@@ -110,8 +108,8 @@ export interface RouterHandlers {
  * @param rawData   - The raw "data:" field value (unparsed JSON string).
  * @param handlers  - The handler bag wired to stores.
  *
- * Unknown event names are silently ignored. Malformed JSON data is caught and
- * suppressed — the handler is NOT called if the payload cannot be parsed.
+ * Unknown event names are silently ignored. Malformed JSON data is caught and suppressed — the handler is NOT called if
+ * the payload cannot be parsed.
  */
 export function routeEvent(eventName: string, rawData: string, handlers: RouterHandlers): void {
   // reminder.* — route everything with this prefix to the reminder handler.

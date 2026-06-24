@@ -1,5 +1,5 @@
-// Tests for the shared formatDueAt datetime helper.
-// Environment: browser (happy-dom) — included via src/lib/**/*.test.ts pattern.
+// Tests for the shared formatDueAt datetime helper. Environment: browser (happy-dom) — included via
+// src/lib/**/*.test.ts pattern.
 import { describe, expect, it } from "vitest";
 
 import { formatDueAt } from "./datetime.js";

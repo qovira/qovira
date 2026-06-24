@@ -3,13 +3,9 @@ info:
   title: Qovira API
   version: "0.1"
   description: >-
-    The Qovira server API. All endpoints are under /api/v1 and speak
-    application/json. Error responses use application/problem+json (RFC 9457)
-    with a `code` extension field that clients branch on.
+    The Qovira server API. All endpoints are under /api/v1 and speak application/json. Error responses use application/problem+json (RFC 9457) with a `code` extension field that clients branch on.
 
-    Authentication: session cookie __Host-qovira_session (set by POST /auth/login).
-    CSRF: POST/PATCH/DELETE require a CSRF-Token header echoed from the qovira_csrf
-    cookie (double-submit pattern).
+    Authentication: session cookie __Host-qovira_session (set by POST /auth/login). CSRF: POST/PATCH/DELETE require a CSRF-Token header echoed from the qovira_csrf cookie (double-submit pattern).
 
 servers:
   - url: /api/v1
@@ -28,9 +24,7 @@ components:
         type:
           type: string
           format: uri
-          description: >-
-            Stable URL identifying the problem kind.
-            Always "https://qovira.ai/errors/" + code.
+          description: Stable URL identifying the problem kind. Always "https://qovira.ai/errors/" + code.
           example: "https://qovira.ai/errors/not_found"
         title:
           type: string
@@ -50,9 +44,7 @@ components:
           example: "not_found"
         requestId:
           type: string
-          description: >-
-            Correlation ID tying this response to server logs.
-            Always present; sentinel "unknown" if none in context.
+          description: Correlation ID tying this response to server logs. Always present; sentinel "unknown" if none in context.
           example: "a1b2c3d4e5f6"
         errors:
           type: array
@@ -119,15 +111,10 @@ components:
           description: RFC 5545 RRULE string for recurring reminders. Absent for one-shot.
         tz:
           type: string
-          description: >-
-            Snapshotted IANA timezone. NOTE: field name is `tz` (not `timezone`)
-            to distinguish from User.timezone.
+          description: "Snapshotted IANA timezone. NOTE: field name is `tz` (not `timezone`) to distinguish from User.timezone."
         autoComplete:
           type: boolean
-          description: >-
-            When true (the default), firing the reminder automatically completes it.
-            When false, firing leaves status active (used for recurring reminders
-            that fire but stay active until the user completes them manually).
+          description: When true (the default), firing the reminder automatically completes it. When false, firing leaves status active (used for recurring reminders that fire but stay active until the user completes them manually).
         status:
           type: string
           enum: [active, completed]
@@ -303,9 +290,7 @@ paths:
     get:
       operationId: getHealthz
       summary: Health check
-      description: >-
-        Public health probe. Returns 200 with service status and version.
-        Not under /api/v1 — served directly at /healthz.
+      description: Public health probe. Returns 200 with service status and version. Not under /api/v1 — served directly at /healthz.
       tags: [health]
       servers:
         - url: /
@@ -331,10 +316,7 @@ paths:
     post:
       operationId: postAuthLogin
       summary: Log in
-      description: >-
-        Public endpoint. Authenticates with email + password, mints a session,
-        and sets the __Host-qovira_session (HttpOnly) and qovira_csrf (readable)
-        cookies. The session token is never returned in the body.
+      description: Public endpoint. Authenticates with email + password, mints a session, and sets the __Host-qovira_session (HttpOnly) and qovira_csrf (readable) cookies. The session token is never returned in the body.
       tags: [auth]
       requestBody:
         required: true
@@ -420,9 +402,7 @@ paths:
     patch:
       operationId: patchMe
       summary: Update current user profile
-      description: >-
-        Merge-patch semantics: present fields are set, absent fields unchanged.
-        null is not accepted (use an explicit empty string if you need to clear).
+      description: "Merge-patch semantics: present fields are set, absent fields unchanged. null is not accepted (use an explicit empty string if you need to clear)."
       tags: [me]
       requestBody:
         required: true
@@ -489,12 +469,7 @@ paths:
     get:
       operationId: listConversations
       summary: List conversations (cursor-paginated, most-recently-active first)
-      description: >-
-        Returns a cursor-paginated list of the caller's conversations ordered by
-        most-recently-active first (updated_at DESC, id DESC). Each item includes
-        an opaque preview derived from the first user message in the conversation,
-        truncated to ~80 characters. Unknown query parameters are rejected with
-        400 unknown_query_param.
+      description: Returns a cursor-paginated list of the caller's conversations ordered by most-recently-active first (updated_at DESC, id DESC). Each item includes an opaque preview derived from the first user message in the conversation, truncated to ~80 characters. Unknown query parameters are rejected with 400 unknown_query_param.
       tags: [conversations]
       parameters:
         - name: cursor
@@ -534,9 +509,7 @@ paths:
     get:
       operationId: getConversation
       summary: Get conversation history
-      description: >-
-        Returns the full chronological message history for the conversation.
-        Returns 404 when the conversation does not exist or belongs to another user.
+      description: Returns the full chronological message history for the conversation. Returns 404 when the conversation does not exist or belongs to another user.
       tags: [conversations]
       parameters:
         - name: id
@@ -561,10 +534,7 @@ paths:
     post:
       operationId: postConversationMessage
       summary: Send a message to a conversation
-      description: >-
-        Persists the user message and returns 202 immediately with the persisted
-        message body. The AI response streams over the /events SSE channel tagged
-        by conversationId — the turn outlives this request.
+      description: Persists the user message and returns 202 immediately with the persisted message body. The AI response streams over the /events SSE channel tagged by conversationId — the turn outlives this request.
       tags: [conversations]
       parameters:
         - name: id
@@ -601,9 +571,7 @@ paths:
     post:
       operationId: postConversationConfirmation
       summary: Resolve a pending tool confirmation
-      description: >-
-        Approve or deny a pending tool call confirmation. Returns 202 with no
-        body. The harness re-enters the turn asynchronously via SSE.
+      description: Approve or deny a pending tool call confirmation. Returns 202 with no body. The harness re-enters the turn asynchronously via SSE.
       tags: [conversations]
       parameters:
         - name: id
@@ -700,9 +668,7 @@ paths:
     get:
       operationId: listReminders
       summary: List reminders (cursor-paginated)
-      description: >-
-        Returns a cursor-paginated list of reminders. Unknown query parameters
-        are rejected with 400 unknown_query_param.
+      description: Returns a cursor-paginated list of reminders. Unknown query parameters are rejected with 400 unknown_query_param.
       tags: [reminders]
       parameters:
         - name: cursor
@@ -781,10 +747,7 @@ paths:
     patch:
       operationId: patchReminder
       summary: Update a reminder
-      description: >-
-        Merge-patch semantics: present fields are set, absent fields unchanged.
-        null explicitly clears a nullable field (notes, rrule).
-        `status` field routes to complete/reopen logic.
+      description: "Merge-patch semantics: present fields are set, absent fields unchanged. null explicitly clears a nullable field (notes, rrule). `status` field routes to complete/reopen logic."
       tags: [reminders]
       parameters:
         - name: id

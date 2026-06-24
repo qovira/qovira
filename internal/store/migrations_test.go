@@ -17,8 +17,7 @@ import (
 // testKey is a valid-length SQLCipher passphrase for use in migration tests.
 const testKey = "a-sufficiently-long-passphrase-for-sqlcipher"
 
-// openTestStore is a helper that opens a store at a temp-dir path and
-// registers a Cleanup to close it.
+// openTestStore is a helper that opens a store at a temp-dir path and registers a Cleanup to close it.
 func openTestStore(t *testing.T, dir string) *store.Store {
 	t.Helper()
 	s, err := store.Open(store.Config{
@@ -50,9 +49,8 @@ func tableExists(t *testing.T, db *sql.DB, name string) bool {
 	return n > 0
 }
 
-// TestRunnerUp_CreatesSchema verifies that Runner.Up applies migrations and
-// creates the expected schema objects (instance, user_data, settings, users,
-// sessions, conversations, messages, and the goose version table).
+// TestRunnerUp_CreatesSchema verifies that Runner.Up applies migrations and creates the expected schema objects
+// (instance, user_data, settings, users, sessions, conversations, messages, and the goose version table).
 func TestRunnerUp_CreatesSchema(t *testing.T) {
 	t.Parallel()
 
@@ -89,11 +87,9 @@ func TestRunnerUp_CreatesSchema(t *testing.T) {
 	}
 }
 
-// TestRunnerDown_RevertsSchema verifies that Runner.Down rolls back the last
-// applied migration. A single Down call reverts only the top migration while
-// leaving all earlier migrations intact. The messages table must still be
-// present after this Down because it was created by migration 7 and no
-// Down in the chain removes it.
+// TestRunnerDown_RevertsSchema verifies that Runner.Down rolls back the last applied migration. A single Down call
+// reverts only the top migration while leaving all earlier migrations intact. The messages table must still be present
+// after this Down because it was created by migration 7 and no Down in the chain removes it.
 func TestRunnerDown_RevertsSchema(t *testing.T) {
 	t.Parallel()
 
@@ -135,9 +131,8 @@ func TestRunnerDown_RevertsSchema(t *testing.T) {
 	}
 }
 
-// TestRunnerStatus_ReflectsAppliedState verifies that Status output correctly
-// reflects the state before and after Up. Before Up the single migration is
-// pending; after Up it is applied.
+// TestRunnerStatus_ReflectsAppliedState verifies that Status output correctly reflects the state before and after Up.
+// Before Up the single migration is pending; after Up it is applied.
 func TestRunnerStatus_ReflectsAppliedState(t *testing.T) {
 	t.Parallel()
 
@@ -170,8 +165,8 @@ func TestRunnerStatus_ReflectsAppliedState(t *testing.T) {
 	}
 }
 
-// TestRunnerUpDownStatus_RoundTrip is the integration round-trip that maps to
-// acceptance criterion 3: Up → Status shows applied → Down → Status shows pending.
+// TestRunnerUpDownStatus_RoundTrip is the integration round-trip that maps to acceptance criterion 3: Up → Status shows
+// applied → Down → Status shows pending.
 func TestRunnerUpDownStatus_RoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -206,8 +201,8 @@ func TestRunnerUpDownStatus_RoundTrip(t *testing.T) {
 	if !strings.Contains(afterDown.String(), string(goose.StatePending)) {
 		t.Errorf("after Down: expected pending state in status output, got:\n%s", afterDown.String())
 	}
-	// The messages table was created by migration 7 and no Down in the chain after
-	// that removes it, so it must still be present.
+	// The messages table was created by migration 7 and no Down in the chain after that removes it, so it must still be
+	// present.
 	if !tableExists(t, s.Writer(), "messages") {
 		t.Error("messages table must be present after top-migration Down (migration 7 is still applied)")
 	}
@@ -226,17 +221,16 @@ func TestRunnerUpDownStatus_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestRunnerUp_BadMigration verifies that a broken migration surfaces a
-// wrapped, non-panic error through the real Runner.Up code path. This
-// exercises Qovira's fail-fast: Runner.Up over an injected broken fs.FS
-// returns a non-nil wrapped error without panicking.
+// TestRunnerUp_BadMigration verifies that a broken migration surfaces a wrapped, non-panic error through the real
+// Runner.Up code path. This exercises Qovira's fail-fast: Runner.Up over an injected broken fs.FS returns a non-nil
+// wrapped error without panicking.
 func TestRunnerUp_BadMigration(t *testing.T) {
 	t.Parallel()
 
 	s := openTestStore(t, t.TempDir())
 
-	// Construct a synthetic FS with a deliberately broken migration and inject
-	// it into a Runner via the package-internal test helper.
+	// Construct a synthetic FS with a deliberately broken migration and inject it into a Runner via the
+	// package-internal test helper.
 	badFS := fstest.MapFS{
 		"00001_bad.sql": &fstest.MapFile{
 			Data: []byte("-- +goose Up\nNOT VALID SQL AT ALL;\n\n-- +goose Down\nSELECT 1;\n"),
@@ -255,9 +249,8 @@ func TestRunnerUp_BadMigration(t *testing.T) {
 	t.Logf("bad migration error (expected): %v", err)
 }
 
-// TestWriterPoolMigration verifies AC4: migrations run against the write pool,
-// and after migration the read pool (a separate connection pool to the same
-// file) can observe the migrated schema. This structurally confirms the
+// TestWriterPoolMigration verifies AC4: migrations run against the write pool, and after migration the read pool (a
+// separate connection pool to the same file) can observe the migrated schema. This structurally confirms the
 // write-pool-only requirement.
 func TestWriterPoolMigration(t *testing.T) {
 	t.Parallel()
@@ -270,15 +263,14 @@ func TestWriterPoolMigration(t *testing.T) {
 		t.Fatalf("Runner.Up via write pool: %v", err)
 	}
 
-	// The READ pool (separate connection pool, same file) must see the migrated
-	// schema because both pools share the WAL file.
+	// The READ pool (separate connection pool, same file) must see the migrated schema because both pools share the WAL
+	// file.
 	if !tableExists(t, s.Reader(), "instance") {
 		t.Error("instance table not visible via read pool after migration on write pool")
 	}
 }
 
-// TestDBPath verifies that DBPath derives the expected path from a given
-// dataDir.
+// TestDBPath verifies that DBPath derives the expected path from a given dataDir.
 func TestDBPath(t *testing.T) {
 	t.Parallel()
 
@@ -289,8 +281,8 @@ func TestDBPath(t *testing.T) {
 	}
 }
 
-// TestRunnerStatus_WritesToWriter verifies that Runner.Status writes output to
-// the provided io.Writer and does not print to stdout directly.
+// TestRunnerStatus_WritesToWriter verifies that Runner.Status writes output to the provided io.Writer and does not
+// print to stdout directly.
 func TestRunnerStatus_WritesToWriter(t *testing.T) {
 	t.Parallel()
 

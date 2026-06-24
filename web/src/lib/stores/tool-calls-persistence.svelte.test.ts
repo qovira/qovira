@@ -1,8 +1,7 @@
 // Tests for tool-call persistence across turn finalization (Fix 1 — AC2).
 //
-// Verifies that tool-call entries remain associated with an assistant turn
-// AFTER the streaming sentinel id (__streaming__) is swapped for the real
-// messageId by finalizeToolCallsForMessage(). This is the key invariant for
+// Verifies that tool-call entries remain associated with an assistant turn AFTER the streaming sentinel id
+// (__streaming__) is swapped for the real messageId by finalizeToolCallsForMessage(). This is the key invariant for
 // "cards must persist inline after the turn finalizes".
 //
 // Rune environment: node + Svelte compiler (vitest project "runes").

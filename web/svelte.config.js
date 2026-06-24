@@ -9,8 +9,8 @@ const config = {
     adapter: adapter({
       fallback: "index.html",
     }),
-    // Output stays at the default web/build — wiring into the Go embed is
-    // out of scope for this issue (handled by Server Foundation).
+    // Output stays at the default web/build — wiring into the Go embed is out of scope for this
+    // issue (handled by Server Foundation).
   },
 };
 

@@ -1,14 +1,13 @@
 /**
  * shouldCache — pure cache-routing decision for the app-shell service worker.
  *
- * Extracted from service-worker.ts so it can be unit-tested without the
- * $service-worker ambient module or a real service-worker execution context.
+ * Extracted from service-worker.ts so it can be unit-tested without the $service-worker ambient module or a real
+ * service-worker execution context.
  *
  * @param url    The full URL of the request.
  * @param method The HTTP method (GET, POST, …).
  * @param selfOrigin The origin of the service worker scope (e.g. "https://app.example.com").
- *   Defaults to `self.location.origin` in service-worker context; callers may
- *   pass it explicitly for testing.
+ *   Defaults to `self.location.origin` in service-worker context; callers may pass it explicitly for testing.
  *
  * Rules (in priority order):
  *   1. Non-GET/HEAD methods → never cache (POST, PATCH, DELETE, etc.)
@@ -32,10 +31,9 @@ export function shouldCache(url: string, method: string, selfOrigin?: string): b
     return false;
   }
 
-  // Rule 2 — cross-origin: requests whose origin differs from the SW scope
-  // are never cached. If no selfOrigin is provided, default to the request's
-  // own origin so purely local paths always pass (backwards-safe fallback
-  // for environments without `self.location`).
+  // Rule 2 — cross-origin: requests whose origin differs from the SW scope are never cached. If no selfOrigin is
+  // provided, default to the request's own origin so purely local paths always pass (backwards-safe fallback for
+  // environments without `self.location`).
   const origin = selfOrigin ?? parsed.origin;
   if (parsed.origin !== origin) {
     return false;

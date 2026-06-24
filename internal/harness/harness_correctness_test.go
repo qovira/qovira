@@ -1,7 +1,7 @@
 package harness_test
 
-// Correctness regression tests for H1 work unit.
-// Tests are TDD: written to fail against the original code and pass after the fix.
+// Correctness regression tests for H1 work unit. Tests are TDD: written to fail against the original code and pass
+// after the fix.
 
 import (
 	"context"
@@ -23,11 +23,10 @@ import (
 
 // ── Correctness #1: empty tool-call ID executes exactly once ─────────────────
 //
-// The gateway never synthesizes a tool-call ID; an empty ID arrives in the
-// streamed ToolCall. Before the fix the NULL-id result never entered the
-// idempotency sets so the tool re-ran every step until stepCap.
-// After the fix the harness synthesises a unique ID for any empty-ID call
-// before persistence so the idempotency check fires and the tool runs once.
+// The gateway never synthesizes a tool-call ID; an empty ID arrives in the streamed ToolCall. Before the fix the
+// NULL-id result never entered the idempotency sets so the tool re-ran every step until stepCap. After the fix the
+// harness synthesises a unique ID for any empty-ID call before persistence so the idempotency check fires and the
+// tool runs once.
 
 func TestToolCall_EmptyID_ExecutesExactlyOnce(t *testing.T) {
 	t.Parallel()
@@ -89,8 +88,8 @@ func TestToolCall_EmptyID_ExecutesExactlyOnce(t *testing.T) {
 
 // ── Correctness #2: persistAssistantMessage records finish_reason correctly ───
 //
-// Before the fix persistAssistantMessage hardcoded finish_reason="stop".
-// A tool-call round must record "tool_calls" and a plain reply must record "stop".
+// Before the fix persistAssistantMessage hardcoded finish_reason="stop". A tool-call round must record "tool_calls"
+// and a plain reply must record "stop".
 
 func TestPersistAssistantMessage_FinishReason(t *testing.T) {
 	t.Parallel()
@@ -177,19 +176,17 @@ func TestPersistAssistantMessage_FinishReason(t *testing.T) {
 
 // ── Cleanup #7: logged panic value is bounded/typed ───────────────────────────
 //
-// Raw panic values can embed sensitive data. After the fix the logged "panic"
-// field is a sanitised, bounded, type-tagged string (sanitizePanic): capped at
-// 256 bytes on a UTF-8 rune boundary and prefixed with the value's dynamic type,
-// not the raw recovered interface{} value.
+// Raw panic values can embed sensitive data. After the fix the logged "panic" field is a sanitised, bounded,
+// type-tagged string (sanitizePanic): capped at 256 bytes on a UTF-8 rune boundary and prefixed with the value's
+// dynamic type, not the raw recovered interface{} value.
 //
-// The test injects a panic whose string form exceeds the cap AND has a
-// multi-byte rune straddling the byte-256 boundary, captures the harness log via
-// a recording slog.Handler, and asserts the field is type-tagged, truncated,
-// well-formed UTF-8, and within the cap.
+// The test injects a panic whose string form exceeds the cap AND has a multi-byte rune straddling the byte-256
+// boundary, captures the harness log via a recording slog.Handler, and asserts the field is type-tagged,
+// truncated, well-formed UTF-8, and within the cap.
 
-// capturingHandler is a minimal slog.Handler that records each record's
-// attributes (merged with any WithAttrs context) under a mutex, so a test can
-// read a logged field even though the harness logs from a background goroutine.
+// capturingHandler is a minimal slog.Handler that records each record's attributes (merged with any WithAttrs
+// context) under a mutex, so a test can read a logged field even though the harness logs from a background
+// goroutine.
 type capturingHandler struct {
 	mu      *sync.Mutex
 	records *[]map[string]any
@@ -243,10 +240,9 @@ func TestPanic_LoggedValueIsBounded(t *testing.T) {
 	p := makeTestUser(t, s)
 	bus := &fakeBus{}
 
-	// 255 ASCII bytes, then a run of 'é' (2 bytes each: 0xC3 0xA9). The first
-	// 'é' starts at byte 255, so byte 256 — the raw cap offset — lands on its
-	// continuation byte. A naive byte slice would split it; sanitizePanic must
-	// back up to byte 255 and keep the logged output valid UTF-8.
+	// 255 ASCII bytes, then a run of 'é' (2 bytes each: 0xC3 0xA9). The first 'é' starts at byte 255, so byte 256 —
+	// the raw cap offset — lands on its continuation byte. A naive byte slice would split it; sanitizePanic must back
+	// up to byte 255 and keep the logged output valid UTF-8.
 	panicMsg := strings.Repeat("a", 255) + strings.Repeat("é", 50)
 	gw := makePanicChatter(panicMsg)
 
@@ -310,8 +306,8 @@ func TestPanic_LoggedValueIsBounded(t *testing.T) {
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("logged panic field was not truncated: %q", got)
 	}
-	// The message body (sans "string: " prefix and "…" suffix) must stay within
-	// the 256-byte cap, and the full raw payload must not have leaked.
+	// The message body (sans "string: " prefix and "…" suffix) must stay within the 256-byte cap, and the full raw
+	// payload must not have leaked.
 	body := strings.TrimSuffix(strings.TrimPrefix(got, "string: "), "…")
 	if len(body) > 256 {
 		t.Errorf("logged panic message body = %d bytes, want <= 256", len(body))

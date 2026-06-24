@@ -16,9 +16,8 @@ import (
 	"github.com/qovira/qovira/internal/harness"
 )
 
-// TestIsPublicRoute_LoginEndpoint verifies that POST /api/v1/auth/login is
-// exempted from auth (so an unauthenticated caller can log in) and that GET on
-// the same path is still protected.
+// TestIsPublicRoute_LoginEndpoint verifies that POST /api/v1/auth/login is exempted from auth (so an unauthenticated
+// caller can log in) and that GET on the same path is still protected.
 func TestIsPublicRoute_LoginEndpoint(t *testing.T) {
 	t.Parallel()
 
@@ -37,9 +36,9 @@ func TestIsPublicRoute_LoginEndpoint(t *testing.T) {
 		desc       string
 	}{
 		{
-			// Public — auth does not block it; the API catch-all returns 404 since the
-			// login handler does not exist yet (that's a later slice). A 404 confirms
-			// that auth was bypassed: a 401 would mean auth rejected it.
+			// Public — auth does not block it; the API catch-all returns 404 since the login handler does not
+			// exist yet (that's a later slice). A 404 confirms that auth was bypassed: a 401 would mean auth
+			// rejected it.
 			method:     http.MethodPost,
 			path:       "/api/v1/auth/login",
 			wantStatus: http.StatusNotFound,

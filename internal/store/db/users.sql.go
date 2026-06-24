@@ -29,9 +29,8 @@ type CreateUserParams struct {
 }
 
 // Queries for the users identity table.
-// users is system-owned (no user_id column; it is the identity table from which
-// per-user scope is derived) and is exempt from the scope guard.  All
-// SELECT/UPDATE operations are therefore permitted without a user_id predicate.
+// users is system-owned (no user_id column; it is the identity table from which per-user scope is derived) and is
+// exempt from the scope guard.  All SELECT/UPDATE operations are therefore permitted without a user_id predicate.
 //
 // Parameters use sqlc named params (@name) per the house convention.
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {

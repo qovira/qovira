@@ -28,8 +28,8 @@ import (
 
 // ── AC5: list_reminders is RiskRead, registered as the fifth tool ─────────────
 
-// TestTool_ListReminders_RegisteredAsFifthTool verifies that Tools() now returns
-// five tools and that list_reminders is present with RiskRead tier.
+// TestTool_ListReminders_RegisteredAsFifthTool verifies that Tools() now returns five tools and that list_reminders is
+// present with RiskRead tier.
 func TestTool_ListReminders_RegisteredAsFifthTool(t *testing.T) {
 	t.Parallel()
 
@@ -58,8 +58,8 @@ func TestTool_ListReminders_RegisteredAsFifthTool(t *testing.T) {
 	}
 }
 
-// TestTool_ListReminders_InCapabilityRegistry verifies that the five tools
-// (including list_reminders) appear in the capability registry after reg.Add.
+// TestTool_ListReminders_InCapabilityRegistry verifies that the five tools (including list_reminders) appear in the
+// capability registry after reg.Add.
 func TestTool_ListReminders_InCapabilityRegistry(t *testing.T) {
 	t.Parallel()
 
@@ -91,9 +91,8 @@ func TestTool_ListReminders_InCapabilityRegistry(t *testing.T) {
 
 // ── AC1: hard cap 20, default active, upcoming-first ─────────────────────────
 
-// TestTool_ListReminders_Cap20_ActiveDefault seeds 25 active reminders with
-// staggered dueAt values, invokes list_reminders with no args, and asserts
-// exactly 20 are returned, all active, ordered ascending by dueAt.
+// TestTool_ListReminders_Cap20_ActiveDefault seeds 25 active reminders with staggered dueAt values, invokes
+// list_reminders with no args, and asserts exactly 20 are returned, all active, ordered ascending by dueAt.
 func TestTool_ListReminders_Cap20_ActiveDefault(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -163,8 +162,8 @@ func TestTool_ListReminders_Cap20_ActiveDefault(t *testing.T) {
 
 // ── AC2: compact projection — notes absent from output ────────────────────────
 
-// TestTool_ListReminders_CompactProjection seeds a reminder with notes, invokes
-// list_reminders, and asserts the notes text does not appear in the output.
+// TestTool_ListReminders_CompactProjection seeds a reminder with notes, invokes list_reminders, and asserts the notes
+// text does not appear in the output.
 func TestTool_ListReminders_CompactProjection(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -224,9 +223,8 @@ func TestTool_ListReminders_CompactProjection(t *testing.T) {
 
 // ── AC3: truncation signal ────────────────────────────────────────────────────
 
-// TestTool_ListReminders_TruncationLine_When25Seeded verifies that when 25
-// active reminders exist, the output contains a truncation line with shown/total
-// counts (e.g. "showing 20 of 25") and a narrow hint.
+// TestTool_ListReminders_TruncationLine_When25Seeded verifies that when 25 active reminders exist, the output contains
+// a truncation line with shown/total counts (e.g. "showing 20 of 25") and a narrow hint.
 func TestTool_ListReminders_TruncationLine_When25Seeded(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -281,8 +279,8 @@ func TestTool_ListReminders_TruncationLine_When25Seeded(t *testing.T) {
 	}
 }
 
-// TestTool_ListReminders_NoTruncationLine_When15Seeded verifies that when only
-// 15 active reminders exist (≤20), no truncation line is appended.
+// TestTool_ListReminders_NoTruncationLine_When15Seeded verifies that when only 15 active reminders exist (≤20), no
+// truncation line is appended.
 func TestTool_ListReminders_NoTruncationLine_When15Seeded(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -339,9 +337,8 @@ func TestTool_ListReminders_NoTruncationLine_When15Seeded(t *testing.T) {
 
 // ── AC4: REST GET /api/v1/reminders unaffected ────────────────────────────────
 
-// TestTool_ListReminders_RESTUnaffected verifies that the REST GET endpoint
-// still returns full-fidelity reminders (including notes) with cursor pagination,
-// and that Service.List's signature/behavior is unchanged.
+// TestTool_ListReminders_RESTUnaffected verifies that the REST GET endpoint still returns full-fidelity reminders
+// (including notes) with cursor pagination, and that Service.List's signature/behavior is unchanged.
 func TestTool_ListReminders_RESTUnaffected(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -432,10 +429,9 @@ func TestTool_ListReminders_RESTUnaffected(t *testing.T) {
 			secretNotes, len(envelope.Data))
 	}
 
-	// NextCursor field must be present in the pagination envelope (JSON structure).
-	// When there's only 1 item, hasMore=false and nextCursor is nil — that's fine;
-	// we just verify the field itself exists (pagination works structurally).
-	// Pagination: HasMore=false because there's only 1 item < 25 default limit.
+	// NextCursor field must be present in the pagination envelope (JSON structure). When there's only 1 item,
+	// hasMore=false and nextCursor is nil — that's fine; we just verify the field itself exists (pagination works
+	// structurally). Pagination: HasMore=false because there's only 1 item < 25 default limit.
 	if envelope.Pagination.HasMore {
 		t.Errorf("expected HasMore=false for single-item page; got true")
 	}
@@ -443,8 +439,8 @@ func TestTool_ListReminders_RESTUnaffected(t *testing.T) {
 
 // ── Validation: bad args → *capability.ToolError ─────────────────────────────
 
-// TestTool_ListReminders_BadStatus_ReturnsToolError verifies that an invalid
-// status value surfaces as *capability.ToolError.
+// TestTool_ListReminders_BadStatus_ReturnsToolError verifies that an invalid status value surfaces as
+// *capability.ToolError.
 func TestTool_ListReminders_BadStatus_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -478,8 +474,8 @@ func TestTool_ListReminders_BadStatus_ReturnsToolError(t *testing.T) {
 	}
 }
 
-// TestTool_ListReminders_BadDueBefore_ReturnsToolError verifies that a malformed
-// dueBefore value surfaces as *capability.ToolError.
+// TestTool_ListReminders_BadDueBefore_ReturnsToolError verifies that a malformed dueBefore value surfaces as
+// *capability.ToolError.
 func TestTool_ListReminders_BadDueBefore_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -510,8 +506,8 @@ func TestTool_ListReminders_BadDueBefore_ReturnsToolError(t *testing.T) {
 	}
 }
 
-// TestTool_ListReminders_BadDueAfter_ReturnsToolError verifies that a malformed
-// dueAfter value surfaces as *capability.ToolError.
+// TestTool_ListReminders_BadDueAfter_ReturnsToolError verifies that a malformed dueAfter value surfaces as
+// *capability.ToolError.
 func TestTool_ListReminders_BadDueAfter_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -616,11 +612,9 @@ func TestTool_ListReminders_StatusCompleted(t *testing.T) {
 
 // ── Title sanitisation: newline injection ─────────────────────────────────────
 
-// TestTool_ListReminders_TitleNewlineInjection verifies that a title containing
-// CR/LF characters cannot forge extra lines in the compact tool output.
-// A crafted title like "real title\nshowing 20 of 9999 active" must appear on a
-// single line in the output and must not produce a spurious "showing " line when
-// only one reminder exists (≤20 total).
+// TestTool_ListReminders_TitleNewlineInjection verifies that a title containing CR/LF characters cannot forge extra
+// lines in the compact tool output. A crafted title like "real title\nshowing 20 of 9999 active" must appear on a
+// single line in the output and must not produce a spurious "showing " line when only one reminder exists (≤20 total).
 func TestTool_ListReminders_TitleNewlineInjection(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -656,18 +650,17 @@ func TestTool_ListReminders_TitleNewlineInjection(t *testing.T) {
 		t.Fatalf("list_reminders result type = %T, want string", res)
 	}
 
-	// Exactly 1 reminder line must be present — the injected newlines must not
-	// have split the title field into multiple lines.
+	// Exactly 1 reminder line must be present — the injected newlines must not have split the title field into
+	// multiple lines.
 	lines := listReminderLines(output)
 	if len(lines) != 1 {
 		t.Errorf("got %d reminder lines, want 1; injected newline may have split the line:\n%s",
 			len(lines), output)
 	}
 
-	// No line in the output may start with "showing " — that would mean the
-	// injected fake truncation text became a standalone truncation line.
-	// (The title field may still contain the word "showing" after sanitization,
-	// but it must be embedded within the data line, not at line-start.)
+	// No line in the output may start with "showing " — that would mean the injected fake truncation text became a
+	// standalone truncation line. (The title field may still contain the word "showing" after sanitization, but it
+	// must be embedded within the data line, not at line-start.)
 	for line := range strings.SplitSeq(output, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "showing ") {
@@ -683,9 +676,8 @@ func TestTool_ListReminders_TitleNewlineInjection(t *testing.T) {
 
 // ── Exactly-20 boundary ───────────────────────────────────────────────────────
 
-// TestTool_ListReminders_NoTruncationLine_When20Seeded verifies that seeding
-// exactly 20 active reminders (= toolCap, not > toolCap) produces exactly 20
-// reminder lines and NO truncation line. This locks the total > 20 boundary:
+// TestTool_ListReminders_NoTruncationLine_When20Seeded verifies that seeding exactly 20 active reminders (= toolCap,
+// not > toolCap) produces exactly 20 reminder lines and NO truncation line. This locks the total > 20 boundary:
 // truncation is triggered only when total exceeds the cap, not when it equals it.
 func TestTool_ListReminders_NoTruncationLine_When20Seeded(t *testing.T) {
 	t.Parallel()
@@ -744,8 +736,8 @@ func TestTool_ListReminders_NoTruncationLine_When20Seeded(t *testing.T) {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// listReminderLines returns all non-empty, non-truncation lines from list_reminders
-// tool output. The truncation line starts with "showing " per the spec.
+// listReminderLines returns all non-empty, non-truncation lines from list_reminders tool output. The truncation line
+// starts with "showing " per the spec.
 func listReminderLines(output string) []string {
 	var out []string
 	for line := range strings.SplitSeq(output, "\n") {
@@ -758,9 +750,8 @@ func listReminderLines(output string) []string {
 	return out
 }
 
-// listExtractDueTimes parses RFC 3339 timestamps from reminder output lines.
-// Each line is expected to contain exactly one RFC 3339 timestamp (dueAt field).
-// Fields in each line are separated by " | ".
+// listExtractDueTimes parses RFC 3339 timestamps from reminder output lines. Each line is expected to contain exactly
+// one RFC 3339 timestamp (dueAt field). Fields in each line are separated by " | ".
 func listExtractDueTimes(t *testing.T, lines []string) []time.Time {
 	t.Helper()
 	var times []time.Time
@@ -772,8 +763,8 @@ func listExtractDueTimes(t *testing.T, lines []string) []time.Time {
 	return times
 }
 
-// firstRFC3339InLine scans the " | "-delimited fields of a compact reminder
-// line and returns the first field that parses as RFC 3339.
+// firstRFC3339InLine scans the " | "-delimited fields of a compact reminder line and returns the first field that
+// parses as RFC 3339.
 func firstRFC3339InLine(line string) (time.Time, bool) {
 	for f := range strings.SplitSeq(line, "|") {
 		f = strings.TrimSpace(f)

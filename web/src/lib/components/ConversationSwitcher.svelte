@@ -2,21 +2,20 @@
   // ConversationSwitcher — slide-over panel listing the user's conversations.
   //
   // Behaviour:
-  //   - On open: fetches the first page of conversations (most-recently-active first)
-  //     via GET /api/v1/conversations.
+  //   - On open: fetches the first page of conversations (most-recently-active first) via
+  //     GET /api/v1/conversations.
   //   - "Load more" button pages through the cursor-paginated list.
-  //   - Selecting a conversation calls switchConversation(id) (which resets
-  //     tool-calls + confirmations, fetches history, sets the active conversation),
-  //     then closes the panel.
-  //   - "New conversation" calls startNewConversation() (resets stores, mints a
-  //     fresh ULID, empty history) and closes the panel.
+  //   - Selecting a conversation calls switchConversation(id) (which resets tool-calls + confirmations,
+  //     fetches history, sets the active conversation), then closes the panel.
+  //   - "New conversation" calls startNewConversation() (resets stores, mints a fresh ULID, empty history)
+  //     and closes the panel.
   //
   // Props:
   //   open         — bindable; controls the slide-over visibility.
-  //   onconvclose  — callback prop called when the panel closes (via selection,
-  //                  new conversation, Esc, or overlay click).
-  //   focusComposer — callback prop called when "New conversation" is selected,
-  //                   so the parent can focus the composer textarea.
+  //   onconvclose  — callback prop called when the panel closes (via selection, new conversation, Esc, or
+  //                  overlay click).
+  //   focusComposer — callback prop called when "New conversation" is selected, so the parent can
+  //                   focus the composer textarea.
 
   import type { components } from "$lib/api/schema.d.ts";
   import { Api } from "$lib/api/index.js";
@@ -52,9 +51,9 @@
   let loading = $state(false);
   let loadingMore = $state(false);
   /**
-   * True when loadPage() threw (network error, unexpected server error).
-   * Distinct from an empty list so the UI can show "couldn't load / retry"
-   * instead of the "No conversations yet" empty-state, which would be a lie.
+   * True when loadPage() threw (network error, unexpected server error). Distinct from an empty list so the
+   * UI can show "couldn't load / retry" instead of the "No conversations yet" empty-state, which would be a
+   * lie.
    */
   let loadError = $state(false);
 
@@ -62,16 +61,15 @@
   const activeId = $derived(getActiveConversationId());
 
   // ---------------------------------------------------------------------------
-  // Load the first page when the panel opens.
-  // $effect is appropriate: syncing with an external I/O system (the API)
-  // triggered by a DOM/prop state change.
+  // Load the first page when the panel opens. $effect is appropriate: syncing with an external I/O system
+  // (the API) triggered by a DOM/prop state change.
   // ---------------------------------------------------------------------------
   $effect(() => {
     if (!open) {
       return;
     }
-    // Reset and reload the list each time the panel opens so it reflects the
-    // latest state (e.g. a new conversation that materialized since last open).
+    // Reset and reload the list each time the panel opens so it reflects the latest state (e.g. a new
+    // conversation that materialized since last open).
     conversations = [];
     nextCursor = null;
     hasMore = false;
@@ -96,11 +94,10 @@
       });
 
       if (result.error !== undefined) {
-        // Server returned a problem+json error. The Api wrapper resolves with
-        // { error, data: undefined } rather than throwing, so catch never runs
-        // for 4xx/5xx. Set loadError explicitly to distinguish a genuine server
-        // error from a successful empty list (which would be a lie to show
-        // "No conversations yet" for).
+        // Server returned a problem+json error. The Api wrapper resolves with { error, data: undefined }
+        // rather than throwing, so catch never runs for 4xx/5xx. Set loadError explicitly to distinguish a
+        // genuine server error from a successful empty list (which would be a lie to show "No conversations
+        // yet" for).
         loadError = true;
       } else {
         // Success — data is defined (non-error branch of the discriminated union).
@@ -129,8 +126,7 @@
   // ---------------------------------------------------------------------------
 
   async function handleSelect(id: string): Promise<void> {
-    // switchConversation resets tool-calls + confirmations, fetches history,
-    // and calls setActiveConversation.
+    // switchConversation resets tool-calls + confirmations, fetches history, and calls setActiveConversation.
     await switchConversation(id);
     close();
   }

@@ -1,11 +1,10 @@
-// Tests for the ui-preferences store: railPinned load/persist and state transitions.
-// Rune logic is tested with $effect.root + flushSync in the node environment.
+// Tests for the ui-preferences store: railPinned load/persist and state transitions. Rune logic is tested with
+// $effect.root + flushSync in the node environment.
 import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// We re-import the module fresh for each group via vi.resetModules in beforeEach.
-// Module-level $state means a single singleton per import; to isolate tests we
-// reset state manually via the exported setters rather than re-importing.
+// We re-import the module fresh for each group via vi.resetModules in beforeEach. Module-level $state means a single
+// singleton per import; to isolate tests we reset state manually via the exported setters rather than re-importing.
 import { getRailPinned, initPrefs, setRailPinned } from "./ui-preferences.svelte.js";
 
 // ---------------------------------------------------------------------------
@@ -151,10 +150,9 @@ describe("setRailPinned()", () => {
 // ---------------------------------------------------------------------------
 // Rail state-machine transitions (collapsed / peek / pinned)
 // ---------------------------------------------------------------------------
-// The state machine lives in the layout component (pointer/focus events).
-// Here we test the store invariant: pinned=true always overrides the peek state
-// at the store level, and that setRailPinned(true/false) correctly models the
-// pin/unpin transitions the component relies on.
+// The state machine lives in the layout component (pointer/focus events). Here we test the store invariant:
+// pinned=true always overrides the peek state at the store level, and that setRailPinned(true/false) correctly models
+// the pin/unpin transitions the component relies on.
 
 describe("rail state-machine — store layer", () => {
   it("starts in collapsed state (pinned=false)", () => {

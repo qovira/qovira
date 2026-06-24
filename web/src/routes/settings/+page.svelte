@@ -11,8 +11,8 @@
     try {
       await logout();
     } finally {
-      // logout() navigates to /login on success; reset in case navigation is
-      // interrupted so the control never sticks disabled.
+      // logout() navigates to /login on success; reset in case navigation is interrupted so the control never sticks
+      // disabled.
       loggingOut = false;
     }
   }

@@ -11,9 +11,8 @@ import (
 	"github.com/qovira/qovira/internal/gateway"
 )
 
-// openFixture opens a testdata file relative to the test source directory and
-// registers a cleanup to close it. It fails the test immediately if the file
-// cannot be opened.
+// openFixture opens a testdata file relative to the test source directory and registers a cleanup to close it.
+// It fails the test immediately if the file cannot be opened.
 func openFixture(t *testing.T, name string) *os.File {
 	t.Helper()
 	f, err := os.Open("testdata/" + name)
@@ -26,8 +25,8 @@ func openFixture(t *testing.T, name string) *os.File {
 
 // ── AC1: Text-only stream ─────────────────────────────────────────────────────
 
-// TestParseSSE_TextOnly verifies that a clean text-only stream produces the
-// right ordered TextDeltas followed by a Done chunk with correct Usage.
+// TestParseSSE_TextOnly verifies that a clean text-only stream produces the right ordered TextDeltas followed
+// by a Done chunk with correct Usage.
 func TestParseSSE_TextOnly(t *testing.T) {
 	t.Parallel()
 
@@ -79,9 +78,8 @@ func TestParseSSE_TextOnly(t *testing.T) {
 
 // ── AC2: Single tool call fragmented across multiple chunks ───────────────────
 
-// TestParseSSE_SingleToolCall verifies that a tool call fragmented across many
-// delta.tool_calls[] chunks is emitted as exactly one complete ToolCall with
-// the arguments properly concatenated.
+// TestParseSSE_SingleToolCall verifies that a tool call fragmented across many delta.tool_calls[] chunks is emitted
+// as exactly one complete ToolCall with the arguments properly concatenated.
 func TestParseSSE_SingleToolCall(t *testing.T) {
 	t.Parallel()
 
@@ -127,8 +125,8 @@ func TestParseSSE_SingleToolCall(t *testing.T) {
 
 // ── AC3: Multiple parallel tool calls ────────────────────────────────────────
 
-// TestParseSSE_ParallelToolCalls verifies that multiple parallel tool calls
-// (distinct indexes) are each assembled and emitted whole exactly once.
+// TestParseSSE_ParallelToolCalls verifies that multiple parallel tool calls (distinct indexes) are each assembled
+// and emitted whole exactly once.
 func TestParseSSE_ParallelToolCalls(t *testing.T) {
 	t.Parallel()
 
@@ -173,10 +171,9 @@ func TestParseSSE_ParallelToolCalls(t *testing.T) {
 
 // ── AC3 (cont.): Sparse / out-of-order tool-call indices ──────────────────────
 
-// TestParseSSE_SparseToolCallIndices verifies that tool calls whose indices are
-// non-contiguous and first appear out of numeric order (index 2 before index 0)
-// are each assembled whole and emitted in first-seen order — exercising the
-// map-keyed accumulation rather than a naive contiguous-slice assumption.
+// TestParseSSE_SparseToolCallIndices verifies that tool calls whose indices are non-contiguous and first appear
+// out of numeric order (index 2 before index 0) are each assembled whole and emitted in first-seen order —
+// exercising the map-keyed accumulation rather than a naive contiguous-slice assumption.
 func TestParseSSE_SparseToolCallIndices(t *testing.T) {
 	t.Parallel()
 
@@ -219,11 +216,9 @@ func TestParseSSE_SparseToolCallIndices(t *testing.T) {
 	}
 }
 
-// TestParseSSE_LargeArgumentLine verifies a single data line carrying a tool-call
-// arguments payload larger than bufio.Scanner's 64 KiB default is parsed whole
-// rather than misclassified as malformed (the line-buffer ceiling fix). The
-// payload is built in-memory so the test needn't ship a multi-hundred-KiB
-// fixture.
+// TestParseSSE_LargeArgumentLine verifies a single data line carrying a tool-call arguments payload larger than
+// bufio.Scanner's 64 KiB default is parsed whole rather than misclassified as malformed (the line-buffer ceiling
+// fix). The payload is built in-memory so the test needn't ship a multi-hundred-KiB fixture.
 func TestParseSSE_LargeArgumentLine(t *testing.T) {
 	t.Parallel()
 
@@ -267,8 +262,8 @@ func TestParseSSE_LargeArgumentLine(t *testing.T) {
 
 // ── AC4: Missing trailing usage ───────────────────────────────────────────────
 
-// TestParseSSE_NoUsage verifies that a stream without trailing usage terminates
-// cleanly and the Done chunk has nil Usage.
+// TestParseSSE_NoUsage verifies that a stream without trailing usage terminates cleanly and the Done chunk has
+// nil Usage.
 func TestParseSSE_NoUsage(t *testing.T) {
 	t.Parallel()
 
@@ -294,8 +289,8 @@ func TestParseSSE_NoUsage(t *testing.T) {
 
 // ── AC5: Missing [DONE] sentinel ──────────────────────────────────────────────
 
-// TestParseSSE_NoDoneSentinel verifies that a stream that ends without the
-// [DONE] sentinel (end-of-body) still terminates cleanly with a Done chunk.
+// TestParseSSE_NoDoneSentinel verifies that a stream that ends without the [DONE] sentinel (end-of-body) still
+// terminates cleanly with a Done chunk.
 func TestParseSSE_NoDoneSentinel(t *testing.T) {
 	t.Parallel()
 
@@ -327,8 +322,8 @@ func TestParseSSE_NoDoneSentinel(t *testing.T) {
 
 // ── AC6: Keep-alive comment lines ────────────────────────────────────────────
 
-// TestParseSSE_KeepaliveComments verifies that SSE comment lines (lines
-// beginning with ':') are silently ignored and do not affect the output.
+// TestParseSSE_KeepaliveComments verifies that SSE comment lines (lines beginning with ':') are silently ignored
+// and do not affect the output.
 func TestParseSSE_KeepaliveComments(t *testing.T) {
 	t.Parallel()
 
@@ -356,8 +351,8 @@ func TestParseSSE_KeepaliveComments(t *testing.T) {
 
 // ── AC7: Malformed SSE returns distinguishable error ─────────────────────────
 
-// TestParseSSE_MalformedJSON verifies that a data line with invalid JSON
-// returns an error wrapping ErrMalformedStream and does not panic.
+// TestParseSSE_MalformedJSON verifies that a data line with invalid JSON returns an error wrapping ErrMalformedStream
+// and does not panic.
 func TestParseSSE_MalformedJSON(t *testing.T) {
 	t.Parallel()
 
@@ -370,8 +365,8 @@ func TestParseSSE_MalformedJSON(t *testing.T) {
 	}
 }
 
-// TestParseSSE_MalformedJSONInline exercises the same code path via an inline
-// reader so the table-driven approach covers both fixture and inline forms.
+// TestParseSSE_MalformedJSONInline exercises the same code path via an inline reader so the table-driven approach
+// covers both fixture and inline forms.
 func TestParseSSE_MalformedJSONInline(t *testing.T) {
 	t.Parallel()
 
@@ -387,9 +382,9 @@ func TestParseSSE_MalformedJSONInline(t *testing.T) {
 
 // ── GW1 #1: Zero-arg tool call yields valid JSON arguments ──────────────────
 
-// TestParseSSE_ZeroArgToolCall verifies that a tool call whose argument
-// fragments are all empty strings (zero-param tool) emits Arguments that
-// round-trips through json.Marshal rather than the invalid json.RawMessage("").
+// TestParseSSE_ZeroArgToolCall verifies that a tool call whose argument fragments are all empty strings
+// (zero-param tool) emits Arguments that round-trips through json.Marshal rather than the invalid
+// json.RawMessage("").
 func TestParseSSE_ZeroArgToolCall(t *testing.T) {
 	t.Parallel()
 
@@ -431,18 +426,16 @@ func TestParseSSE_ZeroArgToolCall(t *testing.T) {
 
 // ── GW1 #3: Aggregate args-bytes cap and index-count cap ─────────────────────
 
-// TestParseSSE_ArgsCapExceeded verifies that streaming a total argument payload
-// that exceeds the aggregate args-bytes cap returns an error wrapping
-// ErrMalformedStream instead of buffering unboundedly.
+// TestParseSSE_ArgsCapExceeded verifies that streaming a total argument payload that exceeds the aggregate args-bytes
+// cap returns an error wrapping ErrMalformedStream instead of buffering unboundedly.
 //
-// Each individual SSE line stays small (under the per-line 4 MiB cap) but
-// many lines accumulate a total that exceeds any sane per-stream aggregate cap.
+// Each individual SSE line stays small (under the per-line 4 MiB cap) but many lines accumulate a total that
+// exceeds any sane per-stream aggregate cap.
 func TestParseSSE_ArgsCapExceeded(t *testing.T) {
 	t.Parallel()
 
-	// Emit 10 MiB total in 1 KiB fragments across 10 240 SSE lines.
-	// Any reasonable aggregate cap (e.g. 8 MiB) will be exceeded well
-	// before all lines are consumed.
+	// Emit 10 MiB total in 1 KiB fragments across 10 240 SSE lines. Any reasonable aggregate cap (e.g. 8 MiB) will
+	// be exceeded well before all lines are consumed.
 	const fragSize = 1024
 	const numFrags = 10 * 1024 // 10 MiB total
 	frag := strings.Repeat("x", fragSize)
@@ -472,14 +465,13 @@ func TestParseSSE_ArgsCapExceeded(t *testing.T) {
 	}
 }
 
-// TestParseSSE_IndexCountCapExceeded verifies that a stream with more distinct
-// tool-call indices than maxSSEToolCallIndices returns an error wrapping
-// ErrMalformedStream.
+// TestParseSSE_IndexCountCapExceeded verifies that a stream with more distinct tool-call indices than
+// maxSSEToolCallIndices returns an error wrapping ErrMalformedStream.
 func TestParseSSE_IndexCountCapExceeded(t *testing.T) {
 	t.Parallel()
 
-	// Generate a stream with far more distinct tool-call indices than any
-	// reasonable cap. Use 200 indices — well above any expected cap of 64 or 128.
+	// Generate a stream with far more distinct tool-call indices than any reasonable cap. Use 200 indices — well
+	// above any expected cap of 64 or 128.
 	const numIndices = 200
 	var b strings.Builder
 	for i := range numIndices {
@@ -502,11 +494,10 @@ func TestParseSSE_IndexCountCapExceeded(t *testing.T) {
 
 // ── Finding 5: SSE no-space data form, empty-data tolerance, unknown fields ───
 
-// TestParseSSE_EmptyDataLine verifies that a bare "data:" line (no space, empty
-// payload) does NOT abort the stream. The SSE spec allows empty data lines;
-// the no-space fix introduced a regression where CutPrefix("data:") succeeds
-// with rest="" → payload="" → json.Unmarshal("") errors. The fix is to skip
-// the empty payload before attempting JSON decode.
+// TestParseSSE_EmptyDataLine verifies that a bare "data:" line (no space, empty payload) does NOT abort the stream.
+// The SSE spec allows empty data lines; the no-space fix introduced a regression where CutPrefix("data:") succeeds
+// with rest="" → payload="" → json.Unmarshal("") errors. The fix is to skip the empty payload before attempting
+// JSON decode.
 func TestParseSSE_EmptyDataLine(t *testing.T) {
 	t.Parallel()
 
@@ -540,18 +531,17 @@ func TestParseSSE_EmptyDataLine(t *testing.T) {
 
 // ── Finding 5: SSE no-space data form and unknown field tolerance ─────────────
 
-// TestParseSSE_DataNoSpace verifies that a "data:{...}" line (no space after
-// the colon) is parsed correctly. Per the SSE spec the single space after the
-// colon is optional, so silently dropping such chunks is a correctness bug.
+// TestParseSSE_DataNoSpace verifies that a "data:{...}" line (no space after the colon) is parsed correctly. Per
+// the SSE spec the single space after the colon is optional, so silently dropping such chunks is a correctness
+// bug.
 //
-// This test should FAIL against the current parser (which requires "data: "
-// with a space) and pass once stream.go is fixed.
+// This test should FAIL against the current parser (which requires "data: " with a space) and pass once stream.go
+// is fixed.
 func TestParseSSE_DataNoSpace(t *testing.T) {
 	t.Parallel()
 
-	// A minimal SSE stream using the no-space form for the data line.
-	// Per the SSE spec "data:value" and "data: value" are both valid;
-	// the leading space is optional and must be stripped if present.
+	// A minimal SSE stream using the no-space form for the data line. Per the SSE spec "data:value" and
+	// "data: value" are both valid; the leading space is optional and must be stripped if present.
 	const ssePayload = "" +
 		"data:{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\n" +
 		"data:[DONE]\n"
@@ -577,15 +567,14 @@ func TestParseSSE_DataNoSpace(t *testing.T) {
 	}
 }
 
-// TestParseSSE_UnknownFieldSkipped verifies that a stray unknown SSE field line
-// (e.g. "event: foo") is silently skipped rather than causing an error or
-// corrupting the output. This exercises the skip-don't-error tolerance for
-// non-data/non-comment lines already present in the parser.
+// TestParseSSE_UnknownFieldSkipped verifies that a stray unknown SSE field line (e.g. "event: foo") is silently
+// skipped rather than causing an error or corrupting the output. This exercises the skip-don't-error tolerance
+// for non-data/non-comment lines already present in the parser.
 func TestParseSSE_UnknownFieldSkipped(t *testing.T) {
 	t.Parallel()
 
-	// A stream interspersed with "event:" and "id:" lines which are valid SSE
-	// fields but not used by the OpenAI-compatible protocol; they must be skipped.
+	// A stream interspersed with "event:" and "id:" lines which are valid SSE fields but not used by the
+	// OpenAI-compatible protocol; they must be skipped.
 	const ssePayload = "" +
 		"event: ping\n" +
 		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n" +
@@ -616,9 +605,8 @@ func TestParseSSE_UnknownFieldSkipped(t *testing.T) {
 
 // ── AC8: Table-driven fixture tests ──────────────────────────────────────────
 
-// TestParseSSE_Fixtures is the omnibus table-driven test that runs all eight
-// acceptance criteria through the fixture files. Each row exercises one
-// scenario and verifies the salient contract, supplementing the individual
+// TestParseSSE_Fixtures is the omnibus table-driven test that runs all eight acceptance criteria through the
+// fixture files. Each row exercises one scenario and verifies the salient contract, supplementing the individual
 // tests above.
 func TestParseSSE_Fixtures(t *testing.T) {
 	t.Parallel()

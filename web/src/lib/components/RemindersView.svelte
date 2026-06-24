@@ -1,17 +1,14 @@
 <script lang="ts">
   // RemindersView — thin presentational wrapper around the bucketed reminders list.
   //
-  // Reads from the real reminders store (getReminders) and bucket logic
-  // (bucketReminders, shouldShowPlaceholder) so stories exercise the actual rendering
-  // paths used in +page.svelte — not parallel mocks. Uses the shared ReminderRow
+  // Reads from the real reminders store (getReminders) and bucket logic (bucketReminders, shouldShowPlaceholder) so
+  // stories exercise the actual rendering paths used in +page.svelte — not parallel mocks. Uses the shared ReminderRow
   // component so the row markup is identical to the route.
   //
-  // Omits the Quick-add form and Edit slide-over because those are interactions
-  // covered by separate tests. Callback props (oncomplete, onedit) are absent so
-  // story interaction with the check-circle or row body is a no-op.
+  // Omits the Quick-add form and Edit slide-over because those are interactions covered by separate tests. Callback
+  // props (oncomplete, onedit) are absent so story interaction with the check-circle or row body is a no-op.
   //
-  // "now" is injectable so stories can demonstrate buckets without depending on
-  // the wall clock.
+  // "now" is injectable so stories can demonstrate buckets without depending on the wall clock.
 
   import { getReminders } from "$lib/stores/reminders.svelte.js";
   import { bucketReminders, shouldShowPlaceholder } from "$lib/reminders/bucket.js";
@@ -30,8 +27,8 @@
 
   interface Props {
     /**
-     * Reference timestamp for bucket boundaries. Defaults to now.
-     * Pass a fixed Date in stories for deterministic bucket assignment.
+     * Reference timestamp for bucket boundaries. Defaults to now. Pass a fixed Date in stories for deterministic
+     * bucket assignment.
      */
     now?: Date;
   }
@@ -159,11 +156,10 @@
     gap: 1.5rem;
   }
 
-  /* .reminders-bucket and .reminders-bucket__heading are also defined in
-     ReminderBucketSection.svelte for the active-bucket sections. They are kept
-     here too because the Done section's <section class="reminders-bucket"> and
-     the .reminders-done-toggle .reminders-bucket__heading compound selector are
-     inline in this component and rely on these scoped styles. */
+  /* .reminders-bucket and .reminders-bucket__heading are also defined in ReminderBucketSection.svelte for the
+     active-bucket sections. They are kept here too because the Done section's <section class="reminders-bucket"> and
+     the .reminders-done-toggle .reminders-bucket__heading compound selector are inline in this component and rely on
+     these scoped styles. */
   .reminders-bucket {
     display: flex;
     flex-direction: column;

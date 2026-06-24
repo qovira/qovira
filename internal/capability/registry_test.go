@@ -40,8 +40,7 @@ func collectNames(tools []capability.Tool) []string {
 
 // ── NewRegistry ───────────────────────────────────────────────────────────────
 
-// TestNewRegistry_IsEmpty verifies that a freshly created Registry has an
-// empty catalog.
+// TestNewRegistry_IsEmpty verifies that a freshly created Registry has an empty catalog.
 func TestNewRegistry_IsEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -54,8 +53,8 @@ func TestNewRegistry_IsEmpty(t *testing.T) {
 
 // ── Add ───────────────────────────────────────────────────────────────────────
 
-// TestAdd_SingleModule_AppearsInCatalog verifies that tools from a single module
-// are all present in the catalog after Add.
+// TestAdd_SingleModule_AppearsInCatalog verifies that tools from a single module are all present in the catalog after
+// Add.
 func TestAdd_SingleModule_AppearsInCatalog(t *testing.T) {
 	t.Parallel()
 
@@ -88,8 +87,8 @@ func TestAdd_SingleModule_AppearsInCatalog(t *testing.T) {
 	}
 }
 
-// TestAdd_MultipleModules_AllToolsInCatalog verifies that adding two distinct
-// modules merges their tools into the catalog with no loss.
+// TestAdd_MultipleModules_AllToolsInCatalog verifies that adding two distinct modules merges their tools into the
+// catalog with no loss.
 func TestAdd_MultipleModules_AllToolsInCatalog(t *testing.T) {
 	t.Parallel()
 
@@ -111,8 +110,8 @@ func TestAdd_MultipleModules_AllToolsInCatalog(t *testing.T) {
 	}
 }
 
-// TestAdd_DuplicateToolName_ReturnsError verifies that adding two tools with
-// the same name returns a non-nil error naming the offending tool.
+// TestAdd_DuplicateToolName_ReturnsError verifies that adding two tools with the same name returns a non-nil error
+// naming the offending tool.
 func TestAdd_DuplicateToolName_ReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -135,8 +134,8 @@ func TestAdd_DuplicateToolName_ReturnsError(t *testing.T) {
 			dupToolName: "ping",
 		},
 		{
-			// A single module that returns two tools with the same name must
-			// abort on its own Add, not silently collapse them into one entry.
+			// A single module that returns two tools with the same name must abort on its own Add, not silently
+			// collapse them into one entry.
 			name:        "single module repeats a name within one batch",
 			firstSrc:    fakeSource{tools: nil},
 			secondSrc:   fakeSource{tools: []capability.Tool{makeTool("dup"), makeTool("dup")}},
@@ -171,8 +170,7 @@ func TestAdd_DuplicateToolName_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestAdd_NilTools_IsNoOp verifies that a module returning nil does not error
-// and contributes nothing to the catalog.
+// TestAdd_NilTools_IsNoOp verifies that a module returning nil does not error and contributes nothing to the catalog.
 func TestAdd_NilTools_IsNoOp(t *testing.T) {
 	t.Parallel()
 
@@ -191,9 +189,8 @@ func TestAdd_NilTools_IsNoOp(t *testing.T) {
 
 // ── Catalog ───────────────────────────────────────────────────────────────────
 
-// TestCatalog_ReturnsSnapshot_NotReference verifies that Catalog() returns a
-// new slice on each call (snapshot semantics), so the registry is unaffected by
-// any mutation of the returned slice.
+// TestCatalog_ReturnsSnapshot_NotReference verifies that Catalog() returns a new slice on each call (snapshot
+// semantics), so the registry is unaffected by any mutation of the returned slice.
 func TestCatalog_ReturnsSnapshot_NotReference(t *testing.T) {
 	t.Parallel()
 
@@ -209,8 +206,7 @@ func TestCatalog_ReturnsSnapshot_NotReference(t *testing.T) {
 		t.Fatalf("first Catalog() len = %d, want 1", len(snap1))
 	}
 
-	// Mutate the returned slice; the registry must be unaffected because Catalog
-	// hands back a fresh copy each call.
+	// Mutate the returned slice; the registry must be unaffected because Catalog hands back a fresh copy each call.
 	snap1[0] = makeTool("mutated")
 
 	snap2 := reg.Catalog()
@@ -222,8 +218,8 @@ func TestCatalog_ReturnsSnapshot_NotReference(t *testing.T) {
 	}
 }
 
-// TestCatalog_UniqueNames verifies that Catalog() never returns duplicate names
-// when multiple modules are registered (regression guard).
+// TestCatalog_UniqueNames verifies that Catalog() never returns duplicate names when multiple modules are registered
+// (regression guard).
 func TestCatalog_UniqueNames(t *testing.T) {
 	t.Parallel()
 
@@ -256,9 +252,8 @@ func TestCatalog_UniqueNames(t *testing.T) {
 
 // ── Concurrency ───────────────────────────────────────────────────────────────
 
-// TestRegistry_ConcurrentAccess exercises concurrent Add and Catalog calls so
-// the race detector has something to catch if the mutex is missing. The test
-// does not assert ordering — only that it does not panic or race.
+// TestRegistry_ConcurrentAccess exercises concurrent Add and Catalog calls so the race detector has something to catch
+// if the mutex is missing. The test does not assert ordering — only that it does not panic or race.
 func TestRegistry_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
@@ -278,8 +273,8 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 			for i := range toolsPerWriter {
 				tools[i] = makeTool(fmt.Sprintf("w%d_tool%d", w, i))
 			}
-			// Ignore error — concurrent adds may collide in contrived scenarios;
-			// we are testing for data races, not error semantics here.
+			// Ignore error — concurrent adds may collide in contrived scenarios; we are testing for data races, not
+			// error semantics here.
 			_ = reg.Add(fakeSource{tools: tools})
 		})
 	}
@@ -296,9 +291,8 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-// TestRegistry_ConcurrentAdd_DuplicateDetection verifies that when two goroutines
-// concurrently try to Add sources with the same tool name, exactly one succeeds
-// and the other returns an error (no lost-update, no panic).
+// TestRegistry_ConcurrentAdd_DuplicateDetection verifies that when two goroutines concurrently try to Add sources with
+// the same tool name, exactly one succeeds and the other returns an error (no lost-update, no panic).
 func TestRegistry_ConcurrentAdd_DuplicateDetection(t *testing.T) {
 	t.Parallel()
 

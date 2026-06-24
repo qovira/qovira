@@ -5,10 +5,9 @@ package scheduler_test
 // Acceptance criteria:
 //   1. Repeated registration of the same Key converges to exactly one row.
 //   2. The created row is system-scoped (user_id NULL) and recurring.
-//   3. Changing the Recurrence and re-registering updates the schedule in place
-//      (no duplicate row; recurrence columns reflect the new schedule).
-//   4. The registered job self-reschedules through the same machinery as any
-//      recurring job.
+//   3. Changing the Recurrence and re-registering updates the schedule in place (no duplicate row; recurrence columns
+//      reflect the new schedule).
+//   4. The registered job self-reschedules through the same machinery as any recurring job.
 //   5. End-to-end: Register + RegisterPeriodic → handler fires when due.
 
 import (
@@ -22,8 +21,8 @@ import (
 	"github.com/qovira/qovira/internal/scheduler"
 )
 
-// periodicJobRow reads the columns needed to assert periodic-job behaviour from
-// the jobs table, looking up by key (not id — the key is the stable handle).
+// periodicJobRow reads the columns needed to assert periodic-job behaviour from the jobs table, looking up by key (not
+// id — the key is the stable handle).
 func periodicJobRow(
 	t *testing.T, db *sql.DB, key string,
 ) (id, status, runAt string, attempt int, userID sql.NullString, rruleVal sql.NullString, tzVal sql.NullString, intervalSecs sql.NullInt64) {
@@ -37,17 +36,15 @@ func periodicJobRow(
 	return
 }
 
-// countJobsByKeyCol counts rows where the key column equals the given value.
-// (Re-declared here so this file compiles standalone; the main test file also
-// declares countJobsByKey but that is the same helper — both are in the same
-// package so only one declaration may exist.)
-// Actually, countJobsByKey is already declared in scheduler_test.go. We use it
-// directly below.
+// countJobsByKeyCol counts rows where the key column equals the given value. (Re-declared here so this file compiles
+// standalone; the main test file also declares countJobsByKey but that is the same helper — both are in the same
+// package so only one declaration may exist.) Actually, countJobsByKey is already declared in scheduler_test.go. We use
+// it directly below.
 
 // ── Criterion 1: repeated RegisterPeriodic converges to exactly one row ──────
 
-// TestRegisterPeriodic_IdempotentAcrossBoots verifies that registering the same
-// PeriodicJob Key many times results in exactly one row in the jobs table.
+// TestRegisterPeriodic_IdempotentAcrossBoots verifies that registering the same PeriodicJob Key many times results in
+// exactly one row in the jobs table.
 func TestRegisterPeriodic_IdempotentAcrossBoots(t *testing.T) {
 	t.Parallel()
 
@@ -78,9 +75,8 @@ func TestRegisterPeriodic_IdempotentAcrossBoots(t *testing.T) {
 
 // ── Criterion 2: system-scoped (user_id NULL) and recurring ──────────────────
 
-// TestRegisterPeriodic_SystemScopedAndRecurring verifies that the row created by
-// RegisterPeriodic has user_id NULL (system scope) and has the recurrence columns
-// set (interval_secs for an Every-based job).
+// TestRegisterPeriodic_SystemScopedAndRecurring verifies that the row created by RegisterPeriodic has user_id NULL
+// (system scope) and has the recurrence columns set (interval_secs for an Every-based job).
 func TestRegisterPeriodic_SystemScopedAndRecurring(t *testing.T) {
 	t.Parallel()
 
@@ -118,8 +114,8 @@ func TestRegisterPeriodic_SystemScopedAndRecurring(t *testing.T) {
 	}
 }
 
-// TestRegisterPeriodic_SystemScopedRRULE verifies that an RRULE-based PeriodicJob
-// also has user_id NULL and the rrule/tz columns set.
+// TestRegisterPeriodic_SystemScopedRRULE verifies that an RRULE-based PeriodicJob also has user_id NULL and the
+// rrule/tz columns set.
 func TestRegisterPeriodic_SystemScopedRRULE(t *testing.T) {
 	t.Parallel()
 
@@ -162,9 +158,8 @@ func TestRegisterPeriodic_SystemScopedRRULE(t *testing.T) {
 
 // ── Criterion 2b: initial run_at is deferred (not an immediate boot-time fire) ─
 
-// TestRegisterPeriodic_IntervalRunAtDeferred verifies that an interval-based
-// PeriodicJob's initial run_at = now + Every (first fire after one interval —
-// avoids immediate boot-time fires).
+// TestRegisterPeriodic_IntervalRunAtDeferred verifies that an interval-based PeriodicJob's initial run_at = now + Every
+// (first fire after one interval — avoids immediate boot-time fires).
 func TestRegisterPeriodic_IntervalRunAtDeferred(t *testing.T) {
 	t.Parallel()
 
@@ -204,9 +199,8 @@ func TestRegisterPeriodic_IntervalRunAtDeferred(t *testing.T) {
 
 // ── Criterion 3: changing Recurrence updates the row in place ────────────────
 
-// TestRegisterPeriodic_UpdatesRecurrenceInPlace verifies criterion 3:
-// calling RegisterPeriodic with the same Key but a different Recurrence updates
-// the stored schedule columns in place. No second row is created.
+// TestRegisterPeriodic_UpdatesRecurrenceInPlace verifies criterion 3: calling RegisterPeriodic with the same Key but a
+// different Recurrence updates the stored schedule columns in place. No second row is created.
 func TestRegisterPeriodic_UpdatesRecurrenceInPlace(t *testing.T) {
 	t.Parallel()
 
@@ -262,8 +256,7 @@ func TestRegisterPeriodic_UpdatesRecurrenceInPlace(t *testing.T) {
 	}
 }
 
-// TestRegisterPeriodic_UpdatesKindInPlace verifies that the kind column also
-// updates when changed in a re-registration.
+// TestRegisterPeriodic_UpdatesKindInPlace verifies that the kind column also updates when changed in a re-registration.
 func TestRegisterPeriodic_UpdatesKindInPlace(t *testing.T) {
 	t.Parallel()
 
@@ -310,17 +303,15 @@ func TestRegisterPeriodic_UpdatesKindInPlace(t *testing.T) {
 
 // ── Criterion 4: self-reschedule via same machinery as any recurring job ──────
 
-// TestRegisterPeriodic_SelfReschedules verifies criterion 4:
-// a registered periodic job fires and then self-reschedules through the same
-// machinery as any recurring job (AdvanceRecurringJob path). The row must survive,
-// status=pending, run_at advanced to now+interval, attempt reset to 0.
+// TestRegisterPeriodic_SelfReschedules verifies criterion 4: a registered periodic job fires and then self-reschedules
+// through the same machinery as any recurring job (AdvanceRecurringJob path). The row must survive, status=pending,
+// run_at advanced to now+interval, attempt reset to 0.
 func TestRegisterPeriodic_SelfReschedules(t *testing.T) {
 	t.Parallel()
 
 	s := openMigratedStore(t)
 
-	// Clock set so the periodic job is due immediately: run_at = now + Every,
-	// and we will advance the clock past that.
+	// Clock set so the periodic job is due immediately: run_at = now + Every, and we will advance the clock past that.
 	base := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	const every = 5 * time.Minute
 
@@ -402,11 +393,10 @@ func TestRegisterPeriodic_SelfReschedules(t *testing.T) {
 
 // ── Criterion 5: end-to-end Register + RegisterPeriodic dispatches to handler ─
 
-// TestRegisterPeriodic_EndToEnd verifies criterion 5:
-// the exact shape from the issue spec — Register("harness.sweep_confirmations", handler)
-// + RegisterPeriodic({ Key: "harness.sweep_confirmations", Kind: "harness.sweep_confirmations",
-// Recurrence: &Recurrence{Every: time.Minute} }) — produces one system job that,
-// when due, dispatches to the registered handler.
+// TestRegisterPeriodic_EndToEnd verifies criterion 5: the exact shape from the issue spec —
+// Register("harness.sweep_confirmations", handler) + RegisterPeriodic({ Key: "harness.sweep_confirmations", Kind:
+// "harness.sweep_confirmations", Recurrence: &Recurrence{Every: time.Minute} }) — produces one system job that, when
+// due, dispatches to the registered handler.
 func TestRegisterPeriodic_EndToEnd(t *testing.T) {
 	t.Parallel()
 
@@ -522,8 +512,8 @@ func TestRegisterPeriodic_RejectsEmptyKind(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-// TestRegisterPeriodic_RejectsNilRecurrence verifies that a nil Recurrence (no
-// recurrence at all) returns an error — a PeriodicJob MUST recur.
+// TestRegisterPeriodic_RejectsNilRecurrence verifies that a nil Recurrence (no recurrence at all) returns an error — a
+// PeriodicJob MUST recur.
 func TestRegisterPeriodic_RejectsNilRecurrence(t *testing.T) {
 	t.Parallel()
 
@@ -541,8 +531,7 @@ func TestRegisterPeriodic_RejectsNilRecurrence(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-// TestRegisterPeriodic_RejectsZeroEvery verifies that a zero-valued Every (no
-// recurrence kind set) returns an error.
+// TestRegisterPeriodic_RejectsZeroEvery verifies that a zero-valued Every (no recurrence kind set) returns an error.
 func TestRegisterPeriodic_RejectsZeroEvery(t *testing.T) {
 	t.Parallel()
 
@@ -562,8 +551,8 @@ func TestRegisterPeriodic_RejectsZeroEvery(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-// TestRegisterPeriodic_RejectsBothRecurrenceKinds verifies that specifying both
-// RRULE+TZ and Every returns an error (same constraint as Enqueue).
+// TestRegisterPeriodic_RejectsBothRecurrenceKinds verifies that specifying both RRULE+TZ and Every returns an error
+// (same constraint as Enqueue).
 func TestRegisterPeriodic_RejectsBothRecurrenceKinds(t *testing.T) {
 	t.Parallel()
 
@@ -585,8 +574,7 @@ func TestRegisterPeriodic_RejectsBothRecurrenceKinds(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-// TestRegisterPeriodic_RejectsRRuleWithoutTZ verifies that an RRULE without TZ
-// returns an error.
+// TestRegisterPeriodic_RejectsRRuleWithoutTZ verifies that an RRULE without TZ returns an error.
 func TestRegisterPeriodic_RejectsRRuleWithoutTZ(t *testing.T) {
 	t.Parallel()
 
@@ -607,8 +595,8 @@ func TestRegisterPeriodic_RejectsRRuleWithoutTZ(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-// TestRegisterPeriodic_PayloadDefaultsToEmpty verifies that a zero Payload is
-// stored as an empty JSON object `{}`, matching the Enqueue convention.
+// TestRegisterPeriodic_PayloadDefaultsToEmpty verifies that a zero Payload is stored as an empty JSON object `{}`,
+// matching the Enqueue convention.
 func TestRegisterPeriodic_PayloadDefaultsToEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -670,8 +658,8 @@ func TestRegisterPeriodic_WithPayload(t *testing.T) {
 	}
 }
 
-// TestRegisterPeriodic_StatusIsPending verifies that the initial row created by
-// RegisterPeriodic has status='pending' and attempt=0.
+// TestRegisterPeriodic_StatusIsPending verifies that the initial row created by RegisterPeriodic has status='pending'
+// and attempt=0.
 func TestRegisterPeriodic_StatusIsPending(t *testing.T) {
 	t.Parallel()
 
@@ -716,11 +704,10 @@ func periodicJobLockedAt(t *testing.T, db *sql.DB, key string) string {
 	return ""
 }
 
-// TestRegisterPeriodic_RevivesDeadLettered verifies that calling RegisterPeriodic
-// with the same Key on a row that dead-lettered (status='failed') revives it back
-// to status='pending' with attempt=0 and locked_at cleared. The row count for the
-// key must still be exactly 1 (no duplicate row), and run_at must be a sane future
-// instant relative to the scheduler clock.
+// TestRegisterPeriodic_RevivesDeadLettered verifies that calling RegisterPeriodic with the same Key on a row that
+// dead-lettered (status='failed') revives it back to status='pending' with attempt=0 and locked_at cleared. The row
+// count for the key must still be exactly 1 (no duplicate row), and run_at must be a sane future instant relative to
+// the scheduler clock.
 func TestRegisterPeriodic_RevivesDeadLettered(t *testing.T) {
 	t.Parallel()
 
@@ -751,8 +738,8 @@ func TestRegisterPeriodic_RevivesDeadLettered(t *testing.T) {
 		t.Fatalf("pre-condition: status=%q attempt=%d, want pending/0", status, attempt)
 	}
 
-	// Step 2: force the row into the dead-lettered state — simulates a Permanent
-	// error having been processed by the scheduler without needing to run the engine.
+	// Step 2: force the row into the dead-lettered state — simulates a Permanent error having been processed by the
+	// scheduler without needing to run the engine.
 	_, err := s.Writer().ExecContext(context.Background(),
 		`UPDATE jobs SET status='failed', last_error='permanent failure', attempt=3, locked_at=NULL WHERE key=?`, key,
 	)
@@ -809,10 +796,9 @@ func TestRegisterPeriodic_RevivesDeadLettered(t *testing.T) {
 	}
 }
 
-// TestRegisterPeriodic_InFlightPendingUndisturbed verifies that re-registering a
-// PeriodicJob whose existing row is in-flight (status='pending' with a non-zero
-// attempt, simulating an active retry cycle) does NOT reset attempt, run_at, or
-// status — only the schedule columns (kind/payload/rrule/tz/interval_secs) update.
+// TestRegisterPeriodic_InFlightPendingUndisturbed verifies that re-registering a PeriodicJob whose existing row is
+// in-flight (status='pending' with a non-zero attempt, simulating an active retry cycle) does NOT reset attempt,
+// run_at, or status — only the schedule columns (kind/payload/rrule/tz/interval_secs) update.
 func TestRegisterPeriodic_InFlightPendingUndisturbed(t *testing.T) {
 	t.Parallel()
 
@@ -834,8 +820,8 @@ func TestRegisterPeriodic_InFlightPendingUndisturbed(t *testing.T) {
 		t.Fatalf("RegisterPeriodic (initial): %v", err)
 	}
 
-	// Step 2: simulate an in-flight retry cycle — set attempt=2 and a custom run_at
-	// so we can assert the re-register leaves them untouched.
+	// Step 2: simulate an in-flight retry cycle — set attempt=2 and a custom run_at so we can assert the re-register
+	// leaves them untouched.
 	customRunAt := now.Add(30 * time.Minute).UTC().Format(time.RFC3339)
 	_, err := s.Writer().ExecContext(context.Background(),
 		`UPDATE jobs SET status='pending', attempt=2, run_at=? WHERE key=?`, customRunAt, key,
@@ -844,8 +830,7 @@ func TestRegisterPeriodic_InFlightPendingUndisturbed(t *testing.T) {
 		t.Fatalf("force in-flight state: %v", err)
 	}
 
-	// Step 3: re-register with a changed Kind — schedule cols must update,
-	// but status/attempt/run_at must stay.
+	// Step 3: re-register with a changed Kind — schedule cols must update, but status/attempt/run_at must stay.
 	if err := sched.RegisterPeriodic(scheduler.PeriodicJob{
 		Key:  key,
 		Kind: "kind.v2",

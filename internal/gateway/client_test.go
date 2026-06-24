@@ -7,9 +7,8 @@ import (
 
 // ── GW1 #2: v1BaseURL rejects non-http/https schemes and embedded userinfo ────
 
-// TestV1BaseURL_SchemeValidation verifies that v1BaseURL rejects non-http/https
-// schemes (gopher, ftp, file) and accepts only http/https, and that error
-// messages never leak embedded credentials.
+// TestV1BaseURL_SchemeValidation verifies that v1BaseURL rejects non-http/https schemes (gopher, ftp, file) and accepts
+// only http/https, and that error messages never leak embedded credentials.
 func TestV1BaseURL_SchemeValidation(t *testing.T) {
 	t.Parallel()
 
@@ -38,8 +37,7 @@ func TestV1BaseURL_SchemeValidation(t *testing.T) {
 			errSub:     "userinfo",
 			errNotSubs: []string{"s3cr3t", "user:s3cr3t"},
 		},
-		// gopher + userinfo: error must not echo the password regardless of which
-		// guard fires first.
+		// gopher + userinfo: error must not echo the password regardless of which guard fires first.
 		//nolint:gosec // G101: test fixture, not real credentials
 		{
 			name:       "gopher+userinfo — no password in error",
@@ -76,14 +74,13 @@ func TestV1BaseURL_SchemeValidation(t *testing.T) {
 	}
 }
 
-// TestV1BaseURL_ParseError verifies that a URL with a control character (which
-// causes url.Parse to fail) does not expose any caller-supplied content in the
-// error string. This guards the parse-error path against credential leaks.
+// TestV1BaseURL_ParseError verifies that a URL with a control character (which causes url.Parse to fail) does not
+// expose any caller-supplied content in the error string. This guards the parse-error path against credential leaks.
 func TestV1BaseURL_ParseError(t *testing.T) {
 	t.Parallel()
 
-	// A URL containing a raw control character causes url.Parse to return an
-	// error. The raw input must not appear verbatim in the returned error.
+	// A URL containing a raw control character causes url.Parse to return an error. The raw input must not appear
+	// verbatim in the returned error.
 	//nolint:gosec // G101: test fixture, not real credentials
 	rawBase := "https://user:s3cr3t@host\x00/"
 	_, err := v1BaseURL(rawBase)
@@ -99,8 +96,8 @@ func TestV1BaseURL_ParseError(t *testing.T) {
 	}
 }
 
-// TestChatEndpointURL verifies that all four common operator-supplied base URL
-// variants resolve to the same canonical chat/completions endpoint URL (AC3).
+// TestChatEndpointURL verifies that all four common operator-supplied base URL variants resolve to the same canonical
+// chat/completions endpoint URL (AC3).
 func TestChatEndpointURL(t *testing.T) {
 	t.Parallel()
 

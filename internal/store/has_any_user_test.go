@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// TestHasAnyUser_EmptyDB verifies that HasAnyUser returns false on a freshly
-// migrated database that contains no user rows.
+// TestHasAnyUser_EmptyDB verifies that HasAnyUser returns false on a freshly migrated database that contains no user
+// rows.
 func TestHasAnyUser_EmptyDB(t *testing.T) {
 	t.Parallel()
 
@@ -23,17 +23,16 @@ func TestHasAnyUser_EmptyDB(t *testing.T) {
 	}
 }
 
-// TestHasAnyUser_AfterInsert verifies that HasAnyUser returns true after a
-// user row has been inserted into the users table.
+// TestHasAnyUser_AfterInsert verifies that HasAnyUser returns true after a user row has been inserted into the users
+// table.
 func TestHasAnyUser_AfterInsert(t *testing.T) {
 	t.Parallel()
 
 	s := openMigratedStore(t)
 	ctx := context.Background()
 
-	// Insert a minimal user row directly via the write pool so we don't need
-	// to import internal/auth here (avoids a cycle and keeps the store test
-	// focused on the store layer).
+	// Insert a minimal user row directly via the write pool so we don't need to import internal/auth here (avoids a
+	// cycle and keeps the store test focused on the store layer).
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.Writer().ExecContext(ctx,
 		`INSERT INTO users
@@ -63,10 +62,9 @@ func TestHasAnyUser_AfterInsert(t *testing.T) {
 	}
 }
 
-// TestHasAnyUser_ImplementsUserExisterSeam verifies that *store.Store satisfies
-// the bootstrap.UserExister interface at compile time by using an interface
-// conversion. The actual interface is defined in bootstrap; we replicate the
-// minimal shape here to avoid importing bootstrap from the store test.
+// TestHasAnyUser_ImplementsUserExisterSeam verifies that *store.Store satisfies the bootstrap.UserExister interface at
+// compile time by using an interface conversion. The actual interface is defined in bootstrap; we replicate the minimal
+// shape here to avoid importing bootstrap from the store test.
 func TestHasAnyUser_ImplementsUserExisterSeam(t *testing.T) {
 	t.Parallel()
 

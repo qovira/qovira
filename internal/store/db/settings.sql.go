@@ -42,10 +42,9 @@ WHERE setting_key LIKE ?1 || '%' ESCAPE '\'
 ORDER BY setting_key
 `
 
-// List all settings whose key starts with @prefix, ordered by key. The caller
-// must escape LIKE metacharacters (\, %, _) in @prefix; ESCAPE '\' then makes
-// those escapes literal, so a prefix containing '_' or '%' matches literally
-// rather than as a wildcard.
+// List all settings whose key starts with @prefix, ordered by key. The caller must escape LIKE metacharacters
+// (\, %, _) in @prefix; ESCAPE '\' then makes those escapes literal, so a prefix containing '_' or '%' matches
+// literally rather than as a wildcard.
 func (q *Queries) ListSettingsByPrefix(ctx context.Context, prefix sql.NullString) ([]Setting, error) {
 	rows, err := q.db.QueryContext(ctx, listSettingsByPrefix, prefix)
 	if err != nil {
@@ -82,8 +81,7 @@ type UpsertSettingParams struct {
 	Value      string
 }
 
-// Upsert a setting by key.  Inserts a new row or replaces value and
-// updated_at when the key already exists.
+// Upsert a setting by key.  Inserts a new row or replaces value and updated_at when the key already exists.
 func (q *Queries) UpsertSetting(ctx context.Context, arg UpsertSettingParams) error {
 	_, err := q.db.ExecContext(ctx, upsertSetting, arg.SettingKey, arg.Value)
 	return err

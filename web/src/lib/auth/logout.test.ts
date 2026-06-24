@@ -1,9 +1,8 @@
 // Tests for the logout flow.
 //
-// Environment: browser (happy-dom) — openapi-fetch needs a location origin.
-// The session store and $app/navigation are mocked; this suite verifies that
-// logout issues the DELETE, tears down, resets the store, and navigates — even
-// when the session is already revoked.
+// Environment: browser (happy-dom) — openapi-fetch needs a location origin. The session store and $app/navigation are
+// mocked; this suite verifies that logout issues the DELETE, tears down, resets the store, and navigates — even when
+// the session is already revoked.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { notifyTearDown, resetSession } = vi.hoisted(() => ({
@@ -88,9 +87,9 @@ describe("logout", () => {
   });
 
   it("completes the client-side teardown (notifyTearDown + resetSession + goto) even when the DELETE network call throws", async () => {
-    // Simulate a hard network failure — fetch rejects entirely (offline / DNS failure).
-    // Without try/finally, the teardown steps after the await would be skipped,
-    // leaving the SSE connection open and the session store in authenticated state.
+    // Simulate a hard network failure — fetch rejects entirely (offline / DNS failure). Without try/finally, the
+    // teardown steps after the await would be skipped, leaving the SSE connection open and the session store in
+    // authenticated state.
     vi.stubGlobal(
       "fetch",
       vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))),

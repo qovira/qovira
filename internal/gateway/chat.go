@@ -11,9 +11,8 @@ import (
 
 // ChatRequest is the caller-facing input to [Gateway.Chat].
 //
-// Temperature and MaxTokens are pointers so that a nil value means "omit the
-// field entirely" and let the upstream apply its own default, as opposed to
-// explicitly sending zero.
+// Temperature and MaxTokens are pointers so that a nil value means "omit the field entirely" and let the upstream
+// apply its own default, as opposed to explicitly sending zero.
 type ChatRequest struct {
 	Messages    []Message
 	Tools       []ToolSchema
@@ -24,10 +23,9 @@ type ChatRequest struct {
 
 // Message is one entry in the conversation history sent to the model.
 //
-// Role must be one of the OpenAI-compatible role strings: "system", "user",
-// "assistant", or "tool". For assistant messages that include tool calls, set
-// ToolCalls. For tool-result messages, set Role="tool" and ToolCallID to the
-// ID of the call being answered.
+// Role must be one of the OpenAI-compatible role strings: "system", "user", "assistant", or "tool". For assistant
+// messages that include tool calls, set ToolCalls. For tool-result messages, set Role="tool" and ToolCallID to the ID
+// of the call being answered.
 type Message struct {
 	Role       string
 	Content    string
@@ -39,15 +37,13 @@ type Message struct {
 type ToolSchema struct {
 	Name        string
 	Description string
-	// Parameters is the JSON Schema of the tool's input, passed through
-	// verbatim to the upstream endpoint.
+	// Parameters is the JSON Schema of the tool's input, passed through verbatim to the upstream endpoint.
 	Parameters json.RawMessage
 }
 
-// ToolChoice expresses the caller's preference for tool use. The zero value
-// maps to "auto" (the upstream decides whether to use a tool). Use the
-// [ToolChoiceNone], [ToolChoiceAuto], [ToolChoiceRequired], and
-// [ToolChoiceNamed] constructors rather than building the struct directly.
+// ToolChoice expresses the caller's preference for tool use. The zero value maps to "auto" (the upstream decides
+// whether to use a tool). Use the [ToolChoiceNone], [ToolChoiceAuto], [ToolChoiceRequired], and [ToolChoiceNamed]
+// constructors rather than building the struct directly.
 //
 // Wire mapping:
 //   - mode == "auto"     → JSON string "auto"
@@ -55,9 +51,8 @@ type ToolSchema struct {
 //   - mode == "required" → JSON string "required"
 //   - mode == "function" → JSON object {"type":"function","function":{"name":"…"}}
 //
-// The zero value (mode == "") is treated identically to ToolChoiceAuto by
-// [marshalToolChoice]; the field is omitted from the request body entirely
-// when no tools are present.
+// The zero value (mode == "") is treated identically to ToolChoiceAuto by [marshalToolChoice]; the field is omitted
+// from the request body entirely when no tools are present.
 type ToolChoice struct {
 	mode string // "auto" | "none" | "required" | "function"
 	name string // set when mode == "function"
@@ -118,9 +113,8 @@ type toolSchemaWire struct {
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
-// marshalToolChoice serialises a ToolChoice into the wire shape expected by
-// OpenAI-compatible endpoints. The zero value (mode == "" or mode == "auto")
-// produces the JSON string "auto".
+// marshalToolChoice serialises a ToolChoice into the wire shape expected by OpenAI-compatible endpoints. The zero value
+// (mode == "" or mode == "auto") produces the JSON string "auto".
 func marshalToolChoice(tc ToolChoice) (json.RawMessage, error) {
 	mode := tc.mode
 	if mode == "" {
@@ -154,8 +148,8 @@ func marshalToolChoice(tc ToolChoice) (json.RawMessage, error) {
 	}
 }
 
-// buildWireRequest converts a [ChatRequest] and a resolved model name into the
-// JSON bytes sent to the upstream chat/completions endpoint.
+// buildWireRequest converts a [ChatRequest] and a resolved model name into the JSON bytes sent to the upstream
+// chat/completions endpoint.
 func buildWireRequest(req ChatRequest, model string) ([]byte, error) {
 	wire := chatRequestWire{
 		Model:       model,
@@ -215,27 +209,21 @@ func buildWireRequest(req ChatRequest, model string) ([]byte, error) {
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 
-// Chat sends req to the configured chat endpoint and returns a streaming
-// iterator over the response chunks.
+// Chat sends req to the configured chat endpoint and returns a streaming iterator over the response chunks.
 //
 // Two-phase error model:
-//   - A non-nil error returned directly (setup error) means the request was
-//     never accepted: the gateway is unconfigured, the request could not be
-//     built, or the upstream rejected it (non-2xx after exhausting retries).
-//     In this case the returned iterator is nil.
-//   - A nil error with a non-nil iterator means the upstream accepted the
-//     request (2xx). Subsequent errors — transport breaks, malformed SSE,
-//     idle or first-token timeouts — surface as the error value in each
-//     (Chunk, error) yield from the iterator. The iterator always yields at
-//     most one non-nil error, after which ranging over it terminates.
+//   - A non-nil error returned directly (setup error) means the request was never accepted: the gateway is
+//     unconfigured, the request could not be built, or the upstream rejected it (non-2xx after exhausting retries). In
+//     this case the returned iterator is nil.
+//   - A nil error with a non-nil iterator means the upstream accepted the request (2xx). Subsequent errors — transport
+//     breaks, malformed SSE, idle or first-token timeouts — surface as the error value in each (Chunk, error) yield
+//     from the iterator. The iterator always yields at most one non-nil error, after which ranging over it terminates.
 //
-// Chat applies resilience policies (pre-first-token retry with jittered
-// backoff, first-token timeout, idle timeout) as configured by the Gateway's
-// [ResilienceConfig].
+// Chat applies resilience policies (pre-first-token retry with jittered backoff, first-token timeout, idle timeout) as
+// configured by the Gateway's [ResilienceConfig].
 //
-// The caller must range over the iterator to completion (or break early) to
-// ensure the response body is closed. The body is closed automatically when
-// the iterator is exhausted or the consumer breaks.
+// The caller must range over the iterator to completion (or break early) to ensure the response body is closed. The
+// body is closed automatically when the iterator is exhausted or the consumer breaks.
 func (g *Gateway) Chat(ctx context.Context, req ChatRequest) (iter.Seq2[Chunk, error], error) {
 	return g.chatWithResilience(ctx, req, g.resilienceCfg)
 }

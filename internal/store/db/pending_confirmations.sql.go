@@ -22,11 +22,10 @@ type CountNonExpiredConfirmationsByMessageIDParams struct {
 	UserID    string
 }
 
-// Returns the count of pending_confirmations rows for a given assistant message
-// that are NOT in 'expired' status (i.e. 'pending', 'approved', or 'denied').
-// Used to gate MarkMessageAbandoned: the assistant message is only abandoned when
-// this count is zero (no siblings remain pending or were resolved by the user).
-// User-scoped: requires user_id to prevent cross-user information leakage.
+// Returns the count of pending_confirmations rows for a given assistant message that are NOT in 'expired'
+// status (i.e. 'pending', 'approved', or 'denied'). Used to gate MarkMessageAbandoned: the assistant message is only
+// abandoned when this count is zero (no siblings remain pending or were resolved by the user). User-scoped:
+// requires user_id to prevent cross-user information leakage.
 func (q *Queries) CountNonExpiredConfirmationsByMessageID(ctx context.Context, arg CountNonExpiredConfirmationsByMessageIDParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countNonExpiredConfirmationsByMessageID, arg.MessageID, arg.UserID)
 	var count int64
@@ -84,8 +83,8 @@ type InsertPendingConfirmationParams struct {
 }
 
 // Queries for the pending_confirmations table.
-// Every SELECT/UPDATE includes a user_id predicate so the row always
-// belongs to the bound Scope. Parameters use sqlc named params (@name).
+// Every SELECT/UPDATE includes a user_id predicate so the row always belongs to the bound Scope.
+// Parameters use sqlc named params (@name).
 func (q *Queries) InsertPendingConfirmation(ctx context.Context, arg InsertPendingConfirmationParams) (PendingConfirmation, error) {
 	row := q.db.QueryRowContext(ctx, insertPendingConfirmation,
 		arg.ID,
@@ -122,10 +121,9 @@ WHERE status = 'pending'
 ORDER BY expires_at, id
 `
 
-// scopeguard:allow-unscoped: SYSTEM-HOUSEKEEPING cross-user sweep. The scheduler
-// calls SweepExpiredConfirmations across all users by TTL cutoff, so no single
-// user_id predicate is applicable. Each returned row carries its own user_id so
-// the caller can scope per-row operations (abandon message, emit per-user event).
+// scopeguard:allow-unscoped: SYSTEM-HOUSEKEEPING cross-user sweep. The scheduler calls SweepExpiredConfirmations
+// across all users by TTL cutoff, so no single user_id predicate is applicable. Each returned row carries its own
+// user_id so the caller can scope per-row operations (abandon message, emit per-user event).
 func (q *Queries) ListLapsedConfirmations(ctx context.Context, now string) ([]PendingConfirmation, error) {
 	rows, err := q.db.QueryContext(ctx, listLapsedConfirmations, now)
 	if err != nil {
@@ -173,9 +171,9 @@ type MarkConfirmationExpiredParams struct {
 	UserID string
 }
 
-// Atomic CAS: transitions a pending row to expired only when still pending.
-// Used by both the lazy check (user-scoped, includes user_id) and the sweep
-// (system-scope, but calls this per-row with the row's user_id from ListLapsedConfirmations).
+// Atomic CAS: transitions a pending row to expired only when still pending. Used by both the lazy check
+// (user-scoped, includes user_id) and the sweep (system-scope, but calls this per-row with the row's user_id from
+// ListLapsedConfirmations).
 func (q *Queries) MarkConfirmationExpired(ctx context.Context, arg MarkConfirmationExpiredParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, markConfirmationExpired, arg.ID, arg.UserID)
 	if err != nil {

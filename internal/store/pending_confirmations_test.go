@@ -1,11 +1,10 @@
 package store_test
 
-// Tests for pending_confirmations behaviour: CAS branch discrimination and
-// cross-user isolation of the scope-bypass methods.
+// Tests for pending_confirmations behaviour: CAS branch discrimination and cross-user isolation of the scope-bypass
+// methods.
 //
-// These are integration tests against a real migrated SQLCipher store.  They
-// characterise existing contract (B.1) and prove isolation semantics (B.2) for
-// the system-housekeeping bypass methods.
+// These are integration tests against a real migrated SQLCipher store.  They characterise existing contract (B.1) and
+// prove isolation semantics (B.2) for the system-housekeeping bypass methods.
 
 import (
 	"context"
@@ -18,8 +17,7 @@ import (
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// seedUser inserts a minimal users row so foreign-key constraints on
-// conversations and messages are satisfied.
+// seedUser inserts a minimal users row so foreign-key constraints on conversations and messages are satisfied.
 func seedUser(t *testing.T, s *store.Store, userID string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -64,8 +62,8 @@ func seedMessage(t *testing.T, s *store.Store, msgID, convID, userID, role strin
 	}
 }
 
-// seedConfirmation inserts a pending_confirmations row with the given status
-// and expires_at value.  Returns the inserted row.
+// seedConfirmation inserts a pending_confirmations row with the given status and expires_at value.  Returns the
+// inserted row.
 func seedConfirmation(
 	t *testing.T,
 	s *store.Store,
@@ -100,8 +98,8 @@ func now() string {
 
 // ── B.1: CAS branch discrimination ───────────────────────────────────────────
 
-// TestUpdatePendingConfirmationStatusIfCurrent_Branches characterises the four
-// outcomes of UpdatePendingConfirmationStatusIfCurrent against distinct row states.
+// TestUpdatePendingConfirmationStatusIfCurrent_Branches characterises the four outcomes of
+// UpdatePendingConfirmationStatusIfCurrent against distinct row states.
 //
 // The method must return, via errors.Is:
 //   - nil:                           row is pending and not yet expired
@@ -161,8 +159,8 @@ func TestUpdatePendingConfirmationStatusIfCurrent_Branches(t *testing.T) {
 	})
 }
 
-// TestMarkConfirmationExpired_ZeroRows verifies that MarkConfirmationExpired on a
-// row that no longer exists (or was already transitioned) returns ErrConfirmationExpired.
+// TestMarkConfirmationExpired_ZeroRows verifies that MarkConfirmationExpired on a row that no longer exists (or was
+// already transitioned) returns ErrConfirmationExpired.
 func TestMarkConfirmationExpired_ZeroRows(t *testing.T) {
 	t.Parallel()
 
@@ -186,8 +184,8 @@ func TestMarkConfirmationExpired_ZeroRows(t *testing.T) {
 	})
 
 	t.Run("already_expired_row_returns_ErrConfirmationExpired", func(t *testing.T) {
-		// Seed a row that is already in "expired" status — the CAS (WHERE status='pending')
-		// finds zero rows for this case too.
+		// Seed a row that is already in "expired" status — the CAS (WHERE status='pending') finds zero rows for
+		// this case too.
 		callID := "call-mark-already-expired-01"
 		seedConfirmation(t, s, callID, convID, msgID, userID, "expired", pastTime())
 
@@ -200,8 +198,8 @@ func TestMarkConfirmationExpired_ZeroRows(t *testing.T) {
 
 // ── B.2: cross-user isolation of the bypass methods ──────────────────────────
 
-// TestBypassMethods_CrossUserIsolation seeds two users' confirmations that share
-// message/call-ID patterns, then asserts:
+// TestBypassMethods_CrossUserIsolation seeds two users' confirmations that share message/call-ID patterns, then
+// asserts:
 //
 //  1. MarkConfirmationExpiredByUserID(callID, userA) expires only userA's row.
 //  2. MarkMessageAbandonedByUserID(msgID, userA) abandons only userA's message.

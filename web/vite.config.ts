@@ -9,8 +9,8 @@ export default defineConfig({
     paraglideVitePlugin({
       project: "./project.inlang",
       outdir: "./src/lib/paraglide",
-      // CSR-only app: no SSR, always browser. Use globalVariable fallback only so
-      // the runtime is minimal and isServer never evaluates to true.
+      // CSR-only app: no SSR, always browser. Use globalVariable fallback only so the runtime is
+      // minimal and isServer never evaluates to true.
       strategy: ["globalVariable", "baseLocale"],
     }),
     sveltekit(),

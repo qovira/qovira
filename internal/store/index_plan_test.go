@@ -10,8 +10,8 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// eqpRows executes EXPLAIN QUERY PLAN for the given SQL against the provided
-// *sql.DB and returns the detail strings from every plan row.
+// eqpRows executes EXPLAIN QUERY PLAN for the given SQL against the provided *sql.DB and returns the detail strings
+// from every plan row.
 func eqpRows(t *testing.T, db *sql.DB, query string, args ...any) []string {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN\n"+query, args...)
@@ -38,8 +38,8 @@ func eqpRows(t *testing.T, db *sql.DB, query string, args ...any) []string {
 	return plans
 }
 
-// assertNoFullScan checks that no plan row is an unindexed full SCAN of the
-// named table (i.e., a SCAN without a USING clause).
+// assertNoFullScan checks that no plan row is an unindexed full SCAN of the named table (i.e., a SCAN without a USING
+// clause).
 func assertNoFullScan(t *testing.T, label, tableName string, plans []string) {
 	t.Helper()
 	upper := strings.ToUpper(tableName)
@@ -51,8 +51,8 @@ func assertNoFullScan(t *testing.T, label, tableName string, plans []string) {
 	}
 }
 
-// assertNoTempBTree checks that no plan row contains a USE TEMP B-TREE FOR
-// ORDER BY, which would indicate a sort that the index should be eliminating.
+// assertNoTempBTree checks that no plan row contains a USE TEMP B-TREE FOR ORDER BY, which would indicate a sort that
+// the index should be eliminating.
 func assertNoTempBTree(t *testing.T, label string, plans []string) {
 	t.Helper()
 	for _, p := range plans {
@@ -73,8 +73,7 @@ func assertUsesIndex(t *testing.T, label, indexName string, plans []string) {
 	t.Errorf("[%s] query plan does not reference index %q; plans: %v", label, indexName, plans)
 }
 
-// seedIndexPlanUser inserts a minimal user row for index-plan tests that need
-// real data to influence the query planner.
+// seedIndexPlanUser inserts a minimal user row for index-plan tests that need real data to influence the query planner.
 func seedIndexPlanUser(t *testing.T, s *store.Store, userID string) {
 	t.Helper()
 	_, err := s.Writer().ExecContext(context.Background(),
@@ -100,13 +99,12 @@ func seedIndexPlanConversation(t *testing.T, s *store.Store, convID, userID stri
 	}
 }
 
-// TestListMessages_IndexPlan verifies via EXPLAIN QUERY PLAN that the
-// ListMessages query uses the messages_conv_user_created index on
-// (conversation_id, user_id, created_at, id) and produces no full unindexed
-// SCAN of messages and no USE TEMP B-TREE FOR ORDER BY.
+// TestListMessages_IndexPlan verifies via EXPLAIN QUERY PLAN that the ListMessages query uses the
+// messages_conv_user_created index on (conversation_id, user_id, created_at, id) and produces no full unindexed SCAN of
+// messages and no USE TEMP B-TREE FOR ORDER BY.
 //
-// Real rows are seeded so the SQLite query planner sees a non-empty table —
-// an empty table can produce degenerate plans that differ from production.
+// Real rows are seeded so the SQLite query planner sees a non-empty table — an empty table can produce degenerate plans
+// that differ from production.
 func TestListMessages_IndexPlan(t *testing.T) {
 	t.Parallel()
 	s := openMigratedStore(t)
@@ -133,8 +131,8 @@ func TestListMessages_IndexPlan(t *testing.T) {
 		}
 	}
 
-	// The SQL emitted by sqlc for ListMessages (positional ?N params).
-	// Keep in sync with the generated listMessages constant in db/messages.sql.go.
+	// The SQL emitted by sqlc for ListMessages (positional ?N params). Keep in sync with the generated listMessages
+	// constant in db/messages.sql.go.
 	const listSQL = `SELECT id, conversation_id, user_id, role, content, tool_calls, tool_call_id, finish_reason, abandoned, created_at
 FROM messages
 WHERE conversation_id = ?1
@@ -156,22 +154,20 @@ ORDER BY created_at, id`
 	assertNoFullScan(t, "ListMessages", "messages", plans)
 }
 
-// TestReclaimStaleJobs_IndexPlan verifies via EXPLAIN QUERY PLAN that the
-// ReclaimStaleJobs UPDATE uses the jobs_running_locked_at partial index
-// (finding 5) and does not fall back to an unindexed scan of the jobs table.
+// TestReclaimStaleJobs_IndexPlan verifies via EXPLAIN QUERY PLAN that the ReclaimStaleJobs UPDATE uses the
+// jobs_running_locked_at partial index (finding 5) and does not fall back to an unindexed scan of the jobs table.
 //
-// A realistic mix of running rows (with varied locked_at) and pending rows is
-// seeded so the query planner has enough statistics to prefer the targeted
-// partial index over the broader jobs_status_run_at index.  PRAGMA optimize is
-// run after seeding to refresh the planner's row estimates before EQP.
+// A realistic mix of running rows (with varied locked_at) and pending rows is seeded so the query planner has enough
+// statistics to prefer the targeted partial index over the broader jobs_status_run_at index.  PRAGMA optimize is run
+// after seeding to refresh the planner's row estimates before EQP.
 func TestReclaimStaleJobs_IndexPlan(t *testing.T) {
 	t.Parallel()
 	s := openMigratedStore(t)
 	ctx := context.Background()
 
-	// Seed 50 running rows with a locked_at in the past.  The planner needs a
-	// realistic dataset to prefer jobs_running_locked_at (locked_at range scan)
-	// over jobs_status_run_at (status point lookup + full running-rows scan).
+	// Seed 50 running rows with a locked_at in the past.  The planner needs a realistic dataset to prefer
+	// jobs_running_locked_at (locked_at range scan) over jobs_status_run_at (status point lookup + full running-rows
+	// scan).
 	for i := range 50 {
 		id := fmt.Sprintf("01JRECLAIM%016d", i)
 		if _, err := s.Writer().ExecContext(ctx,
@@ -186,8 +182,8 @@ func TestReclaimStaleJobs_IndexPlan(t *testing.T) {
 			t.Fatalf("seed running job %d: %v", i, err)
 		}
 	}
-	// Also seed pending rows so the planner can distinguish the status
-	// distribution: a large pending set makes the running subset more selective.
+	// Also seed pending rows so the planner can distinguish the status distribution: a large pending set makes the
+	// running subset more selective.
 	for i := range 100 {
 		id := fmt.Sprintf("01JPENDING0%015d", i)
 		if _, err := s.Writer().ExecContext(ctx,
@@ -207,8 +203,8 @@ func TestReclaimStaleJobs_IndexPlan(t *testing.T) {
 		t.Logf("optimize warn: %v", err)
 	}
 
-	// The SQL emitted by sqlc for ReclaimStaleJobs (named params → positional).
-	// Keep in sync with the generated reclaimStaleJobs constant in db/jobs.sql.go.
+	// The SQL emitted by sqlc for ReclaimStaleJobs (named params → positional). Keep in sync with the generated
+	// reclaimStaleJobs constant in db/jobs.sql.go.
 	const reclaimSQL = `UPDATE jobs SET status = 'pending', locked_at = NULL, updated_at = ?1
 WHERE status = 'running' AND locked_at IS NOT NULL AND locked_at < ?2`
 
@@ -227,10 +223,9 @@ WHERE status = 'running' AND locked_at IS NOT NULL AND locked_at < ?2`
 	assertNoFullScan(t, "ReclaimStaleJobs", "jobs", plans)
 }
 
-// TestListConversations_MessagesIndexPlan verifies via EXPLAIN QUERY PLAN that
-// the messages-side aggregation inside ListConversations uses the
-// messages_user_role_conv index on (user_id, role, conversation_id, created_at)
-// and produces no full unindexed SCAN of messages.
+// TestListConversations_MessagesIndexPlan verifies via EXPLAIN QUERY PLAN that the messages-side aggregation inside
+// ListConversations uses the messages_user_role_conv index on (user_id, role, conversation_id, created_at) and produces
+// no full unindexed SCAN of messages.
 //
 // Real rows are seeded so the SQLite query planner sees a non-empty table.
 func TestListConversations_MessagesIndexPlan(t *testing.T) {
@@ -258,8 +253,8 @@ func TestListConversations_MessagesIndexPlan(t *testing.T) {
 		}
 	}
 
-	// The SQL emitted by sqlc for ListConversations (positional ?N params).
-	// Keep in sync with the generated listConversations constant in db/conversations.sql.go.
+	// The SQL emitted by sqlc for ListConversations (positional ?N params). Keep in sync with the generated
+	// listConversations constant in db/conversations.sql.go.
 	const listSQL = `SELECT
     c.id,
     c.created_at,

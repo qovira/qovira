@@ -18,9 +18,8 @@ env:
   GOFLAGS: "-trimpath"
 
 jobs:
-  # Frontend checks for the SvelteKit SPA in web/. Runs first and gates the Go
-  # jobs below — a broken frontend build blocks the pipeline before the slower
-  # CGo matrix legs start. Runs on Linux x64 only (platform-agnostic JS build).
+  # Frontend checks for the SvelteKit SPA in web/. Runs first and gates the Go jobs below — a broken frontend build
+  # blocks the pipeline before the slower CGo matrix legs start. Runs on Linux x64 only (platform-agnostic JS build).
   web:
     name: Web (api-drift-gate, svelte-check, lint, format, test, build)
     runs-on: blacksmith-2vcpu-ubuntu-2404
@@ -41,15 +40,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: API types drift gate
-        # Regenerate TypeScript types from openapi.yaml and fail if the committed
-        # schema.d.ts is stale. The spec (openapi.yaml) is the contract; the types
-        # are derived from it. A drift means the spec changed without regenerating
-        # the types (or vice versa) — both must move together.
+        # Regenerate TypeScript types from openapi.yaml and fail if the committed schema.d.ts is stale. The spec
+        # (openapi.yaml) is the contract; the types are derived from it. A drift means the spec changed without
+        # regenerating the types (or vice versa) — both must move together.
         run: pnpm generate:api && git diff --exit-code src/lib/api/schema.d.ts
       - name: Compile i18n
-        # Paraglide-JS generates src/lib/paraglide/ at build time. The directory is
-        # gitignored; generate it once here so svelte-check, lint, and test can all
-        # import the compiled message functions without each running Vite.
+        # Paraglide-JS generates src/lib/paraglide/ at build time. The directory is gitignored; generate it once here
+        # so svelte-check, lint, and test can all import the compiled message functions without each running Vite.
         # pnpm check / pnpm lint / pnpm test also chain compile:i18n for local runs.
         run: pnpm compile:i18n
       - name: svelte-check
@@ -59,23 +56,20 @@ jobs:
       - name: Format check
         run: pnpm format:check
       - name: Install Playwright browser
-        # `pnpm test` runs the Storybook project in Vitest Browser Mode, which
-        # drives Chromium via Playwright — install it (and its system libs)
-        # before the test step on the bare runner.
+        # `pnpm test` runs the Storybook project in Vitest Browser Mode, which drives Chromium via Playwright —
+        # install it (and its system libs) before the test step on the bare runner.
         run: pnpm exec playwright install --with-deps chromium
       - name: Test
         run: pnpm test
       - name: Build
         run: pnpm build
 
-  # Build and Test run across every supported OS/arch target: the SQLCipher cgo
-  # build (via go-sqlcipher) and its OpenSSL linkage are platform-specific, so a
-  # green Linux x64 run says nothing about ARM64 or Apple Silicon. Lint and Vuln
-  # are static, platform-agnostic analyses and run once on Linux x64.
+  # Build and Test run across every supported OS/arch target: the SQLCipher cgo build (via go-sqlcipher) and its OpenSSL
+  # linkage are platform-specific, so a green Linux x64 run says nothing about ARM64 or Apple Silicon. Lint and Vuln are
+  # static, platform-agnostic analyses and run once on Linux x64.
   #
-  # House rule (writing-workflows): every job runs on Blacksmith, never a
-  # GitHub-hosted runner. 2 vCPU is the like-for-like Linux default; macOS starts
-  # at Blacksmith's smallest size, 6 vCPU.
+  # House rule (writing-workflows): every job runs on Blacksmith, never a GitHub-hosted runner. 2 vCPU is the
+  # like-for-like Linux default; macOS starts at Blacksmith's smallest size, 6 vCPU.
   build:
     needs: web
     name: Build (${{ matrix.target }})
@@ -140,13 +134,11 @@ jobs:
       - name: govulncheck
         run: govulncheck ./...
 
-  # End-to-end journeys: drive the real server (scripted Chatter, e2e build tag)
-  # plus the embedded SPA with Playwright. This leg needs BOTH toolchains — Go +
-  # OpenSSL (the composite setup) to compile the CGo e2e binary that
-  # `make e2e-server` builds and starts, and Node/pnpm + Chromium to build the
-  # SPA and run the browser journeys. Linux x64 only: the journeys are browser
-  # behaviour above the CGo layer, which the per-arch build/race legs already
-  # cover; re-running them on every arch would buy nothing.
+  # End-to-end journeys: drive the real server (scripted Chatter, e2e build tag) plus the embedded SPA with Playwright.
+  # This leg needs BOTH toolchains — Go + OpenSSL (the composite setup) to compile the CGo e2e binary that
+  # `make e2e-server` builds and starts, and Node/pnpm + Chromium to build the SPA and run the browser journeys. Linux
+  # x64 only: the journeys are browser behaviour above the CGo layer, which the per-arch build/race legs already cover;
+  # re-running them on every arch would buy nothing.
   e2e:
     needs: web
     name: E2E (Playwright journeys)
@@ -167,20 +159,18 @@ jobs:
         working-directory: web
         run: pnpm install --frozen-lockfile
       - name: Install Playwright browser
-        # The journeys run on Chromium; --with-deps pulls the system libraries the
-        # browser needs on a bare runner.
+        # The journeys run on Chromium; --with-deps pulls the system libraries the browser needs on a bare runner.
         working-directory: web
         run: pnpm exec playwright install --with-deps chromium
       - name: Run journeys
-        # Playwright's webServer builds and starts the e2e binary via
-        # `make e2e-server` (reuseExistingServer is false in CI) and polls
-        # /healthz before the specs run. Server env (master key, admin
-        # credentials, fixture path) comes from playwright.config.ts.
+        # Playwright's webServer builds and starts the e2e binary via `make e2e-server` (reuseExistingServer is false
+        # in CI) and polls /healthz before the specs run. Server env (master key, admin credentials, fixture path)
+        # comes from playwright.config.ts.
         working-directory: web
         run: pnpm exec playwright test
       - name: Upload report and traces
-        # Upload on failure too — the blob report and on-retry traces/videos are
-        # the artifacts that make a red run diagnosable.
+        # Upload on failure too — the blob report and on-retry traces/videos are the artifacts that make a red run
+        # diagnosable.
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
@@ -191,18 +181,15 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # Build the container image for both supported Linux arches. The image is not
-  # published — this leg only proves the multi-stage Dockerfile builds cleanly,
-  # including the arm64 cross-compile path that `make docker-build` can't
-  # exercise on an amd64 host. The Dockerfile pins its build stage to
-  # BUILDPLATFORM and cross-compiles to the target arch (Go's cgo cross-compiler
-  # links the SQLCipher build against the arm64 OpenSSL), so both arches build on
-  # one amd64 runner with no QEMU emulation. 4 vCPU: the two platform builds run
-  # concurrently and each compiles the large SQLCipher amalgamation.
+  # Build the container image for both supported Linux arches. The image is not published — this leg only proves the
+  # multi-stage Dockerfile builds cleanly, including the arm64 cross-compile path that `make docker-build` can't
+  # exercise on an amd64 host. The Dockerfile pins its build stage to BUILDPLATFORM and cross-compiles to the target
+  # arch (Go's cgo cross-compiler links the SQLCipher build against the arm64 OpenSSL), so both arches build on one
+  # amd64 runner with no QEMU emulation. 4 vCPU: the two platform builds run concurrently and each compiles the large
+  # SQLCipher amalgamation.
   #
-  # Blacksmith Docker conventions (writing-workflows): the buildx actions are the
-  # useblacksmith/* drop-ins and there is no type=gha layer cache — Blacksmith
-  # persists build layers itself.
+  # Blacksmith Docker conventions (writing-workflows): the buildx actions are the useblacksmith/* drop-ins and there is
+  # no type=gha layer cache — Blacksmith persists build layers itself.
   docker:
     needs: web
     name: Docker image

@@ -1,32 +1,30 @@
 // Package auth implements the password-credential core for Qovira.
 //
-// This package is intentionally self-contained: it has no database/sql or net/http imports.
-// All parameters are injected through [Params] and [Policy] structs so the caller (an identity
-// service constructed in a later slice) can supply production values from its own config.
+// This package is intentionally self-contained: it has no database/sql or net/http imports. All parameters are injected
+// through [Params] and [Policy] structs so the caller (an identity service constructed in a later slice) can supply
+// production values from its own config.
 //
 // # Hashing
 //
-// [Hasher] wraps argon2id ([golang.org/x/crypto/argon2.IDKey]).  [Hash] produces a PHC-formatted
-// string; [Verify] decodes the PHC and re-derives in constant time.
+// [Hasher] wraps argon2id ([golang.org/x/crypto/argon2.IDKey]).  [Hash] produces a PHC-formatted string; [Verify]
+// decodes the PHC and re-derives in constant time.
 //
 // # PHC string format
 //
 //	$argon2id$v=19$m=<memory>,t=<time>,p=<threads>$<base64-salt>$<base64-hash>
 //
-// Salt and hash are encoded with [base64.RawStdEncoding] (no padding), matching the PHC
-// convention.
+// Salt and hash are encoded with [base64.RawStdEncoding] (no padding), matching the PHC convention.
 //
 // # Dummy-verify
 //
-// [Hasher.DummyVerify] performs a real argon2id derivation so the unknown-email login path
-// costs the same wall-clock time as the wrong-password path, defeating user-enumeration
-// timing oracles.
+// [Hasher.DummyVerify] performs a real argon2id derivation so the unknown-email login path costs the same wall-clock
+// time as the wrong-password path, defeating user-enumeration timing oracles.
 //
 // # Password policy
 //
-// [Policy] enforces minimum/maximum UTF-8 rune length with no composition rules.
-// [ValidatePassword] returns a typed sentinel ([ErrPasswordTooShort] / [ErrPasswordTooLong])
-// so a later HTTP slice can map the error to a 422 with a JSON Pointer.
+// [Policy] enforces minimum/maximum UTF-8 rune length with no composition rules. [ValidatePassword] returns a typed
+// sentinel ([ErrPasswordTooShort] / [ErrPasswordTooLong]) so a later HTTP slice can map the error to a 422 with a JSON
+// Pointer.
 package auth
 
 import (
@@ -42,15 +40,13 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// phcVersion is the argon2 version encoded in PHC strings.  argon2.IDKey always produces
-// output for version 19 (0x13).
+// phcVersion is the argon2 version encoded in PHC strings.  argon2.IDKey always produces output for version 19 (0x13).
 const phcVersion = 19
 
 // ── Params ───────────────────────────────────────────────────────────────────
 
-// Params holds the argon2id KDF parameters and salt/key lengths.  Treat it as an injected
-// value — the identity service that constructs a [Hasher] is responsible for mapping its
-// own config here.
+// Params holds the argon2id KDF parameters and salt/key lengths.  Treat it as an injected value — the identity service
+// that constructs a [Hasher] is responsible for mapping its own config here.
 //
 // The zero value is not valid; use [DefaultParams] or populate every field explicitly.
 type Params struct {
@@ -86,26 +82,24 @@ var DefaultParams = Params{
 
 // ── Hasher ───────────────────────────────────────────────────────────────────
 
-// Hasher wraps argon2id with an injected [Params] set.  Construct it via [NewHasher].
-// The zero value is not valid.
+// Hasher wraps argon2id with an injected [Params] set.  Construct it via [NewHasher]. The zero value is not valid.
 type Hasher struct {
 	params    Params
 	dummyHash string // precomputed PHC for the dummy-verify path
 }
 
-// NewHasher constructs a Hasher parameterised by p.  It eagerly computes a dummy PHC
-// hash (from a random password + random salt) so the [DummyVerify] path is ready without
-// any per-call overhead.
+// NewHasher constructs a Hasher parameterised by p.  It eagerly computes a dummy PHC hash (from a random password +
+// random salt) so the [DummyVerify] path is ready without any per-call overhead.
 //
-// NewHasher panics if the OS entropy source is unavailable when generating the dummy hash;
-// that is a fatal system error and not recoverable.
+// NewHasher panics if the OS entropy source is unavailable when generating the dummy hash; that is a fatal system error
+// and not recoverable.
 func NewHasher(p Params) *Hasher {
 	phc := mustDummyHash(p)
 	return &Hasher{params: p, dummyHash: phc}
 }
 
-// mustDummyHash creates a genuine argon2id PHC hash from a random 32-byte password so the
-// dummy-verify path incurs a full KDF round.  Panics on entropy failure.
+// mustDummyHash creates a genuine argon2id PHC hash from a random 32-byte password so the dummy-verify path incurs a
+// full KDF round.  Panics on entropy failure.
 func mustDummyHash(p Params) string {
 	// Random password so the dummy PHC is unpredictable.
 	randomPwd := make([]byte, 32)
@@ -119,8 +113,8 @@ func mustDummyHash(p Params) string {
 	return phc
 }
 
-// Hash derives an argon2id hash of plaintext and returns it as a PHC string.
-// A fresh random salt is generated for every call.
+// Hash derives an argon2id hash of plaintext and returns it as a PHC string. A fresh random salt is generated for every
+// call.
 func (h *Hasher) Hash(plaintext string) (string, error) {
 	return hashWithParams(h.params, plaintext)
 }
@@ -151,11 +145,10 @@ func hashWithParams(p Params, plaintext string) (string, error) {
 	return phc, nil
 }
 
-// Verify decodes the parameters and salt from phc, re-derives the key for plaintext,
-// and compares using [crypto/subtle.ConstantTimeCompare].
+// Verify decodes the parameters and salt from phc, re-derives the key for plaintext, and compares using
+// [crypto/subtle.ConstantTimeCompare].
 //
-// Returns (false, nil) when the password does not match.
-// Returns (false, error) when phc is malformed or unparseable.
+// Returns (false, nil) when the password does not match. Returns (false, error) when phc is malformed or unparseable.
 func (h *Hasher) Verify(phc, plaintext string) (bool, error) {
 	p, salt, storedKey, err := parsePHC(phc)
 	if err != nil {
@@ -167,9 +160,9 @@ func (h *Hasher) Verify(phc, plaintext string) (bool, error) {
 	return match, nil
 }
 
-// NeedsRehash reports whether the params embedded in phc are weaker than the Hasher's
-// current params (i.e. any of Memory, Time, or Threads is strictly less than the current
-// value).  Returns true for an unparseable PHC so the caller can rehash on the next login.
+// NeedsRehash reports whether the params embedded in phc are weaker than the Hasher's current params (i.e. any of
+// Memory, Time, or Threads is strictly less than the current value).  Returns true for an unparseable PHC so the caller
+// can rehash on the next login.
 func (h *Hasher) NeedsRehash(phc string) bool {
 	stored, _, _, err := parsePHC(phc)
 	if err != nil {
@@ -177,22 +170,21 @@ func (h *Hasher) NeedsRehash(phc string) bool {
 		return true
 	}
 	cur := h.params
-	// KeyLen and SaltLen are intentionally omitted: they affect output size, not KDF hardness.
-	// A change to either requires an explicit migration, not an opportunistic rehash.
+	// KeyLen and SaltLen are intentionally omitted: they affect output size, not KDF hardness. A change to either
+	// requires an explicit migration, not an opportunistic rehash.
 	return stored.Memory < cur.Memory || stored.Time < cur.Time || stored.Threads < cur.Threads
 }
 
-// DummyHash returns the precomputed dummy PHC string.  Exposed for tests that need to
-// assert it is a valid argon2id PHC.
+// DummyHash returns the precomputed dummy PHC string.  Exposed for tests that need to assert it is a valid argon2id
+// PHC.
 func (h *Hasher) DummyHash() string {
 	return h.dummyHash
 }
 
-// DummyVerify performs a real argon2id verification against the precomputed dummy PHC for
-// an unknown email, so the unknown-email and wrong-password login paths cost the same KDF
-// work.  Always returns (false, nil) on a correctly formed dummy hash; an error is
-// returned only if the dummy hash is somehow unparseable (which would be a programmer error
-// caught in tests).
+// DummyVerify performs a real argon2id verification against the precomputed dummy PHC for an unknown email, so the
+// unknown-email and wrong-password login paths cost the same KDF work.  Always returns (false, nil) on a correctly
+// formed dummy hash; an error is returned only if the dummy hash is somehow unparseable (which would be a programmer
+// error caught in tests).
 func (h *Hasher) DummyVerify(plaintext string) (bool, error) {
 	return h.Verify(h.dummyHash, plaintext)
 }
@@ -203,9 +195,8 @@ func (h *Hasher) DummyVerify(plaintext string) (bool, error) {
 //
 //	$argon2id$v=19$m=<M>,t=<T>,p=<P>$<b64salt>$<b64hash>
 //
-// It returns the embedded Params (Memory/Time/Threads; KeyLen is derived from the decoded
-// key length; SaltLen is derived from the decoded salt length), the raw salt bytes, and the
-// raw derived-key bytes.
+// It returns the embedded Params (Memory/Time/Threads; KeyLen is derived from the decoded key length; SaltLen is
+// derived from the decoded salt length), the raw salt bytes, and the raw derived-key bytes.
 func parsePHC(phc string) (p Params, salt, key []byte, err error) {
 	// Expected structure after splitting on '$':
 	//   [0] ""             (the leading $)
@@ -258,16 +249,15 @@ func parsePHC(phc string) (p Params, salt, key []byte, err error) {
 
 // parseParamsSegment parses the "m=<M>,t=<T>,p=<P>" segment into *p.
 func parseParamsSegment(seg string, p *Params) error {
-	// The segment contains exactly three comma-separated key=value pairs in the
-	// canonical order m, t, p.  We accept them in that order only, matching the
-	// PHC spec's argon2id encoding.
+	// The segment contains exactly three comma-separated key=value pairs in the canonical order m, t, p.  We accept
+	// them in that order only, matching the PHC spec's argon2id encoding.
 	fields := strings.Split(seg, ",")
 	if len(fields) != 3 {
 		return fmt.Errorf("auth: params segment %q: want m=<M>,t=<T>,p=<P>", seg)
 	}
 
-	// parseField parses a "key=value" pair, requiring the value to fit in bitSize bits and
-	// to be strictly greater than zero (argon2id requires positive m, t, and p).
+	// parseField parses a "key=value" pair, requiring the value to fit in bitSize bits and to be strictly greater
+	// than zero (argon2id requires positive m, t, and p).
 	parseField := func(kv, prefix string, bitSize int) (uint64, error) {
 		val, ok := strings.CutPrefix(kv, prefix)
 		if !ok {
@@ -291,8 +281,8 @@ func parseParamsSegment(seg string, p *Params) error {
 	if err != nil {
 		return err
 	}
-	// Threads is uint8 in argon2 (max 255); parse with bit size 8 so p=256 is a parse
-	// error rather than silently truncating to 0, which would panic inside argon2.IDKey.
+	// Threads is uint8 in argon2 (max 255); parse with bit size 8 so p=256 is a parse error rather than silently
+	// truncating to 0, which would panic inside argon2.IDKey.
 	pVal, err := parseField(fields[2], "p=", 8)
 	if err != nil {
 		return err
@@ -306,38 +296,35 @@ func parseParamsSegment(seg string, p *Params) error {
 
 // ── Password policy ───────────────────────────────────────────────────────────
 
-// ErrPasswordTooShort is returned by [Policy.ValidatePassword] when the plaintext is
-// shorter than [Policy.MinLen] UTF-8 runes.  Use [errors.Is] to check.
+// ErrPasswordTooShort is returned by [Policy.ValidatePassword] when the plaintext is shorter than [Policy.MinLen] UTF-8
+// runes.  Use [errors.Is] to check.
 var ErrPasswordTooShort = errors.New("password is too short")
 
-// ErrPasswordTooLong is returned by [Policy.ValidatePassword] when the plaintext is
-// longer than [Policy.MaxLen] UTF-8 runes.  Use [errors.Is] to check.
+// ErrPasswordTooLong is returned by [Policy.ValidatePassword] when the plaintext is longer than [Policy.MaxLen] UTF-8
+// runes.  Use [errors.Is] to check.
 var ErrPasswordTooLong = errors.New("password is too long")
 
-// Policy carries the password validation rules.  There are deliberately no composition
-// rules (uppercase, digits, symbols) — length only, per the OWASP guidance embedded in
-// the Qovira design.
+// Policy carries the password validation rules.  There are deliberately no composition rules (uppercase, digits,
+// symbols) — length only, per the OWASP guidance embedded in the Qovira design.
 //
 // Use [DefaultPolicy] for the production defaults or construct your own for tests.
 type Policy struct {
-	// MinLen is the minimum number of UTF-8 runes required.  Must be > 0.
-	// Production default: 12.
+	// MinLen is the minimum number of UTF-8 runes required.  Must be > 0. Production default: 12.
 	MinLen int
 
-	// MaxLen is the maximum number of UTF-8 runes allowed.  A generous upper bound
-	// (e.g. 1024) admits passphrases and password-manager output while bounding abuse.
-	// Production default: 1024.
+	// MaxLen is the maximum number of UTF-8 runes allowed.  A generous upper bound (e.g. 1024) admits passphrases and
+	// password-manager output while bounding abuse. Production default: 1024.
 	MaxLen int
 }
 
 // DefaultPolicy is the production password policy: min 12, max 1024 runes.
 var DefaultPolicy = Policy{MinLen: 12, MaxLen: 1024}
 
-// ValidatePassword checks that plaintext satisfies the policy length bounds.
-// It counts UTF-8 runes (not bytes) so multi-byte characters count once.
+// ValidatePassword checks that plaintext satisfies the policy length bounds. It counts UTF-8 runes (not bytes) so
+// multi-byte characters count once.
 //
-// Returns [ErrPasswordTooShort] or [ErrPasswordTooLong] when the constraint is violated;
-// nil when the password is acceptable.  No composition rules are applied.
+// Returns [ErrPasswordTooShort] or [ErrPasswordTooLong] when the constraint is violated; nil when the password is
+// acceptable.  No composition rules are applied.
 func (pol Policy) ValidatePassword(plaintext string) error {
 	n := utf8.RuneCountInString(plaintext)
 	if n < pol.MinLen {

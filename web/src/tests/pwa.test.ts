@@ -105,9 +105,9 @@ describe("icon files", () => {
 // ---------------------------------------------------------------------------
 
 describe("service worker", () => {
-  // The $service-worker `build` array contains only hashed _app/* assets;
-  // index.html is NOT included by SvelteKit. The SW must add it explicitly so
-  // a cold start (no network) can serve the shell document for any navigation.
+  // The $service-worker `build` array contains only hashed _app/* assets; index.html is NOT
+  // included by SvelteKit. The SW must add it explicitly so a cold start (no network) can serve the
+  // shell document for any navigation.
   const swSrc = readFileSync(fileURLToPath(new URL("../service-worker.ts", import.meta.url)), "utf8");
 
   it('explicitly precaches "/index.html" as the navigation fallback', () => {
@@ -115,8 +115,8 @@ describe("service worker", () => {
   });
 
   it('handles navigation requests (mode === "navigate") with fallback to the cached shell', () => {
-    // The fetch handler must branch on request.mode === "navigate" so that deep
-    // links (e.g. /reminders) resolve offline via the precached shell document.
+    // The fetch handler must branch on request.mode === "navigate" so that deep links (e.g.
+    // /reminders) resolve offline via the precached shell document.
     expect(swSrc).toContain('"navigate"');
     expect(swSrc).toContain("NAV_FALLBACK");
   });

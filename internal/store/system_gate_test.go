@@ -1,11 +1,10 @@
 package store
 
-// Whitebox tests for the system-scope gate on the five scope-bypass methods.
-// These live in package store (not store_test) so they can reference the
-// unexported errUserScopeForSystemMethod sentinel.
+// Whitebox tests for the system-scope gate on the five scope-bypass methods. These live in package store (not
+// store_test) so they can reference the unexported errUserScopeForSystemMethod sentinel.
 //
-// Each method must reject a user scope with errUserScopeForSystemMethod before
-// any DB work and let a system scope through.
+// Each method must reject a user scope with errUserScopeForSystemMethod before any DB work and let a system scope
+// through.
 
 import (
 	"context"
@@ -14,8 +13,8 @@ import (
 	"testing"
 )
 
-// openMigratedStoreInternal opens a migrated store for whitebox tests.
-// Mirrors openMigratedStore in scoped_queries_test.go but lives in package store.
+// openMigratedStoreInternal opens a migrated store for whitebox tests. Mirrors openMigratedStore in
+// scoped_queries_test.go but lives in package store.
 func openMigratedStoreInternal(t *testing.T) *Store {
 	t.Helper()
 	dir := t.TempDir()
@@ -49,8 +48,8 @@ func sysSQInternal(s *Store) *ScopedQueries {
 	return s.ForUser(SystemScope())
 }
 
-// TestSystemGate_InsertMessageByUserID verifies that InsertMessageByUserID
-// rejects a user scope with errUserScopeForSystemMethod and passes a system scope.
+// TestSystemGate_InsertMessageByUserID verifies that InsertMessageByUserID rejects a user scope with
+// errUserScopeForSystemMethod and passes a system scope.
 func TestSystemGate_InsertMessageByUserID(t *testing.T) {
 	t.Parallel()
 	s := openMigratedStoreInternal(t)
@@ -65,9 +64,8 @@ func TestSystemGate_InsertMessageByUserID(t *testing.T) {
 	})
 
 	t.Run("system_scope_passes_gate", func(t *testing.T) {
-		// The system scope should get past the gate (may still fail on FK constraints
-		// since we haven't seeded the DB — that's fine, any error other than the
-		// gate sentinel means the gate itself passed).
+		// The system scope should get past the gate (may still fail on FK constraints since we haven't seeded the
+		// DB — that's fine, any error other than the gate sentinel means the gate itself passed).
 		sq := sysSQInternal(s)
 		err := sq.InsertMessageByUserID(ctx, "id1", "conv-nonexistent", "user-none", "call1", "content")
 		if errors.Is(err, errUserScopeForSystemMethod) {
@@ -77,8 +75,8 @@ func TestSystemGate_InsertMessageByUserID(t *testing.T) {
 	})
 }
 
-// TestSystemGate_CountNonExpiredConfirmationsByMessageIDForUser verifies the
-// gate on CountNonExpiredConfirmationsByMessageIDForUser.
+// TestSystemGate_CountNonExpiredConfirmationsByMessageIDForUser verifies the gate on
+// CountNonExpiredConfirmationsByMessageIDForUser.
 func TestSystemGate_CountNonExpiredConfirmationsByMessageIDForUser(t *testing.T) {
 	t.Parallel()
 	s := openMigratedStoreInternal(t)
@@ -108,8 +106,7 @@ func TestSystemGate_CountNonExpiredConfirmationsByMessageIDForUser(t *testing.T)
 	})
 }
 
-// TestSystemGate_MarkConfirmationExpiredByUserID verifies the gate on
-// MarkConfirmationExpiredByUserID.
+// TestSystemGate_MarkConfirmationExpiredByUserID verifies the gate on MarkConfirmationExpiredByUserID.
 func TestSystemGate_MarkConfirmationExpiredByUserID(t *testing.T) {
 	t.Parallel()
 	s := openMigratedStoreInternal(t)
@@ -139,8 +136,7 @@ func TestSystemGate_MarkConfirmationExpiredByUserID(t *testing.T) {
 	})
 }
 
-// TestSystemGate_MarkMessageAbandonedByUserID verifies the gate on
-// MarkMessageAbandonedByUserID.
+// TestSystemGate_MarkMessageAbandonedByUserID verifies the gate on MarkMessageAbandonedByUserID.
 func TestSystemGate_MarkMessageAbandonedByUserID(t *testing.T) {
 	t.Parallel()
 	s := openMigratedStoreInternal(t)
@@ -167,8 +163,7 @@ func TestSystemGate_MarkMessageAbandonedByUserID(t *testing.T) {
 	})
 }
 
-// TestSystemGate_ListLapsedConfirmations verifies the gate on
-// ListLapsedConfirmations.
+// TestSystemGate_ListLapsedConfirmations verifies the gate on ListLapsedConfirmations.
 func TestSystemGate_ListLapsedConfirmations(t *testing.T) {
 	t.Parallel()
 	s := openMigratedStoreInternal(t)

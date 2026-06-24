@@ -81,11 +81,9 @@ func waitForConfirmationRequired(t *testing.T, bus *fakeBus, timeout time.Durati
 	return bus.snapshot()
 }
 
-// waitForToolStarted blocks until a "tool.started" event with the given callID
-// appears on the bus or the timeout expires. It is used as a positive signal
-// that the resumed turn actually executed the approved tool call, so that
-// subsequent "no terminal yet" assertions are gated on real work having occurred
-// rather than on a wall-clock delay.
+// waitForToolStarted blocks until a "tool.started" event with the given callID appears on the bus or the timeout
+// expires. It is used as a positive signal that the resumed turn actually executed the approved tool call, so that
+// subsequent "no terminal yet" assertions are gated on real work having occurred rather than on a wall-clock delay.
 func waitForToolStarted(t *testing.T, bus *fakeBus, callID string, timeout time.Duration) []fakeEvent {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -114,8 +112,8 @@ func countEventType(evs []fakeEvent, typ string) int {
 	return n
 }
 
-// hasPendingConfirmation checks that a pending_confirmations row exists with the given callID
-// for this user. It queries the DB directly.
+// hasPendingConfirmation checks that a pending_confirmations row exists with the given callID for this user. It queries
+// the DB directly.
 func hasPendingConfirmation(t *testing.T, s *store.Store, userID, callID string) bool {
 	t.Helper()
 	var n int
@@ -145,9 +143,9 @@ func getPendingConfirmationStatus(t *testing.T, s *store.Store, userID, callID s
 	return status
 }
 
-// startTurnExpectSuspend fires a turn with a Confirm-tier tool call and waits for
-// the confirmation.required event (max 2s). It returns the snapshot at that point.
-// The turn goroutine ends after emitting confirmation.required — no parked goroutine.
+// startTurnExpectSuspend fires a turn with a Confirm-tier tool call and waits for the confirmation.required event
+// (max 2s). It returns the snapshot at that point. The turn goroutine ends after emitting confirmation.required — no
+// parked goroutine.
 func startTurnExpectSuspend(
 	t *testing.T,
 	h *harness.Harness,
@@ -404,9 +402,9 @@ func TestConfirm_AC3_DenyFeedsSyntheticResult(t *testing.T) {
 
 // ── AC-4: Resume correctness — persisted state drives re-entry identically ──
 
-// TestConfirm_AC4_ResumeCorrectness verifies that constructing a conversation
-// with a dangling tool call (pending_confirmation row exists) in the DB and calling
-// Resolve reconstitutes the turn identically to a freshly-suspended turn.
+// TestConfirm_AC4_ResumeCorrectness verifies that constructing a conversation with a dangling tool call
+// (pending_confirmation row exists) in the DB and calling Resolve reconstitutes the turn identically to a
+// freshly-suspended turn.
 func TestConfirm_AC4_ResumeCorrectness(t *testing.T) {
 	t.Parallel()
 
@@ -427,8 +425,8 @@ func TestConfirm_AC4_ResumeCorrectness(t *testing.T) {
 	h := buildHarnessWithConfirmTool(t, s, gw, bus, extTool, time.Hour)
 	srv := buildConfirmServer(h)
 
-	// Manually construct the conversation state: user message, assistant message
-	// with tool_calls, and a pending_confirmations row — as if a previous turn suspended.
+	// Manually construct the conversation state: user message, assistant message with tool_calls, and a
+	// pending_confirmations row — as if a previous turn suspended.
 	convID := id.New()
 	scope := store.UserScope(p)
 	sq := s.ForUser(scope)
@@ -476,8 +474,7 @@ func TestConfirm_AC4_ResumeCorrectness(t *testing.T) {
 		t.Fatalf("insert pending_confirmations: %v", err)
 	}
 
-	// Now call Resolve(approve) — this should re-enter run, execute the tool,
-	// and continue to message.completed.
+	// Now call Resolve(approve) — this should re-enter run, execute the tool, and continue to message.completed.
 	rr := resolveViaHTTP(t, srv, p, convID, callID, "approve")
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("AC-4: POST confirmations status = %d, want 202; body: %s", rr.Code, rr.Body.String())
@@ -502,8 +499,8 @@ func TestConfirm_AC4_ResumeCorrectness(t *testing.T) {
 		t.Errorf("AC-4: message.completed count = %d, want 1", countEventType(evs, "message.completed"))
 	}
 
-	// AC-4d: only one tool.started (the approved tool, not the gateway round that
-	// was already consumed before suspension).
+	// AC-4d: only one tool.started (the approved tool, not the gateway round that was already consumed before
+	// suspension).
 	toolStartedCount := countEventType(evs, "tool.started")
 	if toolStartedCount != 1 {
 		t.Errorf("AC-4: tool.started count = %d, want 1 (only the approved tool)", toolStartedCount)
@@ -592,8 +589,8 @@ func TestConfirm_AC5_ThreeCallsThreeConfirmations(t *testing.T) {
 		t.Error("AC-5: terminal event emitted with pending confirmations — should not")
 	}
 
-	// Now resolve them one by one. After each of the first two, the turn should
-	// re-enter, execute that one, and suspend again. After the third, it should complete.
+	// Now resolve them one by one. After each of the first two, the turn should re-enter, execute that one, and suspend
+	// again. After the third, it should complete.
 
 	// Approve call 1 — turn re-enters, executes call1, sees call2+call3 still pending, suspends again.
 	rr1 := resolveViaHTTP(t, srv, p, convID, callID1, "approve")
@@ -601,10 +598,9 @@ func TestConfirm_AC5_ThreeCallsThreeConfirmations(t *testing.T) {
 		t.Fatalf("AC-5: approve call1 status = %d, want 202", rr1.Code)
 	}
 
-	// Gate the "no terminal yet" assertion on the positive signal that the resumed
-	// turn actually ran: wait for tool.started for callID1 (proving execution reached
-	// the approved call), then snapshot — at that point the turn has re-suspended and
-	// no terminal event can have been emitted.
+	// Gate the "no terminal yet" assertion on the positive signal that the resumed turn actually ran: wait for
+	// tool.started for callID1 (proving execution reached the approved call), then snapshot — at that point the turn
+	// has re-suspended and no terminal event can have been emitted.
 	waitForToolStarted(t, bus, callID1, 3*time.Second)
 
 	// Tool executed for call1 but turn still suspended (call2 & call3 pending).
@@ -735,8 +731,8 @@ func TestConfirm_AC6_HTTPEndpointStatusCodes(t *testing.T) {
 
 // ── Config.ConfirmationTTL default ───────────────────────────────────────────
 
-// TestConfirm_DefaultTTL verifies that a zero-value ConfirmationTTL uses the default (24h),
-// and that ExpiresAt is set in the persisted row.
+// TestConfirm_DefaultTTL verifies that a zero-value ConfirmationTTL uses the default (24h), and that ExpiresAt is set
+// in the persisted row.
 func TestConfirm_DefaultTTL(t *testing.T) {
 	t.Parallel()
 
@@ -889,9 +885,8 @@ func TestConfirm_ScopeIsolation_CrossUserResolveRejected(t *testing.T) {
 
 // ── SHOULD-FIX 4: callID must belong to the path {id} conversation ───────────
 
-// TestConfirm_ConvIDOwnership_WrongConv verifies that POSTing to
-// /conversations/AAA/confirmations/callX returns 404 when callX actually belongs
-// to conversation BBB (same user). The {id} segment must not be decorative.
+// TestConfirm_ConvIDOwnership_WrongConv verifies that POSTing to /conversations/AAA/confirmations/callX returns 404
+// when callX actually belongs to conversation BBB (same user). The {id} segment must not be decorative.
 func TestConfirm_ConvIDOwnership_WrongConv(t *testing.T) {
 	t.Parallel()
 

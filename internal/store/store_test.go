@@ -12,8 +12,7 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// openStore is a test helper that opens a store against a temp-dir database
-// file and registers a Cleanup to close it.
+// openStore is a test helper that opens a store against a temp-dir database file and registers a Cleanup to close it.
 func openStore(t *testing.T, cfg store.Config) *store.Store {
 	t.Helper()
 	s, err := store.Open(cfg)
@@ -28,9 +27,8 @@ func openStore(t *testing.T, cfg store.Config) *store.Store {
 	return s
 }
 
-// TestWrongKeyFails verifies AC1: opening with the wrong key returns an error
-// at Open time, and opening with the right key succeeds and can read back data
-// written in a previous open/close cycle.
+// TestWrongKeyFails verifies AC1: opening with the wrong key returns an error at Open time, and opening with the right
+// key succeeds and can read back data written in a previous open/close cycle.
 func TestWrongKeyFails(t *testing.T) {
 	t.Parallel()
 
@@ -86,8 +84,8 @@ func TestWrongKeyFails(t *testing.T) {
 	}
 }
 
-// TestPoolSizes verifies AC2: the write pool is capped at one connection and
-// the read pool is capped at ReadPoolSize (both explicit and default).
+// TestPoolSizes verifies AC2: the write pool is capped at one connection and the read pool is capped at ReadPoolSize
+// (both explicit and default).
 func TestPoolSizes(t *testing.T) {
 	t.Parallel()
 
@@ -122,8 +120,7 @@ func TestPoolSizes(t *testing.T) {
 	}
 }
 
-// TestPragmasApplied verifies AC3: the expected PRAGMAs are set on connections
-// from both the write and read pools.
+// TestPragmasApplied verifies AC3: the expected PRAGMAs are set on connections from both the write and read pools.
 func TestPragmasApplied(t *testing.T) {
 	t.Parallel()
 
@@ -148,31 +145,29 @@ func TestPragmasApplied(t *testing.T) {
 			assertPragmaStr(t, tc.db, "journal_mode", "wal")
 			// synchronous → 1 (NORMAL); proves the hook ran (SQLite default is 2 = FULL)
 			assertPragmaInt(t, tc.db, "synchronous", 1)
-			// busy_timeout → 5000 (design-mandated value; note: the driver's own
-			// default is also 5000, so this assertion alone does not prove the
-			// ConnectHook set it — the WAL and temp_store assertions above are what
-			// actually demonstrate the hook executed on this connection).
+			// busy_timeout → 5000 (design-mandated value; note: the driver's own default is also 5000, so this
+			// assertion alone does not prove the ConnectHook set it — the WAL and temp_store assertions above are
+			// what actually demonstrate the hook executed on this connection).
 			assertPragmaInt(t, tc.db, "busy_timeout", 5000)
-			// temp_store → 2 (MEMORY); SQLite default is 0 (DEFAULT/FILE), so this
-			// proves the hook ran even if busy_timeout coincidentally matches the default.
+			// temp_store → 2 (MEMORY); SQLite default is 0 (DEFAULT/FILE), so this proves the hook ran even if
+			// busy_timeout coincidentally matches the default.
 			assertPragmaInt(t, tc.db, "temp_store", 2)
-			// cache_size → -20000 (~20 MiB page cache); SQLite default is -2000, so
-			// this proves the hook set the performance PRAGMA (finding 1).
+			// cache_size → -20000 (~20 MiB page cache); SQLite default is -2000, so this proves the hook set the
+			// performance PRAGMA (finding 1).
 			assertPragmaInt(t, tc.db, "cache_size", -20000)
-			// mmap_size → 134217728 (128 MiB); SQLite default is 0, so any non-zero
-			// value proves the hook ran (finding 1).
+			// mmap_size → 134217728 (128 MiB); SQLite default is 0, so any non-zero value proves the hook ran
+			// (finding 1).
 			assertPragmaInt(t, tc.db, "mmap_size", 134217728)
-			// journal_size_limit → 67108864 (64 MiB); SQLite default is -1, so this
-			// proves the hook set it (finding 1).
+			// journal_size_limit → 67108864 (64 MiB); SQLite default is -1, so this proves the hook set it
+			// (finding 1).
 			assertPragmaInt(t, tc.db, "journal_size_limit", 67108864)
 		})
 	}
 }
 
-// TestOptimizeTimerStopsOnClose verifies that the PRAGMA optimize goroutine
-// started by Open exits cleanly when Close is called, leaving no goroutine leak
-// detectable under -race. The test opens a store, immediately closes it, and
-// relies on the race detector to flag any concurrent access that outlives Close.
+// TestOptimizeTimerStopsOnClose verifies that the PRAGMA optimize goroutine started by Open exits cleanly when Close is
+// called, leaving no goroutine leak detectable under -race. The test opens a store, immediately closes it, and relies
+// on the race detector to flag any concurrent access that outlives Close.
 func TestOptimizeTimerStopsOnClose(t *testing.T) {
 	t.Parallel()
 
@@ -189,18 +184,17 @@ func TestOptimizeTimerStopsOnClose(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Errorf("Close: unexpected error: %v", err)
 	}
-	// A second Close must be idempotent (not panic or return a real error).
-	// database/sql.DB.Close is idempotent so this exercises the channel-guard.
+	// A second Close must be idempotent (not panic or return a real error). database/sql.DB.Close is idempotent so
+	// this exercises the channel-guard.
 	if err := s.Close(); err != nil {
-		// database/sql.DB.Close() returns nil on a double-close, so a non-nil
-		// error here indicates the store itself is not idempotent.
+		// database/sql.DB.Close() returns nil on a double-close, so a non-nil error here indicates the store itself
+		// is not idempotent.
 		t.Errorf("second Close returned error: %v", err)
 	}
 }
 
-// TestWritePoolDSN_HasTxlockImmediate verifies that the write-pool DSN contains
-// "_txlock=immediate" and the read-pool DSN does not, so that every BeginTx on
-// the write pool uses BEGIN IMMEDIATE and avoids the DEFERRED read→write
+// TestWritePoolDSN_HasTxlockImmediate verifies that the write-pool DSN contains "_txlock=immediate" and the read-pool
+// DSN does not, so that every BeginTx on the write pool uses BEGIN IMMEDIATE and avoids the DEFERRED read→write
 // lock-upgrade that busy_timeout cannot catch (finding 3).
 func TestWritePoolDSN_HasTxlockImmediate(t *testing.T) {
 	t.Parallel()
@@ -216,8 +210,7 @@ func TestWritePoolDSN_HasTxlockImmediate(t *testing.T) {
 	}
 }
 
-// assertPragmaInt is a test helper that queries a PRAGMA and asserts the
-// integer result equals want.
+// assertPragmaInt is a test helper that queries a PRAGMA and asserts the integer result equals want.
 func assertPragmaInt(t *testing.T, db *sql.DB, pragma string, want int) {
 	t.Helper()
 	var got int
@@ -229,8 +222,7 @@ func assertPragmaInt(t *testing.T, db *sql.DB, pragma string, want int) {
 	}
 }
 
-// assertPragmaStr is a test helper that queries a PRAGMA and asserts the
-// string result equals want.
+// assertPragmaStr is a test helper that queries a PRAGMA and asserts the string result equals want.
 func assertPragmaStr(t *testing.T, db *sql.DB, pragma string, want string) {
 	t.Helper()
 	var got string
@@ -242,9 +234,8 @@ func assertPragmaStr(t *testing.T, db *sql.DB, pragma string, want string) {
 	}
 }
 
-// TestConcurrentReadsWithWrite verifies AC4: multiple goroutines can read via
-// the read pool while a write transaction is in progress on the write pool, and
-// the race detector sees no data races.
+// TestConcurrentReadsWithWrite verifies AC4: multiple goroutines can read via the read pool while a write transaction
+// is in progress on the write pool, and the race detector sees no data races.
 func TestConcurrentReadsWithWrite(t *testing.T) {
 	t.Parallel()
 
@@ -296,8 +287,7 @@ func TestConcurrentReadsWithWrite(t *testing.T) {
 		t.Fatal("timeout waiting for write transaction to start")
 	}
 
-	// Launch concurrent reads via the read pool — they must all succeed while
-	// the write transaction is open.
+	// Launch concurrent reads via the read pool — they must all succeed while the write transaction is open.
 	const numReaders = 8
 	var wg sync.WaitGroup
 	wg.Add(numReaders)
@@ -332,10 +322,9 @@ func TestConcurrentReadsWithWrite(t *testing.T) {
 	close(writeRelease)
 }
 
-// TestEmptyKeyRejected verifies that Open with an empty encryption key
-// must return a non-nil error and a nil Store. Without this guard the driver
-// silently produces an unencrypted database, which is a silent security failure
-// for an at-rest-encryption product.
+// TestEmptyKeyRejected verifies that Open with an empty encryption key must return a non-nil error and a nil Store.
+// Without this guard the driver silently produces an unencrypted database, which is a silent security failure for an
+// at-rest-encryption product.
 func TestEmptyKeyRejected(t *testing.T) {
 	t.Parallel()
 
@@ -357,18 +346,16 @@ func TestEmptyKeyRejected(t *testing.T) {
 	}
 }
 
-// TestSpecialCharPath verifies that database paths that contain
-// characters reserved in SQLite URI filenames (#, space, %) are handled
-// correctly. The test writes a row, closes, reopens, reads it back, and
-// asserts the on-disk file exists at exactly the intended path.
+// TestSpecialCharPath verifies that database paths that contain characters reserved in SQLite URI filenames (#, space,
+// %) are handled correctly. The test writes a row, closes, reopens, reads it back, and asserts the on-disk file exists
+// at exactly the intended path.
 func TestSpecialCharPath(t *testing.T) {
 	t.Parallel()
 
-	// Build a subpath inside TempDir whose directory and filename both contain
-	// '#' (URI fragment delimiter), ' ' (space), and '%' (percent).
-	// A literal '?' in the path is intentionally omitted: the driver splits the
-	// DSN on the first '?' to find where query params begin, so a '?' in the
-	// path is unrepresentable even with percent-encoding in the file: URI form.
+	// Build a subpath inside TempDir whose directory and filename both contain '#' (URI fragment delimiter), ' '
+	// (space), and '%' (percent). A literal '?' in the path is intentionally omitted: the driver splits the DSN on
+	// the first '?' to find where query params begin, so a '?' in the path is unrepresentable even with
+	// percent-encoding in the file: URI form.
 	base := t.TempDir()
 	weirdDir := filepath.Join(base, "weird #dir %x")
 	if err := os.MkdirAll(weirdDir, 0o700); err != nil {
@@ -427,10 +414,9 @@ func TestSpecialCharPath(t *testing.T) {
 	}
 }
 
-// TestOpenCreatesParentDir verifies that Open creates a missing nested
-// parent directory rather than failing with a "no such file or directory"
-// error. SQLite's open call does not create parent directories, so store.Open
-// must do it before attempting to open the pools.
+// TestOpenCreatesParentDir verifies that Open creates a missing nested parent directory rather than failing with a "no
+// such file or directory" error. SQLite's open call does not create parent directories, so store.Open must do it
+// before attempting to open the pools.
 func TestOpenCreatesParentDir(t *testing.T) {
 	t.Parallel()
 
@@ -458,17 +444,14 @@ func TestOpenCreatesParentDir(t *testing.T) {
 	}
 }
 
-// TestCloseSymmetric verifies that Close is symmetric — both the write and
-// read pool errors, when present, are individually wrapped with their
-// respective "store: close write pool" / "store: close read pool" prefixes and
-// both are included in the returned error.
+// TestCloseSymmetric verifies that Close is symmetric — both the write and read pool errors, when present, are
+// individually wrapped with their respective "store: close write pool" / "store: close read pool" prefixes and both
+// are included in the returned error.
 //
-// database/sql.DB.Close() is idempotent (returns nil on a double-close), so
-// we cannot trigger real pool-close errors through the public Store API. This
-// test therefore verifies the happy path (a clean Close succeeds) and serves
-// as a structural anchor documenting the intended behavior contract: both
-// error branches wrap with fmt.Errorf("store: close X pool: %w", err) and are
-// combined via errors.Join(werr, rerr) so both errors are always reported.
+// database/sql.DB.Close() is idempotent (returns nil on a double-close), so we cannot trigger real pool-close errors
+// through the public Store API. This test therefore verifies the happy path (a clean Close succeeds) and serves as a
+// structural anchor documenting the intended behavior contract: both error branches wrap with fmt.Errorf("store: close
+// X pool: %w", err) and are combined via errors.Join(werr, rerr) so both errors are always reported.
 func TestCloseSymmetric(t *testing.T) {
 	t.Parallel()
 

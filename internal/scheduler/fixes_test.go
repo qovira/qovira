@@ -21,12 +21,10 @@ import (
 
 // ── Fix 1: scan-failure re-arms the row to pending promptly ─────────────────
 //
-// TestReclaim_PeriodicSweepRecoversRunningRowWithStaleClock verifies the
-// periodic reclaim sweep path that would recover a row stranded by a scan
-// failure: a 'running' row whose locked_at is older than LeaseTimeout (as
-// judged by the scheduler clock) is returned to 'pending' within a few poll
-// cycles. This covers the reclaim-sweep recovery path; the proactive rearmRow
-// call on scan error is covered by the white-box tests in rearm_test.go.
+// TestReclaim_PeriodicSweepRecoversRunningRowWithStaleClock verifies the periodic reclaim sweep path that would recover
+// a row stranded by a scan failure: a 'running' row whose locked_at is older than LeaseTimeout (as judged by the
+// scheduler clock) is returned to 'pending' within a few poll cycles. This covers the reclaim-sweep recovery path; the
+// proactive rearmRow call on scan error is covered by the white-box tests in rearm_test.go.
 func TestReclaim_PeriodicSweepRecoversRunningRowWithStaleClock(t *testing.T) {
 	t.Parallel()
 
@@ -36,9 +34,8 @@ func TestReclaim_PeriodicSweepRecoversRunningRowWithStaleClock(t *testing.T) {
 
 	cfg := defaultTestConfig()
 	cfg.PollInterval = 10 * time.Millisecond
-	// LeaseTimeout is 2s so that after advancing by LeaseTimeout + 1s = 3s, the RFC3339
-	// threshold (second-precision) is strictly greater than locked_at. The invariant
-	// LeaseTimeout > JobTimeout must hold.
+	// LeaseTimeout is 2s so that after advancing by LeaseTimeout + 1s = 3s, the RFC3339 threshold (second-precision)
+	// is strictly greater than locked_at. The invariant LeaseTimeout > JobTimeout must hold.
 	cfg.JobTimeout = 1 * time.Second
 	cfg.LeaseTimeout = 2 * time.Second
 
@@ -57,9 +54,8 @@ func TestReclaim_PeriodicSweepRecoversRunningRowWithStaleClock(t *testing.T) {
 	// Let the boot sweep and at least one tick complete.
 	time.Sleep(50 * time.Millisecond)
 
-	// Insert a row in 'running' state with locked_at = clk.Now() to simulate
-	// exactly what the claim query would have set, had a Scan failure occurred
-	// immediately after. The row is 'running' and will become stale once the clock
+	// Insert a row in 'running' state with locked_at = clk.Now() to simulate exactly what the claim query would have
+	// set, had a Scan failure occurred immediately after. The row is 'running' and will become stale once the clock
 	// advances past LeaseTimeout.
 	lockedAt := clk.Now().UTC().Format(time.RFC3339)
 	jobID := insertRunningJob(t, s.Writer(), "scanfail.kind", lockedAt, 1)
@@ -70,16 +66,14 @@ func TestReclaim_PeriodicSweepRecoversRunningRowWithStaleClock(t *testing.T) {
 		t.Fatalf("pre-condition: status = %q, want running", status)
 	}
 
-	// Advance the clock so locked_at is now older than LeaseTimeout. RFC3339 stores
-	// timestamps at second precision, so we advance by LeaseTimeout + 1s to ensure
-	// the computed threshold (now - LeaseTimeout) is strictly greater than locked_at
-	// in the string comparison used by ReclaimStaleJobs.
+	// Advance the clock so locked_at is now older than LeaseTimeout. RFC3339 stores timestamps at second precision, so
+	// we advance by LeaseTimeout + 1s to ensure the computed threshold (now - LeaseTimeout) is strictly greater than
+	// locked_at in the string comparison used by ReclaimStaleJobs.
 	clk.Advance(cfg.LeaseTimeout + time.Second)
 
-	// The periodic reclaim fires on every tick (PollInterval = 10ms). The row must
-	// be returned to 'pending' within a few cycles — well within 3 seconds. If the
-	// row were only recovered via a wall-clock LeaseTimeout trigger, this would take
-	// much longer than the test timeout.
+	// The periodic reclaim fires on every tick (PollInterval = 10ms). The row must be returned to 'pending' within a
+	// few cycles — well within 3 seconds. If the row were only recovered via a wall-clock LeaseTimeout trigger, this
+	// would take much longer than the test timeout.
 	var finalStatus string
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -101,9 +95,8 @@ func TestReclaim_PeriodicSweepRecoversRunningRowWithStaleClock(t *testing.T) {
 
 // ── Fix 2: Reschedule of a failed (dead-lettered) job returns ErrJobNotReschedulable ─
 
-// TestReschedule_FailedJob_ReturnsNotReschedulable verifies that Reschedule of a
-// dead-lettered (status='failed') job returns ErrJobNotReschedulable and does NOT
-// return ErrJobNotFound (the old incorrect behaviour — the row exists, so
+// TestReschedule_FailedJob_ReturnsNotReschedulable verifies that Reschedule of a dead-lettered (status='failed') job
+// returns ErrJobNotReschedulable and does NOT return ErrJobNotFound (the old incorrect behaviour — the row exists, so
 // ErrJobNotFound was wrong; the row simply cannot be rescheduled in its current state).
 func TestReschedule_FailedJob_ReturnsNotReschedulable(t *testing.T) {
 	t.Parallel()
@@ -172,14 +165,13 @@ func TestReschedule_FailedJob_ReturnsNotReschedulable(t *testing.T) {
 
 // ── Fix 3: exhaustRecurring publishes job.failed only after confirming advance ─
 
-// TestExhaustRecurring_EventPublishedAfterAdvanceSucceeds verifies that job.failed
-// is published when the series-advance write successfully updates a row (the normal
-// path). The fix re-orders the exhaustRecurring logic so the AdvanceRecurringJob
-// write runs first and the publish only fires when execrows > 0.
+// TestExhaustRecurring_EventPublishedAfterAdvanceSucceeds verifies that job.failed is published when the series-advance
+// write successfully updates a row (the normal path). The fix re-orders the exhaustRecurring logic so the
+// AdvanceRecurringJob write runs first and the publish only fires when execrows > 0.
 //
-// The negative case (advance affects 0 rows because reclaim raced it) cannot be
-// deterministically triggered without process-level concurrency injection. This test
-// covers the happy path: advance succeeds → event fires, and the row ends up pending.
+// The negative case (advance affects 0 rows because reclaim raced it) cannot be deterministically triggered without
+// process-level concurrency injection. This test covers the happy path: advance succeeds → event fires, and the row
+// ends up pending.
 func TestExhaustRecurring_EventPublishedAfterAdvanceSucceeds(t *testing.T) {
 	t.Parallel()
 
@@ -280,9 +272,8 @@ func TestExhaustRecurring_EventPublishedAfterAdvanceSucceeds(t *testing.T) {
 		t.Errorf("JobFailedEvent.Kind = %q, want exhaust.event.order", payload.Kind)
 	}
 
-	// Ordering invariant: the event was published only after the advance write
-	// succeeded. At the point we observed the event, the DB was already advanced
-	// (status='pending'). We read status='pending' above after observing the event,
-	// confirming the write preceded (or was concurrent with) the publish.
+	// Ordering invariant: the event was published only after the advance write succeeded. At the point we observed
+	// the event, the DB was already advanced (status='pending'). We read status='pending' above after observing the
+	// event, confirming the write preceded (or was concurrent with) the publish.
 	_ = sql.NullString{} // keep the sql import used in other declarations
 }

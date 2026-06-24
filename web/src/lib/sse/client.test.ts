@@ -8,12 +8,11 @@ import { onUnauthorized, callUnauthorizedHandler } from "$lib/api/index.js";
 
 // ---------------------------------------------------------------------------
 // Module mocks (hoisted — must be at the top level of the file)
-// These stub the store imports so the client can be loaded in happy-dom without
-// Svelte $state rune support.
+// These stub the store imports so the client can be loaded in happy-dom without Svelte $state rune support.
 // ---------------------------------------------------------------------------
 
-// vi.hoisted runs before any import so the value is available inside vi.mock
-// factories, which are also hoisted above normal imports.
+// vi.hoisted runs before any import so the value is available inside vi.mock factories, which are also hoisted above
+// normal imports.
 const { STREAMING_SENTINEL_ID } = vi.hoisted(() => ({ STREAMING_SENTINEL_ID: "__streaming__" as const }));
 
 vi.mock("$lib/stores/reminders.svelte.js", () => ({
@@ -62,10 +61,9 @@ describe("nextBackoff()", () => {
   });
 
   it("caps at BACKOFF_MAX_MS (30 000ms) — jitter is applied AFTER clamping", () => {
-    // Input 15 000 (doubled = 30 000, exactly at the ceiling) exercises the
-    // jitter band that straddles the ceiling: jitter ∈ [0.8, 1.2] produces
-    // values in [24 000, 36 000] before clamping, so both sub-ceiling and
-    // above-ceiling samples occur within the 50 iterations.
+    // Input 15 000 (doubled = 30 000, exactly at the ceiling) exercises the jitter band that straddles the ceiling:
+    // jitter ∈ [0.8, 1.2] produces values in [24 000, 36 000] before clamping, so both sub-ceiling and above-ceiling
+    // samples occur within the 50 iterations.
     //
     // With jitter-THEN-clamp (correct, current impl):
     //   Math.min(30000 * jitter, 30000) → [24 000, 30 000] — always ≤ 30 000 ✓
@@ -74,10 +72,9 @@ describe("nextBackoff()", () => {
     //   Math.min(30000, 30000) = 30000; then 30000 * jitter → up to 36 000 ✗
     //   The `toBeLessThanOrEqual(30_000)` assertion would catch this.
     //
-    // (The old input 30 000 also discriminated at the upper bound, but always
-    // produced exactly 30 000 for the correct impl since doubled=60 000 > ceiling
-    // for every jitter value — so all 50 iterations landed at the ceiling,
-    // leaving the jitter band below the ceiling completely unexercised.)
+    // (The old input 30 000 also discriminated at the upper bound, but always produced exactly 30 000 for the correct
+    // impl since doubled=60 000 > ceiling for every jitter value — so all 50 iterations landed at the ceiling, leaving
+    // the jitter band below the ceiling completely unexercised.)
     for (let i = 0; i < 50; i++) {
       const result = nextBackoff(15_000);
       expect(result).toBeLessThanOrEqual(30_000);
@@ -103,8 +100,8 @@ describe("nextBackoff()", () => {
 
   it("progression from 500ms reaches near-max within ~8 steps", () => {
     // 500 → 1000 → 2000 → 4000 → 8000 → 16000 → 30000 (capped)
-    // Without jitter this is exactly 7 doublings; with jitter it may vary slightly.
-    // Generous upper bound of 20 steps to tolerate jitter.
+    // Without jitter this is exactly 7 doublings; with jitter it may vary slightly. Generous upper bound of 20 steps to
+    // tolerate jitter.
     let backoff = BACKOFF_INITIAL_MS;
     let steps = 0;
     while (backoff < 24_000 && steps < 20) {
@@ -466,11 +463,10 @@ describe("makeHandlers() — onReminderEvent dispatch", () => {
 // ---------------------------------------------------------------------------
 // makeHandlers() — onMessageCompleted reconciles conversation history
 //
-// On message.completed the authoritative assistant message is persisted
-// server-side. The handler refetches the conversation and replaces history with
-// server truth, healing any deltas the client missed (e.g. a mid-turn reload
-// that reconnected after the early deltas had already been streamed to the old
-// connection — reload-resilience, journey 5).
+// On message.completed the authoritative assistant message is persisted server-side. The handler refetches the
+// conversation and replaces history with server truth, healing any deltas the client missed (e.g. a mid-turn reload
+// that reconnected after the early deltas had already been streamed to the old connection — reload-resilience, journey
+// 5).
 // ---------------------------------------------------------------------------
 
 describe("makeHandlers() — onMessageCompleted conversation reconcile", () => {
@@ -550,12 +546,10 @@ describe("makeHandlers() — onMessageCompleted conversation reconcile", () => {
 // ---------------------------------------------------------------------------
 // makeHandlers() — SSE race-window guard via real production handler
 //
-// The race window exists between the synchronous pivot of the active conversation
-// id and the resolution of the history fetch. During this window, residual SSE
-// events for the OLD conversation must be silently dropped by the guards in
-// makeHandlers() (the production handler factory). These tests exercise the
-// REAL makeHandlers() — not a hand-rolled stub — so they actually guard the
-// production code path for each event type.
+// The race window exists between the synchronous pivot of the active conversation id and the resolution of the history
+// fetch. During this window, residual SSE events for the OLD conversation must be silently dropped by the guards in
+// makeHandlers() (the production handler factory). These tests exercise the REAL makeHandlers() — not a hand-rolled
+// stub — so they actually guard the production code path for each event type.
 // ---------------------------------------------------------------------------
 
 describe("makeHandlers() — SSE event guards via real handler (race-window)", () => {
@@ -659,11 +653,9 @@ describe("makeHandlers() — SSE event guards via real handler (race-window)", (
 // ---------------------------------------------------------------------------
 // M3 — 401 on /events must invoke the unauthorizedHandler teardown seam
 //
-// When the bare fetch("/events") returns 401, the SSE loop must call
-// callUnauthorizedHandler() (the same authority the REST path uses) so that
-// notifyTearDown / resetSession / goto("/login") fire. Merely setting
-// _active = false is insufficient — the session store keeps reporting
-// authenticated and the user is never redirected.
+// When the bare fetch("/events") returns 401, the SSE loop must call callUnauthorizedHandler() (the same authority the
+// REST path uses) so that notifyTearDown / resetSession / goto("/login") fire. Merely setting _active = false is
+// insufficient — the session store keeps reporting authenticated and the user is never redirected.
 // ---------------------------------------------------------------------------
 
 describe("SSE client — 401 on /events invokes the unauthorized handler (M3)", () => {
@@ -672,8 +664,8 @@ describe("SSE client — 401 on /events invokes the unauthorized handler (M3)", 
   beforeEach(() => {
     vi.useFakeTimers();
     handlerSpy = vi.fn();
-    // Register a spy as the central 401 authority. Cast required: vi.fn() returns
-    // a generic Mock type that is wider than (() => void) | (() => Promise<void>).
+    // Register a spy as the central 401 authority. Cast required: vi.fn() returns a generic Mock type that is wider
+    // than (() => void) | (() => Promise<void>).
     onUnauthorized(handlerSpy as () => void);
   });
 
@@ -723,10 +715,9 @@ describe("SSE client — 401 on /events invokes the unauthorized handler (M3)", 
 // ---------------------------------------------------------------------------
 // Fix 2 — reconcile() does NOT wipe reminders on a server error response
 //
-// When Api.GET("/reminders") returns a problem+json error (non-2xx),
-// openapi-fetch returns { data: undefined, error } without throwing.
-// The reconcile loop must detect result.error and bail out — leaving the
-// reminders store untouched — rather than calling setReminders([]).
+// When Api.GET("/reminders") returns a problem+json error (non-2xx), openapi-fetch returns { data: undefined, error }
+// without throwing. The reconcile loop must detect result.error and bail out — leaving the reminders store untouched
+// — rather than calling setReminders([]).
 // ---------------------------------------------------------------------------
 
 describe("reconcile() — reminders store is left untouched on server error (Fix 2)", () => {
@@ -804,13 +795,12 @@ describe("reconcile() — reminders store is left untouched on server error (Fix
 //   B. Content-Length absent/non-zero  →  error = await response.text() → ""
 //      (`error` is "" which is !== undefined; the existing `result.error !== undefined` guard catches this)
 //
-// These tests use `Content-Length: "0"` to force path A, so they exclusively
-// exercise the `!result.response.ok` clause. Without it they PASS; with it FAIL.
+// These tests use `Content-Length: "0"` to force path A, so they exclusively exercise the `!result.response.ok` clause.
+// Without it they PASS; with it FAIL.
 //
-// Mutation verification (confirmed): removing ONLY `|| !result.response.ok`
-// from the guard while keeping `result.error !== undefined` makes these two
-// tests FAIL, because path A returns `{ error: undefined }` which the first
-// clause does not catch. Adding the header is what forces path A.
+// Mutation verification (confirmed): removing ONLY `|| !result.response.ok` from the guard while keeping
+// `result.error !== undefined` makes these two tests FAIL, because path A returns `{ error: undefined }` which the
+// first clause does not catch. Adding the header is what forces path A.
 // ---------------------------------------------------------------------------
 
 describe("reconcile() — empty-body 500 does NOT wipe reminders store", () => {
@@ -850,10 +840,9 @@ describe("reconcile() — empty-body 500 does NOT wipe reminders store", () => {
           );
         }
 
-        // /api/v1/reminders — Content-Length: 0 forces openapi-fetch's early-return
-        // branch (index.mjs:180-181): { error: undefined, response } where response.ok
-        // is false. Only the `!result.response.ok` guard catches this; result.error is
-        // undefined so the `result.error !== undefined` clause alone would miss it.
+        // /api/v1/reminders — Content-Length: 0 forces openapi-fetch's early-return branch (index.mjs:180-181): {
+        // error: undefined, response } where response.ok is false. Only the `!result.response.ok` guard catches this;
+        // result.error is undefined so the `result.error !== undefined` clause alone would miss it.
         return Promise.resolve(new Response(null, { status: 500, headers: { "Content-Length": "0" } }));
       }),
     );
@@ -865,9 +854,8 @@ describe("reconcile() — empty-body 500 does NOT wipe reminders store", () => {
       await Promise.resolve();
     }
 
-    // setReminders must NOT have been called — the store is left as-is.
-    // Without `!result.response.ok`, this call would proceed and setReminders([])
-    // would wipe the local reminder list.
+    // setReminders must NOT have been called — the store is left as-is. Without `!result.response.ok`, this call would
+    // proceed and setReminders([]) would wipe the local reminder list.
     expect(setRemindersMock).not.toHaveBeenCalled();
   });
 
@@ -907,18 +895,17 @@ describe("reconcile() — empty-body 500 does NOT wipe reminders store", () => {
 // ---------------------------------------------------------------------------
 // Fix 3 — readStream dispatches events from CRLF-terminated frames
 //
-// The SSE spec allows \r\n line endings. A CRLF-framed stream (\r\n\r\n frame
-// boundaries) must dispatch events identically to a LF-framed stream.
-// Without normalization, lastIndexOf("\n\n") never matches \r\n\r\n and the
-// client buffers forever, dispatching nothing.
+// The SSE spec allows \r\n line endings. A CRLF-framed stream (\r\n\r\n frame boundaries) must dispatch events
+// identically to a LF-framed stream. Without normalization, lastIndexOf("\n\n") never matches \r\n\r\n and the client
+// buffers forever, dispatching nothing.
 // ---------------------------------------------------------------------------
 
 describe("readStream() — CRLF-framed events are dispatched (Fix 3)", () => {
   it("dispatches an event from a CRLF-terminated frame", async () => {
     const dispatchedEvents: { event: string; data: string }[] = [];
 
-    // Build a mock RouterHandlers whose onReminderEvent captures dispatches.
-    // We use reminder.created as a canary — any routable event works.
+    // Build a mock RouterHandlers whose onReminderEvent captures dispatches. We use reminder.created as a canary — any
+    // routable event works.
     const handlers = makeHandlers();
 
     // Intercept the stores to capture what gets routed.

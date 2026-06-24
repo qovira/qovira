@@ -9,9 +9,8 @@ description: >-
 runs:
   using: composite
   steps:
-    # go-sqlcipher compiles the SQLCipher codec against OpenSSL and links
-    # -lcrypto, so libcrypto's dev headers + library must be present on every
-    # runner, Linux and macOS alike — without them the cgo build fails to link.
+    # go-sqlcipher compiles the SQLCipher codec against OpenSSL and links -lcrypto, so libcrypto's dev headers + library
+    # must be present on every runner, Linux and macOS alike — without them the cgo build fails to link.
     - name: Install OpenSSL (Linux)
       if: runner.os == 'Linux'
       shell: bash
@@ -19,9 +18,8 @@ runs:
         sudo apt-get update
         sudo apt-get install -y libssl-dev
 
-    # macOS: install via Homebrew. go-sqlcipher hard-codes the Homebrew keg paths
-    # (/opt/homebrew/opt/openssl) on Apple Silicon, so the keg must be present.
-    # Idempotent — a no-op when already in the image.
+    # macOS: install via Homebrew. go-sqlcipher hard-codes the Homebrew keg paths (/opt/homebrew/opt/openssl) on Apple
+    # Silicon, so the keg must be present. Idempotent — a no-op when already in the image.
     - name: Install OpenSSL (macOS)
       if: runner.os == 'macOS'
       shell: bash

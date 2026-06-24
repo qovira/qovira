@@ -1,6 +1,6 @@
 // UI-preferences store — module-level singleton, NOT context-provided.
-// Survives logout. Persists { railPinned: boolean } to localStorage under
-// "qovira-ui". Theme is owned by @qovira/theme/runtime — not duplicated here.
+// Survives logout. Persists { railPinned: boolean } to localStorage under "qovira-ui". Theme is owned by
+// @qovira/theme/runtime — not duplicated here.
 
 const STORAGE_KEY = "qovira-ui";
 
@@ -8,9 +8,8 @@ interface PersistedPrefs {
   railPinned: boolean;
 }
 
-// Module-level $state is valid here: this is genuinely global, non-user data
-// (UI preference — persists across logout, same for all sessions on this device).
-// SSR note: ssr=false in +layout.ts; this module only runs in the browser.
+// Module-level $state is valid here: this is genuinely global, non-user data (UI preference — persists across logout,
+// same for all sessions on this device). SSR note: ssr=false in +layout.ts; this module only runs in the browser.
 let railPinned = $state(false);
 
 /** Read the current rail-pinned value. */
@@ -25,9 +24,8 @@ export function setRailPinned(value: boolean): void {
 }
 
 /**
- * Load persisted preferences from localStorage. Call once from the root layout
- * inside a `$effect` (localStorage access is side-effectful / browser-only).
- * Silently ignores missing or malformed data.
+ * Load persisted preferences from localStorage. Call once from the root layout inside a `$effect` (localStorage access
+ * is side-effectful / browser-only). Silently ignores missing or malformed data.
  */
 export function initPrefs(): void {
   try {

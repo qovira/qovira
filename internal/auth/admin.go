@@ -6,10 +6,9 @@ import (
 	"strings"
 )
 
-// CreateAdmin creates a new admin account with the supplied email and plaintext
-// password. It is intended for first-run seeding via the composition root;
-// production callers should prefer [Service.CreateUser] for full control over
-// all fields.
+// CreateAdmin creates a new admin account with the supplied email and plaintext password. It is intended for
+// first-run seeding via the composition root; production callers should prefer [Service.CreateUser] for full control
+// over all fields.
 //
 // Profile defaults applied:
 //   - DisplayName: the local-part of email (the segment before '@').
@@ -17,11 +16,11 @@ import (
 //   - Locale:      "en"  — BCP 47 base language tag.
 //   - Language:    "en"  — BCP 47 base language tag.
 //
-// Password hashing and policy validation are delegated to [Service.CreateUser],
-// so the same argon2id params and policy apply here.
+// Password hashing and policy validation are delegated to [Service.CreateUser], so the same argon2id params and policy
+// apply here.
 //
-// CreateAdmin satisfies the bootstrap.AccountCreator seam, allowing the
-// composition root to pass the *Service directly without an adapter.
+// CreateAdmin satisfies the bootstrap.AccountCreator seam, allowing the composition root to pass the *Service directly
+// without an adapter.
 func (s *Service) CreateAdmin(ctx context.Context, email, password string) error {
 	displayName := displayNameFromEmail(email)
 	_, err := s.CreateUser(ctx, NewUser{
@@ -39,8 +38,8 @@ func (s *Service) CreateAdmin(ctx context.Context, email, password string) error
 	return nil
 }
 
-// displayNameFromEmail returns the local-part of an email address (the segment
-// before the first '@'). If '@' is absent, the full string is returned.
+// displayNameFromEmail returns the local-part of an email address (the segment before the first '@'). If '@' is absent,
+// the full string is returned.
 func displayNameFromEmail(email string) string {
 	local, _, found := strings.Cut(email, "@")
 	if !found {

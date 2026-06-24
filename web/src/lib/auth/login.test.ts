@@ -1,10 +1,8 @@
 // Tests for the login flow core (performLogin).
 //
-// Environment: browser (happy-dom) — openapi-fetch needs a location origin to
-// build the request URL, and document.cookie for the CSRF read. The session
-// store is mocked so this suite exercises performLogin's contract (what it
-// calls, what it returns) without the $state runtime; the store has its own
-// rune tests.
+// Environment: browser (happy-dom) — openapi-fetch needs a location origin to build the request URL, and
+// document.cookie for the CSRF read. The session store is mocked so this suite exercises performLogin's contract (what
+// it calls, what it returns) without the $state runtime; the store has its own rune tests.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { seedSession, notifySessionReady } = vi.hoisted(() => ({

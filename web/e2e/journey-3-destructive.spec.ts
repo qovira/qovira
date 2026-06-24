@@ -31,9 +31,8 @@ test("destructive tool → confirmation card → approve → reminder deleted", 
   await page.getByRole("button", { name: "Send" }).click();
 
   // ── Confirmation card appears ─────────────────────────────────────────────
-  // delete_reminder is RiskDestructive → the harness suspends the turn and
-  // emits a confirmation.required event → ConfirmationCard renders with
-  // Approve / Deny buttons.
+  // delete_reminder is RiskDestructive → the harness suspends the turn and emits a confirmation.required event →
+  // ConfirmationCard renders with Approve / Deny buttons.
   const approveBtn = page.getByRole("button", { name: "Approve" });
   await expect(approveBtn).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: "Deny" })).toBeVisible();
@@ -47,8 +46,7 @@ test("destructive tool → confirmation card → approve → reminder deleted", 
 
   await page.goto("/reminders");
 
-  // Load completed section in case it ended up there — first ensure active
-  // buckets do NOT show "Dentist".
+  // Load completed section in case it ended up there — first ensure active buckets do NOT show "Dentist".
   // The item was deleted (not completed), so it should not appear anywhere.
   await expect(page.getByText("Dentist")).not.toBeVisible({ timeout: 5_000 });
 });

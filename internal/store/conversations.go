@@ -9,30 +9,28 @@ import (
 	"github.com/qovira/qovira/internal/store/db"
 )
 
-// ErrConversationNotOwned is returned by UpsertConversation when the requested
-// conversation id already exists and is owned by a different user. Callers
-// should treat this as "not found" (404) to avoid leaking the existence of
-// another user's conversation.
+// ErrConversationNotOwned is returned by UpsertConversation when the requested conversation id already exists and is
+// owned by a different user. Callers should treat this as "not found" (404) to avoid leaking the existence of another
+// user's conversation.
 var ErrConversationNotOwned = errors.New("store: conversation id is owned by a different user")
 
-// UpsertConversation ensures that a conversation with the given id exists and is
-// owned by the bound user. Three outcomes are possible:
+// UpsertConversation ensures that a conversation with the given id exists and is owned by the bound user. Three
+// outcomes are possible:
 //
 //   - New id: the conversation is created and owned by the bound user.
 //   - Existing id, same owner: updated_at is bumped; returns nil.
 //   - Existing id, different owner: returns ErrConversationNotOwned so the caller
 //     can respond with 404 (not exposing that another user's conversation exists).
 //
-// The ownership check is performed immediately after the INSERT-if-new step.
-// Because the write pool is capped at one connection all writes are serialised,
-// eliminating TOCTOU races between the INSERT and the ownership read.
+// The ownership check is performed immediately after the INSERT-if-new step. Because the write pool is capped at one
+// connection all writes are serialised, eliminating TOCTOU races between the INSERT and the ownership read.
 func (sq *ScopedQueries) UpsertConversation(ctx context.Context, id string) error {
 	if err := sq.checkUserScope(); err != nil {
 		return fmt.Errorf("UpsertConversation: %w", err)
 	}
 
-	// Attempt to insert. ON CONFLICT(id) DO NOTHING means this is a no-op when the
-	// id already exists, regardless of who owns it.
+	// Attempt to insert. ON CONFLICT(id) DO NOTHING means this is a no-op when the id already exists, regardless of who
+	// owns it.
 	if err := sq.writeQ.UpsertConversation(ctx, db.UpsertConversationParams{
 		ID:     id,
 		UserID: sq.scope.UserID(),
@@ -40,9 +38,8 @@ func (sq *ScopedQueries) UpsertConversation(ctx context.Context, id string) erro
 		return fmt.Errorf("UpsertConversation: %w", err)
 	}
 
-	// Verify ownership: GetConversation is user-scoped (WHERE id=? AND user_id=?).
-	// If the INSERT no-opped because the id belongs to another user, this returns
-	// sql.ErrNoRows — mapped to ErrConversationNotOwned below.
+	// Verify ownership: GetConversation is user-scoped (WHERE id=? AND user_id=?). If the INSERT no-opped because the
+	// id belongs to another user, this returns sql.ErrNoRows — mapped to ErrConversationNotOwned below.
 	_, err := sq.readQ.GetConversation(ctx, db.GetConversationParams{
 		ID:     id,
 		UserID: sq.scope.UserID(),
@@ -54,8 +51,8 @@ func (sq *ScopedQueries) UpsertConversation(ctx context.Context, id string) erro
 		return fmt.Errorf("UpsertConversation: verify ownership: %w", err)
 	}
 
-	// The conversation exists and belongs to this user. Bump updated_at so that
-	// re-posting reflects the most recent activity time.
+	// The conversation exists and belongs to this user. Bump updated_at so that re-posting reflects the most recent
+	// activity time.
 	if err := sq.writeQ.TouchConversation(ctx, db.TouchConversationParams{
 		ID:     id,
 		UserID: sq.scope.UserID(),
@@ -78,20 +75,20 @@ func (sq *ScopedQueries) GetConversation(ctx context.Context, id string) (db.Con
 	})
 }
 
-// ListConversationsParams holds the caller-supplied parameters for listing
-// conversations. The user_id is taken from the bound Scope.
+// ListConversationsParams holds the caller-supplied parameters for listing conversations. The user_id is taken from
+// the bound Scope.
 type ListConversationsParams struct {
-	// CursorUpdatedAt and CursorID are the keyset cursor values. When non-empty,
-	// the query skips rows that sort at or before this position in (updated_at DESC, id DESC).
+	// CursorUpdatedAt and CursorID are the keyset cursor values. When non-empty, the query skips rows that sort at or
+	// before this position in (updated_at DESC, id DESC).
 	CursorUpdatedAt string
 	CursorID        string
 	// Limit is the page size. Callers should fetch limit+1 to detect hasMore.
 	Limit int64
 }
 
-// ListConversations returns a cursor-paginated slice of conversations for the
-// bound user, ordered by (updated_at DESC, id DESC) — most-recently-active first.
-// Each row includes a preview derived from the first user message in the conversation.
+// ListConversations returns a cursor-paginated slice of conversations for the bound user, ordered by (updated_at DESC,
+// id DESC) — most-recently-active first. Each row includes a preview derived from the first user message in the
+// conversation.
 func (sq *ScopedQueries) ListConversations(ctx context.Context, p ListConversationsParams) ([]db.ListConversationsRow, error) {
 	if err := sq.checkUserScope(); err != nil {
 		return nil, fmt.Errorf("ListConversations: %w", err)
@@ -110,8 +107,9 @@ func (sq *ScopedQueries) ListConversations(ctx context.Context, p ListConversati
 	})
 }
 
-// InsertMessage persists a message row into the messages table, scoped to the bound user. It returns the full persisted
-// row (including the server-generated created_at timestamp and abandoned flag). Returns an error if the scope is invalid.
+// InsertMessage persists a message row into the messages table, scoped to the bound user. It returns the full
+// persisted row (including the server-generated created_at timestamp and abandoned flag). Returns an error if the
+// scope is invalid.
 func (sq *ScopedQueries) InsertMessage(ctx context.Context, p InsertMessageParams) (db.InsertMessageRow, error) {
 	if err := sq.checkUserScope(); err != nil {
 		return db.InsertMessageRow{}, fmt.Errorf("InsertMessage: %w", err)
@@ -153,10 +151,10 @@ func (sq *ScopedQueries) ListMessages(ctx context.Context, conversationID string
 	})
 }
 
-// InsertMessageByUserID inserts a tool-result message keyed by (conversation_id, user_id, tool_call_id)
-// using the supplied userID directly rather than the bound scope. The msgID must be supplied by the
-// caller (use id.New()). Used by the sweep path where the user_id comes from the lapsed row, not the
-// bound scope. Requires a system scope — returns errUserScopeForSystemMethod for a user scope.
+// InsertMessageByUserID inserts a tool-result message keyed by (conversation_id, user_id, tool_call_id) using the
+// supplied userID directly rather than the bound scope. The msgID must be supplied by the caller (use id.New()). Used
+// by the sweep path where the user_id comes from the lapsed row, not the bound scope. Requires a system scope —
+// returns errUserScopeForSystemMethod for a user scope.
 func (sq *ScopedQueries) InsertMessageByUserID(ctx context.Context, msgID, conv, userID, callID, content string) error {
 	if !sq.scope.IsSystem() {
 		return fmt.Errorf("InsertMessageByUserID: %w", errUserScopeForSystemMethod)
@@ -176,8 +174,8 @@ func (sq *ScopedQueries) InsertMessageByUserID(ctx context.Context, msgID, conv,
 }
 
 // MarkMessageAbandoned sets the abandoned flag on a message row to 1, scoped to the bound user. Used when a
-// confirmation expires: the assistant message holding the dangling tool_calls is marked abandoned so the
-// conversation is never treated as resumable for those calls.
+// confirmation expires: the assistant message holding the dangling tool_calls is marked abandoned so the conversation
+// is never treated as resumable for those calls.
 func (sq *ScopedQueries) MarkMessageAbandoned(ctx context.Context, messageID string) error {
 	if err := sq.checkUserScope(); err != nil {
 		return fmt.Errorf("MarkMessageAbandoned: %w", err)

@@ -12,8 +12,8 @@ import (
 	"github.com/qovira/qovira/internal/httpx"
 )
 
-// problemBody is the JSON shape used only in these tests to decode a
-// problem+json response. Fields match the RFC 9457 + house-extension contract.
+// problemBody is the JSON shape used only in these tests to decode a problem+json response. Fields match the RFC 9457
+// + house-extension contract.
 type problemBody struct {
 	Type      string           `json:"type"`
 	Title     string           `json:"title"`
@@ -29,8 +29,8 @@ type fieldErrorBody struct {
 	Detail  string `json:"detail"`
 }
 
-// writeProblem is a test helper that wires up an httptest.ResponseRecorder,
-// calls WriteProblem, and decodes the JSON body.
+// writeProblem is a test helper that wires up an httptest.ResponseRecorder, calls WriteProblem, and decodes the JSON
+// body.
 func writeProblem(t *testing.T, r *http.Request, p httpx.Problem) (rr *httptest.ResponseRecorder, body problemBody) {
 	t.Helper()
 	rr = httptest.NewRecorder()
@@ -41,8 +41,7 @@ func writeProblem(t *testing.T, r *http.Request, p httpx.Problem) (rr *httptest.
 	return rr, body
 }
 
-// newGET returns a GET request against "/" with no context, for tests that
-// do not need a specific request context.
+// newGET returns a GET request against "/" with no context, for tests that do not need a specific request context.
 func newGET(t *testing.T) *http.Request {
 	t.Helper()
 	r, err := http.NewRequest(http.MethodGet, "/", nil)
@@ -52,10 +51,9 @@ func newGET(t *testing.T) *http.Request {
 	return r
 }
 
-// TestWriteProblem_ContentType_And_RequiredFields verifies Acceptance Criterion 1:
-// every response carries Content-Type: application/problem+json, a body with
-// type/title/status/detail/code/requestId, and the HTTP status code matches
-// the problem status field.
+// TestWriteProblem_ContentType_And_RequiredFields verifies Acceptance Criterion 1: every response carries Content-Type:
+// application/problem+json, a body with type/title/status/detail/code/requestId, and the HTTP status code matches the
+// problem status field.
 func TestWriteProblem_ContentType_And_RequiredFields(t *testing.T) {
 	t.Parallel()
 
@@ -97,9 +95,8 @@ func TestWriteProblem_ContentType_And_RequiredFields(t *testing.T) {
 	}
 }
 
-// TestWriteProblem_RequestIDFromContext verifies that WriteProblem populates
-// requestId from the context value set by ContextWithRequestID /
-// RequestIDFromContext (Acceptance Criterion 5, requestId sub-criterion).
+// TestWriteProblem_RequestIDFromContext verifies that WriteProblem populates requestId from the context value set by
+// ContextWithRequestID / RequestIDFromContext (Acceptance Criterion 5, requestId sub-criterion).
 func TestWriteProblem_RequestIDFromContext(t *testing.T) {
 	t.Parallel()
 
@@ -122,8 +119,8 @@ func TestWriteProblem_RequestIDFromContext(t *testing.T) {
 	}
 }
 
-// TestValidationProblem verifies Acceptance Criterion 2: a 422 response with
-// an errors[] array locating each offending field by JSON Pointer.
+// TestValidationProblem verifies Acceptance Criterion 2: a 422 response with an errors[] array locating each offending
+// field by JSON Pointer.
 func TestValidationProblem_Status_And_Pointers(t *testing.T) {
 	t.Parallel()
 
@@ -153,8 +150,7 @@ func TestValidationProblem_Status_And_Pointers(t *testing.T) {
 	}
 }
 
-// TestMalformedBodyProblem verifies Acceptance Criterion 3: a 400 response via
-// the MalformedBodyProblem helper.
+// TestMalformedBodyProblem verifies Acceptance Criterion 3: a 400 response via the MalformedBodyProblem helper.
 func TestMalformedBodyProblem_Status400(t *testing.T) {
 	t.Parallel()
 
@@ -174,15 +170,13 @@ func TestMalformedBodyProblem_Status400(t *testing.T) {
 	}
 }
 
-// TestInternalProblem_NoInternalLeak verifies Acceptance Criterion 4: a 5xx
-// response body must NOT contain the internal error string (stack trace, SQL,
-// hostname, etc.). It also proves the internal message WAS logged.
+// TestInternalProblem_NoInternalLeak verifies Acceptance Criterion 4: a 5xx response body must NOT contain the internal
+// error string (stack trace, SQL, hostname, etc.). It also proves the internal message WAS logged.
 func TestInternalProblem_NoInternalLeak(t *testing.T) {
 	t.Parallel()
 
-	// internalErrMsg is the raw error text that must reach the log but must
-	// never appear in the HTTP response body. Use characters safe for JSON
-	// (no quotes) so strings.Contains works on the raw log output.
+	// internalErrMsg is the raw error text that must reach the log but must never appear in the HTTP response body. Use
+	// characters safe for JSON (no quotes) so strings.Contains works on the raw log output.
 	const internalErrMsg = "pq: syntax error near SELECT -- internal-hostname-db01"
 
 	var logBuf bytes.Buffer
@@ -222,8 +216,8 @@ func TestInternalProblem_NoInternalLeak(t *testing.T) {
 	}
 }
 
-// TestTypeURL verifies Acceptance Criterion 5: the type URL is rooted at
-// https://qovira.ai/errors/{slug} when no explicit Type is provided.
+// TestTypeURL verifies Acceptance Criterion 5: the type URL is rooted at https://qovira.ai/errors/{slug} when no
+// explicit Type is provided.
 func TestTypeURL_DerivedFromCode(t *testing.T) {
 	t.Parallel()
 
@@ -244,8 +238,8 @@ func TestTypeURL_DerivedFromCode(t *testing.T) {
 	}
 }
 
-// TestTypeURL_ExplicitTypePreserved verifies that an explicitly set Type is not
-// overwritten by the slug-derivation logic.
+// TestTypeURL_ExplicitTypePreserved verifies that an explicitly set Type is not overwritten by the slug-derivation
+// logic.
 func TestTypeURL_ExplicitTypePreserved(t *testing.T) {
 	t.Parallel()
 
@@ -266,8 +260,8 @@ func TestTypeURL_ExplicitTypePreserved(t *testing.T) {
 	}
 }
 
-// TestContextWithRequestID_RoundTrip verifies that ContextWithRequestID and
-// RequestIDFromContext form a consistent get/set pair.
+// TestContextWithRequestID_RoundTrip verifies that ContextWithRequestID and RequestIDFromContext form a consistent
+// get/set pair.
 func TestContextWithRequestID_RoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -283,8 +277,7 @@ func TestContextWithRequestID_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestValidationProblem_TypeURL verifies that ValidationProblem sets the type
-// URL correctly from the code slug.
+// TestValidationProblem_TypeURL verifies that ValidationProblem sets the type URL correctly from the code slug.
 func TestValidationProblem_TypeURL(t *testing.T) {
 	t.Parallel()
 
@@ -298,8 +291,8 @@ func TestValidationProblem_TypeURL(t *testing.T) {
 	}
 }
 
-// TestInternalProblem_StatusCode verifies that InternalProblem always returns
-// HTTP 500 regardless of what code is passed.
+// TestInternalProblem_StatusCode verifies that InternalProblem always returns HTTP 500 regardless of what code is
+// passed.
 func TestInternalProblem_StatusCode(t *testing.T) {
 	t.Parallel()
 
@@ -315,10 +308,9 @@ func TestInternalProblem_StatusCode(t *testing.T) {
 	}
 }
 
-// TestWriteProblem_ZeroStatusDefaultsTo500 verifies that WriteProblem guards
-// against a zero/unset Status field: a caller that constructs a Problem without
-// setting Status must not emit a 200 with a problem body. The guard defaults to
-// 500 Internal Server Error.
+// TestWriteProblem_ZeroStatusDefaultsTo500 verifies that WriteProblem guards against a zero/unset Status field: a
+// caller that constructs a Problem without setting Status must not emit a 200 with a problem body. The guard defaults
+// to 500 Internal Server Error.
 func TestWriteProblem_ZeroStatusDefaultsTo500(t *testing.T) {
 	t.Parallel()
 
@@ -340,8 +332,8 @@ func TestWriteProblem_ZeroStatusDefaultsTo500(t *testing.T) {
 	}
 }
 
-// TestWriteProblem_NonZeroStatusUnchanged verifies that an explicitly set
-// non-zero Status is not clobbered by the zero-Status guard.
+// TestWriteProblem_NonZeroStatusUnchanged verifies that an explicitly set non-zero Status is not clobbered by the
+// zero-Status guard.
 func TestWriteProblem_NonZeroStatusUnchanged(t *testing.T) {
 	t.Parallel()
 

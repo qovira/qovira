@@ -1,8 +1,8 @@
 package harness_test
 
-// policy_integration_test.go — black-box integration tests for trust-gating behavior.
-// These tests verify the observable outcomes (events, persisted data, assembled catalog)
-// for the gate-tool-execution-by-risk-and-trust feature.
+// policy_integration_test.go — black-box integration tests for trust-gating behavior. These tests verify the
+// observable outcomes (events, persisted data, assembled catalog) for the gate-tool-execution-by-risk-and-trust
+// feature.
 
 import (
 	"context"
@@ -35,9 +35,8 @@ func makeRiskTool(name string, risk capability.RiskTier, tracker *callCapture) c
 	)
 }
 
-// startTurnWithOriginAndWait fires a turn with a specific origin and waits for
-// the terminal event. It returns the full event snapshot; the caller can also
-// check whether run suspended by using waitForSuspendOrCompleted.
+// startTurnWithOriginAndWait fires a turn with a specific origin and waits for the terminal event. It returns the
+// full event snapshot; the caller can also check whether run suspended by using waitForSuspendOrCompleted.
 func startTurnWithOriginAndWait(
 	t *testing.T,
 	h *harness.Harness,
@@ -71,9 +70,9 @@ func startTurnWithOriginAndWait(
 	return bus.snapshot()
 }
 
-// waitForSuspendOrCompleted waits for either a terminal event (message.completed or
-// turn.failed) or for the given duration to pass without one, then returns the snapshot.
-// Used to detect that a turn suspended (no terminal event emitted within the window).
+// waitForSuspendOrCompleted waits for either a terminal event (message.completed or turn.failed) or for the given
+// duration to pass without one, then returns the snapshot. Used to detect that a turn suspended (no terminal event
+// emitted within the window).
 func waitForSuspendOrCompleted(t *testing.T, bus *fakeBus, timeout time.Duration) []fakeEvent {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -99,8 +98,8 @@ func hasTerminalEvent(evs []fakeEvent) bool {
 	return false
 }
 
-// hasToolResult returns true if a tool-result message with the given callID
-// appears in the persisted messages for this conversation and user.
+// hasToolResult returns true if a tool-result message with the given callID appears in the persisted messages for
+// this conversation and user.
 func hasToolResult(t *testing.T, s *store.Store, p store.Principal, convID, callID string) bool {
 	t.Helper()
 	scope := store.UserScope(p)
@@ -119,8 +118,8 @@ func hasToolResult(t *testing.T, s *store.Store, p store.Principal, convID, call
 
 // ── AC-2 (Trusted turn): Read and Write auto-execute; External and Destructive confirm/suspend ──
 
-// TestPolicy_TrustedTurn_ReadWriteAutoExecute verifies that in a Trusted turn,
-// RiskRead and RiskWrite tools are auto-executed (results persisted, tool.completed emitted).
+// TestPolicy_TrustedTurn_ReadWriteAutoExecute verifies that in a Trusted turn, RiskRead and RiskWrite tools are
+// auto-executed (results persisted, tool.completed emitted).
 func TestPolicy_TrustedTurn_ReadWriteAutoExecute(t *testing.T) {
 	t.Parallel()
 
@@ -182,9 +181,8 @@ func TestPolicy_TrustedTurn_ReadWriteAutoExecute(t *testing.T) {
 	}
 }
 
-// TestPolicy_TrustedTurn_ExternalConfirmSuspends verifies that in a Trusted turn,
-// a RiskExternal tool call routes to the confirm seam and suspends the turn
-// (no terminal event, no tool result persisted).
+// TestPolicy_TrustedTurn_ExternalConfirmSuspends verifies that in a Trusted turn, a RiskExternal tool call routes
+// to the confirm seam and suspends the turn (no terminal event, no tool result persisted).
 func TestPolicy_TrustedTurn_ExternalConfirmSuspends(t *testing.T) {
 	t.Parallel()
 
@@ -227,11 +225,10 @@ func TestPolicy_TrustedTurn_ExternalConfirmSuspends(t *testing.T) {
 		t.Fatalf("StartTurn: %v", err)
 	}
 
-	// Gate the "no terminal yet" assertion on the positive signal that the turn
-	// actually reached the Confirm-path: wait for confirmation.required (emitted by
-	// insertPendingConfirmation when the turn suspends). This replaces a bare 500ms
-	// sleep — if confirmation.required fires, the turn is past the policy gate and is
-	// suspended; asserting no terminal event is then load-bearing, not vacuous.
+	// Gate the "no terminal yet" assertion on the positive signal that the turn actually reached the Confirm-path:
+	// wait for confirmation.required (emitted by insertPendingConfirmation when the turn suspends). This replaces a
+	// bare 500ms sleep — if confirmation.required fires, the turn is past the policy gate and is suspended; asserting
+	// no terminal event is then load-bearing, not vacuous.
 	evs := waitForConfirmationRequired(t, bus, 3*time.Second)
 
 	// The turn MUST suspend: no terminal event emitted.
@@ -249,10 +246,9 @@ func TestPolicy_TrustedTurn_ExternalConfirmSuspends(t *testing.T) {
 		t.Error("tool result persisted for RiskExternal — should not be (confirm seam does not execute)")
 	}
 
-	// tool.started must NOT be emitted for a Confirm-path call that suspends.
-	// Emitting it without a resolving tool.completed/tool.failed would leave a
-	// permanently spinning UI chip; the confirmation-suspend-resume slice will
-	// emit confirmation.required instead.
+	// tool.started must NOT be emitted for a Confirm-path call that suspends. Emitting it without a resolving
+	// tool.completed/tool.failed would leave a permanently spinning UI chip; the confirmation-suspend-resume slice
+	// will emit confirmation.required instead.
 	for _, e := range evs {
 		if e.event.Type == "tool.started" {
 			if pl, ok := e.event.Data.(harness.ToolStartedPayload); ok && pl.CallID == callIDExt {
@@ -262,8 +258,8 @@ func TestPolicy_TrustedTurn_ExternalConfirmSuspends(t *testing.T) {
 	}
 }
 
-// TestPolicy_TrustedTurn_DestructiveConfirmSuspends verifies that in a Trusted turn,
-// a RiskDestructive tool call routes to the confirm seam and suspends the turn.
+// TestPolicy_TrustedTurn_DestructiveConfirmSuspends verifies that in a Trusted turn, a RiskDestructive tool call
+// routes to the confirm seam and suspends the turn.
 func TestPolicy_TrustedTurn_DestructiveConfirmSuspends(t *testing.T) {
 	t.Parallel()
 
@@ -306,8 +302,8 @@ func TestPolicy_TrustedTurn_DestructiveConfirmSuspends(t *testing.T) {
 		t.Fatalf("StartTurn: %v", err)
 	}
 
-	// Gate on confirmation.required (positive signal that the turn reached the Confirm
-	// path and is now suspended), replacing the bare 500ms sleep.
+	// Gate on confirmation.required (positive signal that the turn reached the Confirm path and is now suspended),
+	// replacing the bare 500ms sleep.
 	evs := waitForConfirmationRequired(t, bus, 3*time.Second)
 
 	// The turn MUST suspend: no terminal event.
@@ -328,9 +324,9 @@ func TestPolicy_TrustedTurn_DestructiveConfirmSuspends(t *testing.T) {
 
 // ── AC-3 & AC-4: Block enforcement for Untrusted origin ──────────────────────
 
-// TestPolicy_UntrustedTurn_CatalogOmitsDestructive verifies that for an Untrusted
-// origin the assembled ChatRequest does NOT include Destructive tools in its tool list.
-// Uses a captureChatter (from context_retry_test.go) to inspect the request.
+// TestPolicy_UntrustedTurn_CatalogOmitsDestructive verifies that for an Untrusted origin the assembled ChatRequest
+// does NOT include Destructive tools in its tool list. Uses a captureChatter (from context_retry_test.go) to
+// inspect the request.
 func TestPolicy_UntrustedTurn_CatalogOmitsDestructive(t *testing.T) {
 	t.Parallel()
 
@@ -353,8 +349,8 @@ func TestPolicy_UntrustedTurn_CatalogOmitsDestructive(t *testing.T) {
 	h := buildHarnessWithTools(t, s, gw, bus, reg, harness.Config{})
 
 	convID := id.New()
-	// Construct an Untrusted origin directly — the resolver never returns this in v0.1
-	// but we can drive it directly in tests (Acceptance Criterion 4).
+	// Construct an Untrusted origin directly — the resolver never returns this in v0.1 but we can drive it directly
+	// in tests (Acceptance Criterion 4).
 	origin := harness.Origin{Channel: "test", Trust: harness.Untrusted}
 
 	scope := store.UserScope(p)
@@ -405,9 +401,9 @@ func TestPolicy_UntrustedTurn_CatalogOmitsDestructive(t *testing.T) {
 	}
 }
 
-// TestPolicy_UntrustedTurn_BlockRefusesDestructiveTool verifies that for an Untrusted
-// origin, calling a Destructive tool persists a model-visible refusal as the tool-result
-// and emits tool.failed (the execution gate enforces Block).
+// TestPolicy_UntrustedTurn_BlockRefusesDestructiveTool verifies that for an Untrusted origin, calling a
+// Destructive tool persists a model-visible refusal as the tool-result and emits tool.failed (the execution gate
+// enforces Block).
 func TestPolicy_UntrustedTurn_BlockRefusesDestructiveTool(t *testing.T) {
 	t.Parallel()
 
@@ -423,8 +419,8 @@ func TestPolicy_UntrustedTurn_BlockRefusesDestructiveTool(t *testing.T) {
 	}
 
 	const callIDDest = "call_block"
-	// The model attempts to call the destructive tool despite the catalog filter
-	// (the execution gate is the real boundary).
+	// The model attempts to call the destructive tool despite the catalog filter (the execution gate is the real
+	// boundary).
 	round1 := []gateway.Chunk{
 		toolCallChunk(callIDDest, "dest_tool", `{"call_id":"blocked"}`),
 		{Done: true},
@@ -496,8 +492,8 @@ func TestPolicy_UntrustedTurn_BlockRefusesDestructiveTool(t *testing.T) {
 		t.Errorf("tool.failed callId = %q, want %q", toolFailedEvts[0].CallID, callIDDest)
 	}
 
-	// tool.started must NOT be emitted for a Block-path call — Block is a refusal,
-	// not an execution attempt. The UI sees only tool.failed with the refusal message.
+	// tool.started must NOT be emitted for a Block-path call — Block is a refusal, not an execution attempt. The UI
+	// sees only tool.failed with the refusal message.
 	for _, e := range evs {
 		if e.event.Type == "tool.started" {
 			if pl, ok := e.event.Data.(harness.ToolStartedPayload); ok && pl.CallID == callIDDest {
@@ -509,9 +505,9 @@ func TestPolicy_UntrustedTurn_BlockRefusesDestructiveTool(t *testing.T) {
 
 // ── AC-4: Untrusted column tested directly (resolver doesn't return it in v0.1) ──
 
-// TestPolicy_UntrustedOrigin_WriteConfirmsViaBlock verifies that Write from Untrusted
-// resolves to Confirm (not Block). Since Confirm currently suspends (seam for next slice),
-// a Write call from Untrusted should suspend the turn.
+// TestPolicy_UntrustedOrigin_WriteConfirmsViaBlock verifies that Write from Untrusted resolves to Confirm (not
+// Block). Since Confirm currently suspends (seam for next slice), a Write call from Untrusted should suspend the
+// turn.
 func TestPolicy_UntrustedOrigin_WriteConfirms(t *testing.T) {
 	t.Parallel()
 
@@ -555,10 +551,9 @@ func TestPolicy_UntrustedOrigin_WriteConfirms(t *testing.T) {
 		t.Fatalf("StartTurn: %v", err)
 	}
 
-	// Write/Untrusted → Confirm → suspend. Gate the negative assertion on the
-	// positive signal that the turn actually reached the Confirm path: wait for
-	// confirmation.required (emitted by insertPendingConfirmation when the turn
-	// suspends). This replaces a bare 500ms sleep.
+	// Write/Untrusted → Confirm → suspend. Gate the negative assertion on the positive signal that the turn
+	// actually reached the Confirm path: wait for confirmation.required (emitted by insertPendingConfirmation when
+	// the turn suspends). This replaces a bare 500ms sleep.
 	evs := waitForConfirmationRequired(t, bus, 3*time.Second)
 	if hasTerminalEvent(evs) {
 		t.Error("Write/Untrusted turn emitted a terminal event — should suspend (Confirm routes to seam)")

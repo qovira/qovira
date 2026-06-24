@@ -27,8 +27,7 @@ func joinText(chunks []gateway.Chunk) string {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// mustNewScripted constructs a ScriptedChatter from a JSON fixture string and
-// fails the test if construction fails.
+// mustNewScripted constructs a ScriptedChatter from a JSON fixture string and fails the test if construction fails.
 func mustNewScripted(t *testing.T, fixtureJSON string) *gateway.ScriptedChatter {
 	t.Helper()
 	sc, err := gateway.NewScriptedChatterFromJSON([]byte(fixtureJSON))
@@ -273,10 +272,9 @@ func TestScriptedChatter_CaseInsensitiveMatch(t *testing.T) {
 
 // ── 3. Round-index computation ────────────────────────────────────────────────
 
-// TestScriptedChatter_RoundIndex verifies that the round index is correctly
-// derived from the ChatRequest history: round 0 on the first call (only user
-// message present), round 1 on the second call (assistant+tool messages follow
-// the user message), etc.
+// TestScriptedChatter_RoundIndex verifies that the round index is correctly derived from the ChatRequest history:
+// round 0 on the first call (only user message present), round 1 on the second call (assistant+tool messages
+// follow the user message), etc.
 func TestScriptedChatter_RoundIndex(t *testing.T) {
 	t.Parallel()
 
@@ -516,10 +514,9 @@ func TestScriptedChatter_CtxCancellation(t *testing.T) {
 		}
 	}
 
-	// Either the iterator stopped yielding (break) or returned a context error.
-	// The implementation should return ctx.Err() when the context is cancelled.
-	// We allow either termination mode: what matters is that "after-cancel" text
-	// did not appear.
+	// Either the iterator stopped yielding (break) or returned a context error. The implementation should return
+	// ctx.Err() when the context is cancelled. We allow either termination mode: what matters is that "after-cancel"
+	// text did not appear.
 	for _, c := range chunks {
 		if strings.Contains(c.TextDelta, "after-cancel") {
 			t.Error("chunk emitted after context cancellation")
@@ -587,8 +584,8 @@ func TestScriptedChatter_OutOfRangeRoundDefault(t *testing.T) {
 	}`
 	sc := mustNewScripted(t, fixture)
 
-	// Build a request whose history implies round index 1
-	// (user message + 1 assistant + 1 tool = round 1), but only round 0 exists.
+	// Build a request whose history implies round index 1 (user message + 1 assistant + 1 tool = round 1), but only
+	// round 0 exists.
 	req := buildRequest(
 		userMsg("test"),
 		assistantMsg("", gateway.ToolCall{ID: "c1", Name: "some_tool", Arguments: json.RawMessage(`{}`)}),
@@ -674,14 +671,12 @@ func TestScriptedChatter_ToolCallChunkFields(t *testing.T) {
 
 // ── 10. $fromResult — result templating ──────────────────────────────────────
 
-// TestScriptedChatter_FromResult_TopLevel verifies that a top-level tool
-// argument referencing $fromResult is resolved to the value from the matching
-// tool result message in the history.
+// TestScriptedChatter_FromResult_TopLevel verifies that a top-level tool argument referencing $fromResult is
+// resolved to the value from the matching tool result message in the history.
 func TestScriptedChatter_FromResult_TopLevel(t *testing.T) {
 	t.Parallel()
 
-	// Round 1: round 0 would have emitted create_reminder; round 1 deletes it by
-	// id using a $fromResult reference.
+	// Round 1: round 0 would have emitted create_reminder; round 1 deletes it by id using a $fromResult reference.
 	fixture := `{
 		"rules": [
 			{
@@ -742,8 +737,8 @@ func TestScriptedChatter_FromResult_TopLevel(t *testing.T) {
 	}
 }
 
-// TestScriptedChatter_FromResult_ArrayIndexPath verifies resolution via an
-// array-index path segment (e.g. "reminders.0.id" from a list result).
+// TestScriptedChatter_FromResult_ArrayIndexPath verifies resolution via an array-index path segment (e.g.
+// "reminders.0.id" from a list result).
 func TestScriptedChatter_FromResult_ArrayIndexPath(t *testing.T) {
 	t.Parallel()
 
@@ -803,8 +798,8 @@ func TestScriptedChatter_FromResult_ArrayIndexPath(t *testing.T) {
 	}
 }
 
-// TestScriptedChatter_FromResult_NestedReference verifies that a $fromResult
-// reference can appear inside a nested sub-object of the arguments.
+// TestScriptedChatter_FromResult_NestedReference verifies that a $fromResult reference can appear inside a nested
+// sub-object of the arguments.
 func TestScriptedChatter_FromResult_NestedReference(t *testing.T) {
 	t.Parallel()
 
@@ -867,8 +862,8 @@ func TestScriptedChatter_FromResult_NestedReference(t *testing.T) {
 	}
 }
 
-// TestScriptedChatter_FromResult_NoReference verifies that arguments with no
-// $fromResult references pass through byte-identical in structure (regression).
+// TestScriptedChatter_FromResult_NoReference verifies that arguments with no $fromResult references pass through
+// byte-identical in structure (regression).
 func TestScriptedChatter_FromResult_NoReference(t *testing.T) {
 	t.Parallel()
 
@@ -926,9 +921,8 @@ func TestScriptedChatter_FromResult_NoReference(t *testing.T) {
 	}
 }
 
-// TestScriptedChatter_FromResult_UnresolvableCallID verifies that referencing a
-// callId with no matching tool result message in history yields an error from
-// the iterator (not silent wrong output).
+// TestScriptedChatter_FromResult_UnresolvableCallID verifies that referencing a callId with no matching tool
+// result message in history yields an error from the iterator (not silent wrong output).
 func TestScriptedChatter_FromResult_UnresolvableCallID(t *testing.T) {
 	t.Parallel()
 
@@ -968,8 +962,8 @@ func TestScriptedChatter_FromResult_UnresolvableCallID(t *testing.T) {
 	}
 }
 
-// TestScriptedChatter_FromResult_MissingPathSegment verifies that a path that
-// does not exist in the resolved JSON yields an error (not silent empty output).
+// TestScriptedChatter_FromResult_MissingPathSegment verifies that a path that does not exist in the resolved
+// JSON yields an error (not silent empty output).
 func TestScriptedChatter_FromResult_MissingPathSegment(t *testing.T) {
 	t.Parallel()
 
@@ -1011,8 +1005,8 @@ func TestScriptedChatter_FromResult_MissingPathSegment(t *testing.T) {
 	}
 }
 
-// TestScriptedChatter_FromResult_OutOfRangeIndex verifies that an array index
-// that exceeds the array length yields an error.
+// TestScriptedChatter_FromResult_OutOfRangeIndex verifies that an array index that exceeds the array length
+// yields an error.
 func TestScriptedChatter_FromResult_OutOfRangeIndex(t *testing.T) {
 	t.Parallel()
 
@@ -1055,9 +1049,8 @@ func TestScriptedChatter_FromResult_OutOfRangeIndex(t *testing.T) {
 	}
 }
 
-// TestScriptedChatter_FromResult_EmptyPathErrors verifies that a $fromResult
-// reference whose path is empty or misspelled (decoding to "") is a hard error,
-// not a silent substitution of the entire result object.
+// TestScriptedChatter_FromResult_EmptyPathErrors verifies that a $fromResult reference whose path is empty or
+// misspelled (decoding to "") is a hard error, not a silent substitution of the entire result object.
 func TestScriptedChatter_FromResult_EmptyPathErrors(t *testing.T) {
 	t.Parallel()
 
@@ -1100,9 +1093,8 @@ func TestScriptedChatter_FromResult_EmptyPathErrors(t *testing.T) {
 	}
 }
 
-// TestScriptedChatter_FromResult_SiblingKeysError verifies that a marker object
-// carrying a sibling key alongside "$fromResult" is rejected, rather than
-// silently dropping the sibling.
+// TestScriptedChatter_FromResult_SiblingKeysError verifies that a marker object carrying a sibling key alongside
+// "$fromResult" is rejected, rather than silently dropping the sibling.
 func TestScriptedChatter_FromResult_SiblingKeysError(t *testing.T) {
 	t.Parallel()
 
@@ -1147,9 +1139,8 @@ func TestScriptedChatter_FromResult_SiblingKeysError(t *testing.T) {
 	}
 }
 
-// TestScriptedChatter_FromResult_PreservesNumericLiteral verifies that a numeric
-// argument literal survives the resolve round-trip without float64 rounding (the
-// arguments tree is decoded with json.Number, not as a float).
+// TestScriptedChatter_FromResult_PreservesNumericLiteral verifies that a numeric argument literal survives the
+// resolve round-trip without float64 rounding (the arguments tree is decoded with json.Number, not as a float).
 func TestScriptedChatter_FromResult_PreservesNumericLiteral(t *testing.T) {
 	t.Parallel()
 
@@ -1201,9 +1192,9 @@ func TestScriptedChatter_FromResult_PreservesNumericLiteral(t *testing.T) {
 
 // ── 11. Latest-user-message keying ───────────────────────────────────────────
 
-// TestScriptedChatter_LatestUserMessageKeying verifies that the scripted chatter
-// keys off the LATEST user message in the request, not the first. This is the
-// multi-turn case: prior exchanges shouldn't affect the rule selection.
+// TestScriptedChatter_LatestUserMessageKeying verifies that the scripted chatter keys off the LATEST user message
+// in the request, not the first. This is the multi-turn case: prior exchanges shouldn't affect the rule
+// selection.
 func TestScriptedChatter_LatestUserMessageKeying(t *testing.T) {
 	t.Parallel()
 

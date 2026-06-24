@@ -32,8 +32,8 @@ func jobRecurrenceRow(
 
 // ── Criterion 7: Enqueue rejects both rrule+tz AND interval ─────────────────
 
-// TestEnqueue_RejectsBothRecurrenceKinds verifies that specifying both
-// (RRULE+TZ) and Every (interval) in a single EnqueueRequest returns an error.
+// TestEnqueue_RejectsBothRecurrenceKinds verifies that specifying both (RRULE+TZ) and Every (interval) in a single
+// EnqueueRequest returns an error.
 func TestEnqueue_RejectsBothRecurrenceKinds(t *testing.T) {
 	t.Parallel()
 
@@ -80,8 +80,8 @@ func TestEnqueue_RejectsRRuleWithoutTZ(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-// TestEnqueue_OneShot_NoRecurrenceFields verifies that a nil Recurrence (one-shot)
-// inserts NULL into rrule, tz, interval_secs.
+// TestEnqueue_OneShot_NoRecurrenceFields verifies that a nil Recurrence (one-shot) inserts NULL into rrule, tz,
+// interval_secs.
 func TestEnqueue_OneShot_NoRecurrenceFields(t *testing.T) {
 	t.Parallel()
 
@@ -111,8 +111,8 @@ func TestEnqueue_OneShot_NoRecurrenceFields(t *testing.T) {
 	}
 }
 
-// TestEnqueue_RRULE_PersistsRecurrenceColumns verifies that an RRULE+TZ recurrence
-// is stored in the rrule and tz columns, with interval_secs NULL.
+// TestEnqueue_RRULE_PersistsRecurrenceColumns verifies that an RRULE+TZ recurrence is stored in the rrule and tz
+// columns, with interval_secs NULL.
 func TestEnqueue_RRULE_PersistsRecurrenceColumns(t *testing.T) {
 	t.Parallel()
 
@@ -145,8 +145,8 @@ func TestEnqueue_RRULE_PersistsRecurrenceColumns(t *testing.T) {
 	}
 }
 
-// TestEnqueue_Interval_PersistsRecurrenceColumns verifies that an Every-based
-// recurrence is stored in interval_secs (seconds), with rrule/tz NULL.
+// TestEnqueue_Interval_PersistsRecurrenceColumns verifies that an Every-based recurrence is stored in interval_secs
+// (seconds), with rrule/tz NULL.
 func TestEnqueue_Interval_PersistsRecurrenceColumns(t *testing.T) {
 	t.Parallel()
 
@@ -181,12 +181,11 @@ func TestEnqueue_Interval_PersistsRecurrenceColumns(t *testing.T) {
 
 // ── Criterion 1: RRULE self-reschedule, DST-correct ──────────────────────────
 
-// TestRecurring_RRULE_SuccessAdvancesRunAt verifies criterion 1:
-// a successful RRULE recurring job advances run_at to the next wall-clock occurrence
-// in the stored TZ, DST-correct, and resets attempt to 0.
+// TestRecurring_RRULE_SuccessAdvancesRunAt verifies criterion 1: a successful RRULE recurring job advances run_at to
+// the next wall-clock occurrence in the stored TZ, DST-correct, and resets attempt to 0.
 //
-// Scenario: FREQ=DAILY job anchored at 8am America/New_York just before the March 2026
-// DST spring-forward. The new run_at must be 8am EDT (UTC-4) not 8am EST (UTC-5).
+// Scenario: FREQ=DAILY job anchored at 8am America/New_York just before the March 2026 DST spring-forward. The new
+// run_at must be 8am EDT (UTC-4) not 8am EST (UTC-5).
 func TestRecurring_RRULE_SuccessAdvancesRunAt(t *testing.T) {
 	t.Parallel()
 
@@ -270,8 +269,8 @@ func TestRecurring_RRULE_SuccessAdvancesRunAt(t *testing.T) {
 		t.Fatalf("parse run_at %q: %v", runAtStr, parseErr)
 	}
 
-	// DST-correct expectation: 8am EDT on 2026-03-08 = 2026-03-08T12:00:00Z.
-	// "now" is 2026-03-07T13:30:00Z. .After(now) must skip to 2026-03-08 08:00 EDT.
+	// DST-correct expectation: 8am EDT on 2026-03-08 = 2026-03-08T12:00:00Z. "now" is 2026-03-07T13:30:00Z. .After(now)
+	// must skip to 2026-03-08 08:00 EDT.
 	wantNextUTC := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC) // 8am EDT
 	if !nextRunAt.UTC().Equal(wantNextUTC) {
 		t.Errorf("run_at (UTC) = %v, want %v (8am local after DST spring-forward)", nextRunAt.UTC(), wantNextUTC)
@@ -295,8 +294,8 @@ func TestRecurring_RRULE_SuccessAdvancesRunAt(t *testing.T) {
 
 // ── Criterion 2: interval job advances by Every ───────────────────────────────
 
-// TestRecurring_Interval_SuccessAdvancesByEvery verifies criterion 2:
-// an interval-based recurring job advances run_at by exactly Every (from now).
+// TestRecurring_Interval_SuccessAdvancesByEvery verifies criterion 2: an interval-based recurring job advances run_at
+// by exactly Every (from now).
 func TestRecurring_Interval_SuccessAdvancesByEvery(t *testing.T) {
 	t.Parallel()
 
@@ -376,9 +375,8 @@ func TestRecurring_Interval_SuccessAdvancesByEvery(t *testing.T) {
 
 // ── Criterion 3: downtime catch-up fires once, jumps to next future instant ──
 
-// TestRecurring_DowntimeCatchup verifies criterion 3:
-// after simulated downtime across several overdue RRULE occurrences, the job fires
-// exactly once and the new run_at is the next FUTURE instant (no replay burst).
+// TestRecurring_DowntimeCatchup verifies criterion 3: after simulated downtime across several overdue RRULE
+// occurrences, the job fires exactly once and the new run_at is the next FUTURE instant (no replay burst).
 func TestRecurring_DowntimeCatchup(t *testing.T) {
 	t.Parallel()
 
@@ -389,11 +387,10 @@ func TestRecurring_DowntimeCatchup(t *testing.T) {
 		t.Fatalf("LoadLocation: %v", err)
 	}
 
-	// Job was scheduled to fire at 08:00 UTC daily.
-	// Simulated downtime: 3 days. run_at is 3 days ago.
+	// Job was scheduled to fire at 08:00 UTC daily. Simulated downtime: 3 days. run_at is 3 days ago.
 	originalRunAt := time.Date(2026, 1, 10, 8, 0, 0, 0, loc) // 3 days overdue
-	// "now" is Jan 13 08:30 UTC (after 3 missed occurrences: Jan 10, 11, 12 and
-	// currently past Jan 13's occurrence too).
+	// "now" is Jan 13 08:30 UTC (after 3 missed occurrences: Jan 10, 11, 12 and currently past Jan 13's occurrence
+	// too).
 	now := time.Date(2026, 1, 13, 8, 30, 0, 0, loc)
 
 	cfg := defaultTestConfig()
@@ -467,8 +464,8 @@ func TestRecurring_DowntimeCatchup(t *testing.T) {
 		t.Fatalf("parse run_at %q: %v", runAtStr, parseErr)
 	}
 
-	// nextRunAt must be strictly after now (not a past missed occurrence).
-	// now = 2026-01-13T08:30Z, so next DAILY at 08:00 UTC is 2026-01-14T08:00:00Z.
+	// nextRunAt must be strictly after now (not a past missed occurrence). now = 2026-01-13T08:30Z, so next DAILY at
+	// 08:00 UTC is 2026-01-14T08:00:00Z.
 	wantNext := time.Date(2026, 1, 14, 8, 0, 0, 0, loc)
 	if !nextRunAt.UTC().Equal(wantNext) {
 		t.Errorf("run_at = %v, want %v (next future occurrence, not a past missed one)", nextRunAt.UTC(), wantNext)
@@ -480,19 +477,17 @@ func TestRecurring_DowntimeCatchup(t *testing.T) {
 
 // ── Criterion 4: failing recurring job retries the same occurrence ───────────
 
-// TestRecurring_FailureRetriesSameOccurrence verifies criterion 4:
-// a failing recurring job retries the current occurrence (existing transient-retry
-// backoff path) and does NOT advance run_at to the next RRULE occurrence.
+// TestRecurring_FailureRetriesSameOccurrence verifies criterion 4: a failing recurring job retries the current
+// occurrence (existing transient-retry backoff path) and does NOT advance run_at to the next RRULE occurrence.
 func TestRecurring_FailureRetriesSameOccurrence(t *testing.T) {
 	t.Parallel()
 
 	s := openMigratedStore(t)
 
-	// Frozen clock. A large backoff (≥ poll interval, far larger than the test
-	// runtime) guarantees the retried run_at lands strictly in the future of the
-	// frozen clock, so the row is never re-claimed during observation: the handler
-	// fails exactly once and we read a stable retry state. This makes the test
-	// deterministic instead of racing the poll loop through attempts.
+	// Frozen clock. A large backoff (≥ poll interval, far larger than the test runtime) guarantees the retried run_at
+	// lands strictly in the future of the frozen clock, so the row is never re-claimed during observation: the handler
+	// fails exactly once and we read a stable retry state. This makes the test deterministic instead of racing the poll
+	// loop through attempts.
 	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	cfg := defaultTestConfig()
 	cfg.PollInterval = 5 * time.Millisecond
@@ -546,8 +541,8 @@ func TestRecurring_FailureRetriesSameOccurrence(t *testing.T) {
 	defer stopCancel()
 	_ = sched.Stop(stopCtx)
 
-	// The handler should have fired exactly once: the retried run_at is in the
-	// future of the frozen clock, so the row is never re-claimed.
+	// The handler should have fired exactly once: the retried run_at is in the future of the frozen clock, so the row
+	// is never re-claimed.
 	if got := callCount.Load(); got != 1 {
 		t.Errorf("handler call count = %d, want 1 (retried row must not be re-claimed under the frozen clock)", got)
 	}
@@ -562,9 +557,8 @@ func TestRecurring_FailureRetriesSameOccurrence(t *testing.T) {
 		t.Errorf("status = %q, want pending (retrying current occurrence)", status)
 	}
 
-	// run_at must be inside the backoff window (now, now+BackoffCap] — proving the
-	// failure retried the CURRENT occurrence and did NOT skip ahead to the next
-	// RRULE instant (which would be now + 24h).
+	// run_at must be inside the backoff window (now, now+BackoffCap] — proving the failure retried the CURRENT
+	// occurrence and did NOT skip ahead to the next RRULE instant (which would be now + 24h).
 	runAt, parseErr := time.Parse(time.RFC3339, runAtStr)
 	if parseErr != nil {
 		t.Fatalf("parse run_at %q: %v", runAtStr, parseErr)
@@ -577,9 +571,8 @@ func TestRecurring_FailureRetriesSameOccurrence(t *testing.T) {
 
 // ── Criterion 5: exhaustion on recurring job advances series, not dead-letters ─
 
-// TestRecurring_ExhaustionAdvancesSeries verifies criterion 5:
-// a recurring job that exhausts MaxAttempts emits job.failed but advances to the
-// next instant with attempt=0, keeping status=pending (series survives).
+// TestRecurring_ExhaustionAdvancesSeries verifies criterion 5: a recurring job that exhausts MaxAttempts emits
+// job.failed but advances to the next instant with attempt=0, keeping status=pending (series survives).
 func TestRecurring_ExhaustionAdvancesSeries(t *testing.T) {
 	t.Parallel()
 
@@ -675,12 +668,12 @@ func TestRecurring_ExhaustionAdvancesSeries(t *testing.T) {
 
 // ── Fix #1: compute error dead-letters instead of deleting ───────────────────
 
-// TestRecurring_ComputeErrorDeadLetters verifies that when advanceRecurring
-// encounters a compute error (bad TZ or unparseable RRULE) the row is dead-lettered
-// (status=failed, last_error set, job.failed emitted) rather than deleted or left running.
+// TestRecurring_ComputeErrorDeadLetters verifies that when advanceRecurring encounters a compute error (bad TZ or
+// unparseable RRULE) the row is dead-lettered (status=failed, last_error set, job.failed emitted) rather than deleted
+// or left running.
 //
-// A bad TZ ("Not/AZone") cannot be injected through Enqueue (it validates the TZ), so
-// this test inserts the row directly via SQL with an invalid tz column value.
+// A bad TZ ("Not/AZone") cannot be injected through Enqueue (it validates the TZ), so this test inserts the row
+// directly via SQL with an invalid tz column value.
 func TestRecurring_ComputeErrorDeadLetters(t *testing.T) {
 	t.Parallel()
 
@@ -696,8 +689,8 @@ func TestRecurring_ComputeErrorDeadLetters(t *testing.T) {
 	bus := &capturingBus{}
 	sched := scheduler.NewWithClock(s, bus, cfg, fixedClock(now))
 
-	// Register a handler that always succeeds — the failure must come from the
-	// compute path (bad TZ), not the handler itself.
+	// Register a handler that always succeeds — the failure must come from the compute path (bad TZ), not the handler
+	// itself.
 	handlerDone := make(chan struct{})
 	var handlerOnce atomic.Bool
 	sched.Register("bad.tz.recurring", func(_ context.Context, _ scheduler.Job) error {
@@ -707,8 +700,8 @@ func TestRecurring_ComputeErrorDeadLetters(t *testing.T) {
 		return nil
 	})
 
-	// Insert a recurring job row directly with an invalid TZ so advanceRecurring
-	// will hit a compute error after the handler succeeds.
+	// Insert a recurring job row directly with an invalid TZ so advanceRecurring will hit a compute error after the
+	// handler succeeds.
 	jobID := "01TESTBADTZ000000000000001"
 	nowStr := now.UTC().Format(time.RFC3339)
 	_, err := s.Writer().ExecContext(context.Background(), `
@@ -782,9 +775,8 @@ func TestRecurring_ComputeErrorDeadLetters(t *testing.T) {
 
 // ── Fix #2a: backward/fall-back DST ──────────────────────────────────────────
 
-// TestRecurring_RRULE_FallBackDST verifies that a DAILY rule anchored at 8am
-// America/New_York advances correctly across the Nov 1 2026 fall-back transition
-// (EDT UTC-4 → EST UTC-5): the new run_at's LOCAL hour is still 8 and the UTC
+// TestRecurring_RRULE_FallBackDST verifies that a DAILY rule anchored at 8am America/New_York advances correctly across
+// the Nov 1 2026 fall-back transition (EDT UTC-4 → EST UTC-5): the new run_at's LOCAL hour is still 8 and the UTC
 // offset shifts by 1 hour.
 func TestRecurring_RRULE_FallBackDST(t *testing.T) {
 	t.Parallel()
@@ -859,8 +851,8 @@ func TestRecurring_RRULE_FallBackDST(t *testing.T) {
 		t.Fatalf("parse run_at %q: %v", runAtStr, parseErr)
 	}
 
-	// Nov 1 2026 08:00 EST = 2026-11-01T13:00:00Z (UTC-5 after fall-back).
-	// The UTC offset shifts: Oct 31 8am EDT was UTC-4 (12:00Z), Nov 1 8am EST is UTC-5 (13:00Z).
+	// Nov 1 2026 08:00 EST = 2026-11-01T13:00:00Z (UTC-5 after fall-back). The UTC offset shifts: Oct 31 8am EDT was
+	// UTC-4 (12:00Z), Nov 1 8am EST is UTC-5 (13:00Z).
 	wantNextUTC := time.Date(2026, time.November, 1, 13, 0, 0, 0, time.UTC)
 	if !nextRunAt.UTC().Equal(wantNextUTC) {
 		t.Errorf("run_at (UTC) = %v, want %v (8am EST after fall-back DST)", nextRunAt.UTC(), wantNextUTC)
@@ -875,11 +867,10 @@ func TestRecurring_RRULE_FallBackDST(t *testing.T) {
 
 // ── Fix #2b: ambiguous/nonexistent wall-clock hour (spring-forward 2:30am) ───
 
-// TestRecurring_RRULE_SpringForwardAmbiguousHour verifies that a DAILY rule
-// anchored at 2:30am America/New_York does not panic and produces a sane future
-// instant when crossing the Mar 8 2026 spring-forward (2:00am → 3:00am; 2:30am
-// does not exist). The result must not be zero, must be after now, and the
-// returned local hour must be 3 (the library collapses nonexistent times forward).
+// TestRecurring_RRULE_SpringForwardAmbiguousHour verifies that a DAILY rule anchored at 2:30am America/New_York does
+// not panic and produces a sane future instant when crossing the Mar 8 2026 spring-forward (2:00am → 3:00am; 2:30am
+// does not exist). The result must not be zero, must be after now, and the returned local hour must be 3 (the library
+// collapses nonexistent times forward).
 func TestRecurring_RRULE_SpringForwardAmbiguousHour(t *testing.T) {
 	t.Parallel()
 
@@ -960,10 +951,9 @@ func TestRecurring_RRULE_SpringForwardAmbiguousHour(t *testing.T) {
 		t.Errorf("run_at = %v is not after now=%v; must be a future instant", nextRunAt, now)
 	}
 
-	// Go's time package resolves the nonexistent 2:30am EST on the spring-forward day
-	// by folding backward: 2:30am EST = 1:30am EST (just before the gap). The rrule-go
-	// library inherits this, so the result lands at 1:30am on Mar 8 (still EST, hour=1).
-	// The key invariants are: not zero, strictly after now, and a sane local hour (1).
+	// Go's time package resolves the nonexistent 2:30am EST on the spring-forward day by folding backward: 2:30am EST =
+	// 1:30am EST (just before the gap). The rrule-go library inherits this, so the result lands at 1:30am on Mar 8
+	// (still EST, hour=1). The key invariants are: not zero, strictly after now, and a sane local hour (1).
 	localHour := nextRunAt.UTC().In(loc).Hour()
 	if localHour != 1 {
 		t.Errorf("run_at local hour = %d on spring-forward day; want 1 (2:30am collapses to 1:30am EST before the gap)", localHour)
@@ -972,10 +962,9 @@ func TestRecurring_RRULE_SpringForwardAmbiguousHour(t *testing.T) {
 
 // ── Fix #3: finite RRULE (COUNT=1) deletes the row ───────────────────────────
 
-// TestRecurring_FiniteRRULE_DeletesRowOnExhaustion verifies that a recurring job
-// with a RRULE that has no further occurrence (FREQ=DAILY;COUNT=1 — only one
-// occurrence total) is deleted (series complete) after a successful run, with no
-// zero/garbage run_at persisted.
+// TestRecurring_FiniteRRULE_DeletesRowOnExhaustion verifies that a recurring job with a RRULE that has no further
+// occurrence (FREQ=DAILY;COUNT=1 — only one occurrence total) is deleted (series complete) after a successful run, with
+// no zero/garbage run_at persisted.
 func TestRecurring_FiniteRRULE_DeletesRowOnExhaustion(t *testing.T) {
 	t.Parallel()
 
@@ -1037,8 +1026,8 @@ func TestRecurring_FiniteRRULE_DeletesRowOnExhaustion(t *testing.T) {
 
 // ── Criterion 6: Permanent error ends the recurring series ───────────────────
 
-// TestRecurring_PermanentErrorEndsSeries verifies criterion 6:
-// a Permanent error on a recurring job ends the series (status=failed, no advance).
+// TestRecurring_PermanentErrorEndsSeries verifies criterion 6: a Permanent error on a recurring job ends the series
+// (status=failed, no advance).
 func TestRecurring_PermanentErrorEndsSeries(t *testing.T) {
 	t.Parallel()
 
@@ -1112,26 +1101,23 @@ func TestRecurring_PermanentErrorEndsSeries(t *testing.T) {
 
 // ── Re-execution positive coverage ───────────────────────────────────────────
 
-// TestReexecution_FailThenSucceed verifies the full claim→fail→re-claim→re-run path:
-// a one-shot job whose handler fails on attempt 1 and succeeds on attempt 2 must be
-// invoked exactly twice total, and the row must be deleted after the second (successful)
-// run. This is the "positive re-execution" path that is not exercised by any other test:
-// existing retry tests either freeze the clock so the row is never re-claimed, or only
-// verify the row re-arms as pending after one failure without confirming re-execution.
+// TestReexecution_FailThenSucceed verifies the full claim→fail→re-claim→re-run path: a one-shot job whose handler fails
+// on attempt 1 and succeeds on attempt 2 must be invoked exactly twice total, and the row must be deleted after the
+// second (successful) run. This is the "positive re-execution" path that is not exercised by any other test: existing
+// retry tests either freeze the clock so the row is never re-claimed, or only verify the row re-arms as pending after
+// one failure without confirming re-execution.
 //
-// Clock strategy: the advanceable clock starts frozen. BackoffBase=BackoffCap=10m ensures
-// the re-armed run_at is now+jitter where jitter ∈ [0,10m] — strictly in the future
-// under the frozen clock, so the row is NOT immediately re-claimable. Only after
-// clk.Advance(11m) does run_at <= now become true and the poller re-claims on the next
-// tick. This makes the clock advance genuinely load-bearing: if the advance were removed
-// the second invocation could never occur, proving the re-claim is clock-driven.
-// MaxAttempts=5 ensures the job is not dead-lettered before the second attempt.
+// Clock strategy: the advanceable clock starts frozen. BackoffBase=BackoffCap=10m ensures the re-armed run_at is
+// now+jitter where jitter ∈ [0,10m] — strictly in the future under the frozen clock, so the row is NOT immediately
+// re-claimable. Only after clk.Advance(11m) does run_at <= now become true and the poller re-claims on the next tick.
+// This makes the clock advance genuinely load-bearing: if the advance were removed the second invocation could never
+// occur, proving the re-claim is clock-driven. MaxAttempts=5 ensures the job is not dead-lettered before the second
+// attempt.
 //
-// Note: BackoffBase=1ms would be tempting for speed but is wrong here. RFC3339 stores
-// at second granularity; jitter ∈ [0,1ms) truncates to the same second as now, so
-// run_at <= now is immediately true and the row is re-claimed before clk.Advance fires —
-// passing the test via immediate re-claim rather than clock-driven re-execution, which
-// defeats the purpose of the advanceable clock.
+// Note: BackoffBase=1ms would be tempting for speed but is wrong here. RFC3339 stores at second granularity; jitter ∈
+// [0,1ms) truncates to the same second as now, so run_at <= now is immediately true and the row is re-claimed before
+// clk.Advance fires — passing the test via immediate re-claim rather than clock-driven re-execution, which defeats the
+// purpose of the advanceable clock.
 func TestReexecution_FailThenSucceed(t *testing.T) {
 	t.Parallel()
 
@@ -1143,12 +1129,10 @@ func TestReexecution_FailThenSucceed(t *testing.T) {
 	cfg := defaultTestConfig()
 	cfg.PollInterval = 5 * time.Millisecond
 	cfg.MaxAttempts = 5
-	// BackoffBase=BackoffCap=10m: the re-armed run_at = now + jitter where
-	// jitter ∈ [0,10m]. Under the frozen advanceable clock, run_at is always
-	// strictly > now (even jitter=0 stores as now+0ns = now exactly, which is
-	// NOT < now — the claim predicate is run_at <= now). A clock advance of 11m
-	// makes any jitter value due on the next poll tick, so the advance is the
-	// causal trigger for re-execution (not a timing race).
+	// BackoffBase=BackoffCap=10m: the re-armed run_at = now + jitter where jitter ∈ [0,10m]. Under the frozen
+	// advanceable clock, run_at is always strictly > now (even jitter=0 stores as now+0ns = now exactly, which is NOT <
+	// now — the claim predicate is run_at <= now). A clock advance of 11m makes any jitter value due on the next poll
+	// tick, so the advance is the causal trigger for re-execution (not a timing race).
 	cfg.BackoffBase = 10 * time.Minute
 	cfg.BackoffCap = 10 * time.Minute
 
@@ -1164,8 +1148,8 @@ func TestReexecution_FailThenSucceed(t *testing.T) {
 		n := callCount.Add(1)
 		switch n {
 		case 1:
-			// First call: fail. Signal as the handler unwinds (defer), before the
-			// scheduler's post-return retry write (handleFailure / RetryJob DB update).
+			// First call: fail. Signal as the handler unwinds (defer), before the scheduler's post-return retry write
+			// (handleFailure / RetryJob DB update).
 			defer firstFailedOnce.Do(func() { close(firstFailed) })
 			return errors.New("transient: first attempt fails")
 		case 2:
@@ -1204,11 +1188,10 @@ func TestReexecution_FailThenSucceed(t *testing.T) {
 		t.Fatal("first handler invocation did not occur within timeout")
 	}
 
-	// Wait for the RetryJob DB write to commit before advancing the clock. The scheduler
-	// calls handleFailure after h() returns, so firstFailed fires while the row may still
-	// be 'running'. With BackoffBase=10m the re-armed run_at is strictly future under the
-	// frozen clock, so the row will NOT be re-claimed until after clk.Advance fires — the
-	// row stays present and transitions to 'pending'; it cannot be deleted here.
+	// Wait for the RetryJob DB write to commit before advancing the clock. The scheduler calls handleFailure after h()
+	// returns, so firstFailed fires while the row may still be 'running'. With BackoffBase=10m the re-armed run_at is
+	// strictly future under the frozen clock, so the row will NOT be re-claimed until after clk.Advance fires — the row
+	// stays present and transitions to 'pending'; it cannot be deleted here.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		var st string
@@ -1231,9 +1214,9 @@ func TestReexecution_FailThenSucceed(t *testing.T) {
 		t.Fatalf("job status = %q before clock advance; want 'pending' (large backoff must prevent immediate re-claim)", preAdvanceStatus)
 	}
 
-	// Advance the clock by 11 minutes — past the 10m BackoffCap — so any re-armed
-	// row with backoff in [0,10m] is now due on the next poll tick. This advance is
-	// the causal trigger for re-execution; without it the row would never be re-claimed.
+	// Advance the clock by 11 minutes — past the 10m BackoffCap — so any re-armed row with backoff in [0,10m] is now
+	// due on the next poll tick. This advance is the causal trigger for re-execution; without it the row would never be
+	// re-claimed.
 	clk.Advance(11 * time.Minute)
 
 	// Wait for the second (successful) handler invocation.

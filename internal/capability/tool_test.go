@@ -13,8 +13,7 @@ import (
 
 // ── RiskTier ─────────────────────────────────────────────────────────────────
 
-// TestRiskTier_Order verifies that the four risk-tier constants are declared in
-// the correct iota order.
+// TestRiskTier_Order verifies that the four risk-tier constants are declared in the correct iota order.
 func TestRiskTier_Order(t *testing.T) {
 	t.Parallel()
 
@@ -41,8 +40,8 @@ func TestRiskTier_Order(t *testing.T) {
 
 // ── ToolError ─────────────────────────────────────────────────────────────────
 
-// TestToolError_SatisfiesError verifies that *ToolError satisfies the error
-// interface and that Error() returns a non-empty string.
+// TestToolError_SatisfiesError verifies that *ToolError satisfies the error interface and that Error() returns a
+// non-empty string.
 func TestToolError_SatisfiesError(t *testing.T) {
 	t.Parallel()
 
@@ -52,8 +51,7 @@ func TestToolError_SatisfiesError(t *testing.T) {
 	}
 }
 
-// TestToolError_ErrorsAs verifies that a *ToolError wrapped in fmt.Errorf can
-// be matched with errors.As.
+// TestToolError_ErrorsAs verifies that a *ToolError wrapped in fmt.Errorf can be matched with errors.As.
 func TestToolError_ErrorsAs(t *testing.T) {
 	t.Parallel()
 
@@ -76,10 +74,8 @@ type argsType struct {
 	Value string `json:"value"`
 }
 
-// TestNewTool_MalformedArgs_ReturnsToolError verifies that when NewTool's
-// Execute is called with JSON that cannot decode into Args, it returns a
-// *ToolError (matchable via errors.As) and never panics or returns a raw
-// decode error.
+// TestNewTool_MalformedArgs_ReturnsToolError verifies that when NewTool's Execute is called with JSON that cannot
+// decode into Args, it returns a *ToolError (matchable via errors.As) and never panics or returns a raw decode error.
 func TestNewTool_MalformedArgs_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 
@@ -128,9 +124,8 @@ func TestNewTool_MalformedArgs_ReturnsToolError(t *testing.T) {
 	}
 }
 
-// TestNewTool_WellFormedArgs_InvokesHandler verifies that when Execute is
-// called with valid JSON that decodes into Args, the typed handler is called
-// with the decoded value and its return values are propagated.
+// TestNewTool_WellFormedArgs_InvokesHandler verifies that when Execute is called with valid JSON that decodes into
+// Args, the typed handler is called with the decoded value and its return values are propagated.
 func TestNewTool_WellFormedArgs_InvokesHandler(t *testing.T) {
 	t.Parallel()
 
@@ -173,9 +168,8 @@ func TestNewTool_WellFormedArgs_InvokesHandler(t *testing.T) {
 	}
 }
 
-// TestNewTool_WellFormedArgs_HandlerError_Propagated verifies that a non-nil
-// error returned by the handler is passed through as-is (not wrapped in
-// *ToolError).
+// TestNewTool_WellFormedArgs_HandlerError_Propagated verifies that a non-nil error returned by the handler is passed
+// through as-is (not wrapped in *ToolError).
 func TestNewTool_WellFormedArgs_HandlerError_Propagated(t *testing.T) {
 	t.Parallel()
 
@@ -198,8 +192,8 @@ func TestNewTool_WellFormedArgs_HandlerError_Propagated(t *testing.T) {
 	}
 }
 
-// TestNewTool_Fields_SetCorrectly verifies that NewTool wires the tool's
-// metadata fields (Name, Description, Schema, Risk) from the constructor args.
+// TestNewTool_Fields_SetCorrectly verifies that NewTool wires the tool's metadata fields (Name, Description, Schema,
+// Risk) from the constructor args.
 func TestNewTool_Fields_SetCorrectly(t *testing.T) {
 	t.Parallel()
 
@@ -229,8 +223,8 @@ func TestNewTool_Fields_SetCorrectly(t *testing.T) {
 	}
 }
 
-// TestNewTool_ScopePassedThrough verifies that the store.Scope received by
-// Execute is forwarded unchanged to the handler.
+// TestNewTool_ScopePassedThrough verifies that the store.Scope received by Execute is forwarded unchanged to the
+// handler.
 func TestNewTool_ScopePassedThrough(t *testing.T) {
 	t.Parallel()
 

@@ -141,9 +141,9 @@ func (s *Store) Reader() *sql.DB { return s.readDB }
 // stop channel's close is guarded by a select/default so a second sequential Close does not re-close it). Close is not
 // safe to call concurrently from multiple goroutines; no caller does.
 func (s *Store) Close() error {
-	// Signal and wait for the optimize goroutine before closing the pools it uses. The select/default
-	// guards against re-closing stopOptimize on a second sequential Close. A concurrent double-Close
-	// (two goroutines racing on the default arm) is not supported and does not occur.
+	// Signal and wait for the optimize goroutine before closing the pools it uses. The select/default guards
+	// against re-closing stopOptimize on a second sequential Close. A concurrent double-Close (two goroutines
+	// racing on the default arm) is not supported and does not occur.
 	select {
 	case <-s.stopOptimize:
 		// Already closed — second call, skip.
@@ -197,9 +197,9 @@ func Open(cfg Config) (*Store, error) {
 		readPoolSize = defaultReadPoolSize
 	}
 
-	// The write pool uses _txlock=immediate so every BeginTx translates to BEGIN IMMEDIATE,
-	// which takes the write lock up front. This avoids the DEFERRED read→write lock-upgrade
-	// that can hit an un-retryable SQLITE_BUSY that busy_timeout cannot catch (house guide §6.2).
+	// The write pool uses _txlock=immediate so every BeginTx translates to BEGIN IMMEDIATE, which takes the write lock
+	// up front. This avoids the DEFERRED read→write lock-upgrade that can hit an un-retryable SQLITE_BUSY that
+	// busy_timeout cannot catch (house guide §6.2).
 	writeDSN := buildWriteDSN(cfg.Path, cfg.Key)
 	readDSN := buildReadDSN(cfg.Path, cfg.Key)
 
@@ -228,10 +228,9 @@ func Open(cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("store: validate read pool: %w", err)
 	}
 
-	// Seed query-planner statistics on each pool once, now that both pools are open and no
-	// transaction is in flight. PRAGMA optimize = 0x10002 is the at-open invocation SQLite
-	// recommends for long-lived connections (house guide §2.3 / §8.2); it must run outside any
-	// transaction. We run it on the write pool first, then on the read pool.
+	// Seed query-planner statistics on each pool once, now that both pools are open and no transaction is in flight.
+	// PRAGMA optimize = 0x10002 is the at-open invocation SQLite recommends for long-lived connections (house guide
+	// §2.3 / §8.2); it must run outside any transaction. We run it on the write pool first, then on the read pool.
 	seedOptimize(writeDB)
 	seedOptimize(readDB)
 

@@ -8,9 +8,8 @@ import (
 	"github.com/qovira/qovira/internal/auth"
 )
 
-// TestCreateAdmin_CreatesAdminWithCorrectRole verifies that CreateAdmin creates
-// a user with role "admin", a display name derived from the email local-part,
-// and that the password authenticates successfully via Authenticate.
+// TestCreateAdmin_CreatesAdminWithCorrectRole verifies that CreateAdmin creates a user with role "admin", a display
+// name derived from the email local-part, and that the password authenticates successfully via Authenticate.
 func TestCreateAdmin_CreatesAdminWithCorrectRole(t *testing.T) {
 	t.Parallel()
 
@@ -46,8 +45,8 @@ func TestCreateAdmin_CreatesAdminWithCorrectRole(t *testing.T) {
 	}
 }
 
-// TestCreateAdmin_DisplayNameDerivedFromEmail verifies that the display name is
-// derived from the local-part of the email address (the part before '@').
+// TestCreateAdmin_DisplayNameDerivedFromEmail verifies that the display name is derived from the local-part of the
+// email address (the part before '@').
 func TestCreateAdmin_DisplayNameDerivedFromEmail(t *testing.T) {
 	t.Parallel()
 
@@ -68,8 +67,8 @@ func TestCreateAdmin_DisplayNameDerivedFromEmail(t *testing.T) {
 	}
 }
 
-// TestCreateAdmin_SaneProfileDefaults verifies that the default profile fields
-// (timezone, locale, language) are populated with sane values.
+// TestCreateAdmin_SaneProfileDefaults verifies that the default profile fields (timezone, locale, language) are
+// populated with sane values.
 func TestCreateAdmin_SaneProfileDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -95,8 +94,8 @@ func TestCreateAdmin_SaneProfileDefaults(t *testing.T) {
 	}
 }
 
-// TestCreateAdmin_DuplicateEmail_ReturnsErrEmailTaken verifies that calling
-// CreateAdmin a second time for the same email returns ErrEmailTaken.
+// TestCreateAdmin_DuplicateEmail_ReturnsErrEmailTaken verifies that calling CreateAdmin a second time for the same
+// email returns ErrEmailTaken.
 func TestCreateAdmin_DuplicateEmail_ReturnsErrEmailTaken(t *testing.T) {
 	t.Parallel()
 
@@ -113,10 +112,9 @@ func TestCreateAdmin_DuplicateEmail_ReturnsErrEmailTaken(t *testing.T) {
 	}
 }
 
-// TestCreateAdmin_ImplementsAccountCreatorSeam verifies that *auth.Service
-// satisfies the bootstrap.AccountCreator interface at compile time by using an
-// interface conversion. The actual interface lives in bootstrap; we replicate
-// the minimal shape here to avoid a circular import.
+// TestCreateAdmin_ImplementsAccountCreatorSeam verifies that *auth.Service satisfies the bootstrap.AccountCreator
+// interface at compile time by using an interface conversion. The actual interface lives in bootstrap; we replicate the
+// minimal shape here to avoid a circular import.
 func TestCreateAdmin_ImplementsAccountCreatorSeam(t *testing.T) {
 	t.Parallel()
 

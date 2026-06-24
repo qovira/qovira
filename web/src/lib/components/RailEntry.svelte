@@ -12,10 +12,9 @@
 
   const { href, label, icon: Icon, active, expanded }: Props = $props();
 
-  // Gate tooltip open state: when the rail is expanded the visible label makes
-  // the tooltip redundant. We keep the Tooltip mounted regardless (unmounting
-  // it would recreate the trigger anchor and drop keyboard focus). Instead we
-  // prevent it from opening when the rail is already expanded.
+  // Gate tooltip open state: when the rail is expanded the visible label makes the tooltip redundant. We keep
+  // the Tooltip mounted regardless (unmounting it would recreate the trigger anchor and drop keyboard focus).
+  // Instead we prevent it from opening when the rail is already expanded.
   let tooltipOpen = $state(false);
 
   function handleTooltipOpenChange(open: boolean): void {
@@ -25,9 +24,8 @@
 </script>
 
 <!--
-  The Tooltip wraps the anchor unconditionally so the anchor element is NEVER
-  recreated when the rail expands/collapses. Focus is preserved across the
-  expand transition because the same DOM node stays in place.
+  The Tooltip wraps the anchor unconditionally so the anchor element is NEVER recreated when the rail
+  expands/collapses. Focus is preserved across the expand transition because the same DOM node stays in place.
 -->
 <Tooltip side="right" sideOffset={8} bind:open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
   {#snippet trigger({ props })}
@@ -41,9 +39,9 @@
     >
       <Icon size={20} aria-hidden={true} />
       <!--
-        Label is always in the DOM for a stable accessible name.
-        When collapsed it is visually hidden (sr-only); when expanded it shows.
-        Never toggled with {#if} so the anchor's accessible name is constant.
+        Label is always in the DOM for a stable accessible name. When collapsed it is visually hidden
+        (sr-only); when expanded it shows. Never toggled with {#if} so the anchor's accessible name is
+        constant.
       -->
       <span class={expanded ? "block" : "sr-only"}>{label}</span>
     </a>

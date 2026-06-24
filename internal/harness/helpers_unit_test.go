@@ -1,11 +1,11 @@
 package harness
 
-// helpers_unit_test.go — focused table-driven unit tests for the pure in-memory
-// helpers that were made cheaply testable by the H3 load-once refactor.
+// helpers_unit_test.go — focused table-driven unit tests for the pure in-memory helpers that were made cheaply
+// testable by the H3 load-once refactor.
 //
-// Each helper is exercised with constructed []db.ListMessagesRow slices so no
-// store I/O is needed. Each table includes at least one case that would FAIL if
-// the boundary rule were broken, proving the assertion is not tautological.
+// Each helper is exercised with constructed []db.ListMessagesRow slices so no store I/O is needed. Each table
+// includes at least one case that would FAIL if the boundary rule were broken, proving the assertion is not
+// tautological.
 
 import (
 	"database/sql"
@@ -63,14 +63,11 @@ func TestBuildToolResultSet(t *testing.T) {
 			wantIDs: []string{"call_abc"},
 		},
 		{
-			// An empty ToolCallID string (Valid=true, String="") must NOT be
-			// included — the `!= ""` guard is load-bearing. A regression that drops
-			// it would set[""] = true, treating every un-IDed result as "done" and
-			// hiding repeated execution bugs.
-			// Use explicit sql.NullString{Valid:true, String:""} rather than the
-			// row() helper, which sets Valid=false when the string is empty (a
-			// distinct case). Both must be excluded, but this case tests the
-			// non-empty-string guard specifically.
+			// An empty ToolCallID string (Valid=true, String="") must NOT be included — the `!= ""` guard is
+			// load-bearing. A regression that drops it would set[""] = true, treating every un-IDed result as "done"
+			// and hiding repeated execution bugs. Use explicit sql.NullString{Valid:true, String:""} rather than the
+			// row() helper, which sets Valid=false when the string is empty (a distinct case). Both must be excluded,
+			// but this case tests the non-empty-string guard specifically.
 			name: "empty tool_call_id string (Valid=true, String=empty) is excluded",
 			msgs: []db.ListMessagesRow{
 				{Role: "tool", ToolCallID: sql.NullString{Valid: true, String: ""}},
@@ -89,8 +86,8 @@ func TestBuildToolResultSet(t *testing.T) {
 			wantIDs: []string{"call_real"},
 		},
 		{
-			// Non-tool rows (user, assistant) must never populate the set even if
-			// their ToolCallID field happens to be set.
+			// Non-tool rows (user, assistant) must never populate the set even if their ToolCallID field happens to
+			// be set.
 			name: "non-tool roles are not included",
 			msgs: []db.ListMessagesRow{
 				row("assistant", "msg1", "", "spurious_id", 0),
@@ -170,9 +167,9 @@ func TestIsTurnComplete(t *testing.T) {
 			want: false,
 		},
 		{
-			// The key boundary: an assistant message WITHOUT tool_calls is the only
-			// terminal. If isTurnComplete treated a tool-call assistant message as
-			// complete, run() would exit early and never process the outstanding calls.
+			// The key boundary: an assistant message WITHOUT tool_calls is the only terminal. If isTurnComplete treated
+			// a tool-call assistant message as complete, run() would exit early and never process the outstanding
+			// calls.
 			name: "last message is assistant with no tool_calls → complete",
 			msgs: []db.ListMessagesRow{
 				row("user", "u", "", "", 0),
@@ -181,9 +178,8 @@ func TestIsTurnComplete(t *testing.T) {
 			want: true,
 		},
 		{
-			// Abandoned assistant messages are treated as terminal — an abandoned
-			// message means all sibling confirmations expired without user action.
-			// isTurnComplete must return true so run() does not re-enter.
+			// Abandoned assistant messages are treated as terminal — an abandoned message means all sibling
+			// confirmations expired without user action. isTurnComplete must return true so run() does not re-enter.
 			name: "abandoned assistant message → complete",
 			msgs: []db.ListMessagesRow{
 				row("assistant", "a", anyToolCalls, "", 1), // Abandoned=1
@@ -191,9 +187,9 @@ func TestIsTurnComplete(t *testing.T) {
 			want: true,
 		},
 		{
-			// Assistant with empty ToolCalls.String (Valid=true, String="") must be
-			// treated as a final reply (no outstanding calls). This is the same
-			// boundary as outstandingToolCalls — the "non-empty" check is load-bearing.
+			// Assistant with empty ToolCalls.String (Valid=true, String="") must be treated as a final reply (no
+			// outstanding calls). This is the same boundary as outstandingToolCalls — the "non-empty" check is
+			// load-bearing.
 			name: "assistant with valid but empty tool_calls string → complete",
 			msgs: []db.ListMessagesRow{
 				{Role: "assistant", ToolCalls: sql.NullString{String: "", Valid: true}},
@@ -269,9 +265,8 @@ func TestOutstandingToolCalls(t *testing.T) {
 			wantNilOut: true,
 		},
 		{
-			// The backward-scan rule: only the LAST assistant-with-tool_calls is checked.
-			// An older assistant message with outstanding calls must NOT be returned
-			// when a newer one with all results present comes after it.
+			// The backward-scan rule: only the LAST assistant-with-tool_calls is checked. An older assistant message
+			// with outstanding calls must NOT be returned when a newer one with all results present comes after it.
 			name: "backward scan: last assistant checked, not older ones",
 			msgs: []db.ListMessagesRow{
 				// Older round: tool call c_a with its result.
@@ -285,16 +280,14 @@ func TestOutstandingToolCalls(t *testing.T) {
 			wantNilOut: true,
 		},
 		{
-			// An empty-ID tool-result (Valid=true, String="") must NOT mark the
-			// empty-ID call done. buildToolResultSet excludes empty IDs; a regression
-			// that dropped the `!= ""` guard would set set[""] = true, falsely
-			// satisfying an outstanding call whose ID is also "".
-			// Use an explicit NullString{Valid:true,String:""} — the row() helper
-			// sets Valid=false for empty strings, which is the different (null) case.
+			// An empty-ID tool-result (Valid=true, String="") must NOT mark the empty-ID call done. buildToolResultSet
+			// excludes empty IDs; a regression that dropped the `!= ""` guard would set set[""] = true, falsely
+			// satisfying an outstanding call whose ID is also "". Use an explicit NullString{Valid:true,String:""} —
+			// the row() helper sets Valid=false for empty strings, which is the different (null) case.
 			name: "empty-ID tool result does NOT mark empty-ID call done",
 			msgs: []db.ListMessagesRow{
-				// A call with ID="" is outstanding (edge case; harness synthesizes IDs
-				// in practice, but the guard must hold unconditionally).
+				// A call with ID="" is outstanding (edge case; harness synthesizes IDs in practice, but the guard must
+				// hold unconditionally).
 				row("assistant", "a", toolCallsJSON([]gateway.ToolCall{{ID: "", Name: "tool_a"}}), "", 0),
 				{Role: "tool", ToolCallID: sql.NullString{Valid: true, String: ""}}, // Valid=true, String="" — must NOT satisfy ID=""
 			},
@@ -304,10 +297,9 @@ func TestOutstandingToolCalls(t *testing.T) {
 			wantNilOut: false,
 		},
 		{
-			// Abandoned assistant message → nil immediately (the fully-stale short-circuit).
-			// If this guard were removed, outstandingToolCalls would return the calls and
-			// run() would try to re-process them — but they all have status="expired" and
-			// synthetic results, making the re-entry spurious.
+			// Abandoned assistant message → nil immediately (the fully-stale short-circuit). If this guard were
+			// removed, outstandingToolCalls would return the calls and run() would try to re-process them — but they
+			// all have status="expired" and synthetic results, making the re-entry spurious.
 			name: "abandoned assistant → nil (fully-stale short-circuit)",
 			msgs: []db.ListMessagesRow{
 				row("assistant", "a", toolCallsJSON([]gateway.ToolCall{callA}), "", 1), // Abandoned=1

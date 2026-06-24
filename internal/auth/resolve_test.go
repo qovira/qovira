@@ -2,9 +2,8 @@ package auth_test
 
 // Tests for Sessions.Resolve and the Authenticator adapter.
 //
-// Uses the same store test harness as sessions_test.go (openSessionsStore,
-// createTestUser, testSessionConfig). The clock is injected via explicit now
-// parameters so tests never need real sleeps.
+// Uses the same store test harness as sessions_test.go (openSessionsStore, createTestUser, testSessionConfig). The
+// clock is injected via explicit now parameters so tests never need real sleeps.
 
 import (
 	"context"
@@ -18,8 +17,8 @@ import (
 
 // ── Sessions.Resolve ──────────────────────────────────────────────────────────
 
-// TestResolve_ValidToken_ReturnsPrincipal verifies that Resolve returns
-// store.Principal{UserID, Role} for a valid, in-window token.
+// TestResolve_ValidToken_ReturnsPrincipal verifies that Resolve returns store.Principal{UserID, Role} for a valid,
+// in-window token.
 func TestResolve_ValidToken_ReturnsPrincipal(t *testing.T) {
 	t.Parallel()
 
@@ -45,8 +44,8 @@ func TestResolve_ValidToken_ReturnsPrincipal(t *testing.T) {
 	}
 }
 
-// TestResolve_AdminRole_ReturnsPrincipalWithAdminRole verifies that when a
-// user has the admin role the returned principal carries "admin".
+// TestResolve_AdminRole_ReturnsPrincipalWithAdminRole verifies that when a user has the admin role the returned
+// principal carries "admin".
 func TestResolve_AdminRole_ReturnsPrincipalWithAdminRole(t *testing.T) {
 	t.Parallel()
 
@@ -81,8 +80,7 @@ func TestResolve_AdminRole_ReturnsPrincipalWithAdminRole(t *testing.T) {
 	}
 }
 
-// TestResolve_UnknownToken_ReturnsNotFound verifies that an unrecognised token
-// returns ErrSessionNotFound.
+// TestResolve_UnknownToken_ReturnsNotFound verifies that an unrecognised token returns ErrSessionNotFound.
 func TestResolve_UnknownToken_ReturnsNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -95,9 +93,8 @@ func TestResolve_UnknownToken_ReturnsNotFound(t *testing.T) {
 	}
 }
 
-// TestResolve_ExpiredSession_ReturnsNotFoundAndDeleted verifies that an expired
-// session returns ErrSessionNotFound and the row is best-effort deleted so a
-// subsequent Lookup also misses.
+// TestResolve_ExpiredSession_ReturnsNotFoundAndDeleted verifies that an expired session returns ErrSessionNotFound and
+// the row is best-effort deleted so a subsequent Lookup also misses.
 func TestResolve_ExpiredSession_ReturnsNotFoundAndDeleted(t *testing.T) {
 	t.Parallel()
 
@@ -127,8 +124,8 @@ func TestResolve_ExpiredSession_ReturnsNotFoundAndDeleted(t *testing.T) {
 	}
 }
 
-// TestResolve_ValidSession_BumpThrottled verifies that a bump within BumpInterval
-// is silently skipped — the request still succeeds and returns the principal.
+// TestResolve_ValidSession_BumpThrottled verifies that a bump within BumpInterval is silently skipped — the request
+// still succeeds and returns the principal.
 func TestResolve_ValidSession_BumpThrottled(t *testing.T) {
 	t.Parallel()
 
@@ -162,8 +159,8 @@ func TestResolve_ValidSession_BumpThrottled(t *testing.T) {
 	}
 }
 
-// TestResolve_ValidSession_BumpAfterInterval verifies that after BumpInterval
-// the Resolve call issues a bump without failing the request.
+// TestResolve_ValidSession_BumpAfterInterval verifies that after BumpInterval the Resolve call issues a bump without
+// failing the request.
 func TestResolve_ValidSession_BumpAfterInterval(t *testing.T) {
 	t.Parallel()
 
@@ -200,8 +197,7 @@ func TestResolve_ValidSession_BumpAfterInterval(t *testing.T) {
 
 // ── Concurrency / race safety ─────────────────────────────────────────────────
 
-// TestResolve_ConcurrentResolve verifies that concurrent Resolve calls against
-// a shared *Sessions are race-free.
+// TestResolve_ConcurrentResolve verifies that concurrent Resolve calls against a shared *Sessions are race-free.
 func TestResolve_ConcurrentResolve(t *testing.T) {
 	t.Parallel()
 
@@ -240,10 +236,9 @@ func TestResolve_ConcurrentResolve(t *testing.T) {
 	wg.Wait()
 }
 
-// TestResolve_ConcurrentDeleteAndResolve verifies that DeleteAllForUser racing
-// an in-flight Resolve is clean: the Resolve may return either a valid principal
-// (if it beats the delete) or ErrSessionNotFound (if the delete wins). No panic
-// or data race must occur.
+// TestResolve_ConcurrentDeleteAndResolve verifies that DeleteAllForUser racing an in-flight Resolve is clean: the
+// Resolve may return either a valid principal (if it beats the delete) or ErrSessionNotFound (if the delete wins). No
+// panic or data race must occur.
 func TestResolve_ConcurrentDeleteAndResolve(t *testing.T) {
 	t.Parallel()
 
@@ -279,8 +274,8 @@ func TestResolve_ConcurrentDeleteAndResolve(t *testing.T) {
 
 // ── Authenticator adapter ─────────────────────────────────────────────────────
 
-// TestAuthenticator_ValidToken_ReturnsPrincipal verifies that the Authenticator
-// adapts ValidateToken to Resolve and returns the correct Principal.
+// TestAuthenticator_ValidToken_ReturnsPrincipal verifies that the Authenticator adapts ValidateToken to Resolve and
+// returns the correct Principal.
 func TestAuthenticator_ValidToken_ReturnsPrincipal(t *testing.T) {
 	t.Parallel()
 
@@ -309,8 +304,8 @@ func TestAuthenticator_ValidToken_ReturnsPrincipal(t *testing.T) {
 	}
 }
 
-// TestAuthenticator_InvalidToken_ReturnsError verifies that an unrecognised
-// token yields a non-nil error from ValidateToken.
+// TestAuthenticator_InvalidToken_ReturnsError verifies that an unrecognised token yields a non-nil error from
+// ValidateToken.
 func TestAuthenticator_InvalidToken_ReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -325,8 +320,7 @@ func TestAuthenticator_InvalidToken_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestAuthenticator_ExpiredToken_ReturnsError verifies that an expired session
-// yields an error from ValidateToken.
+// TestAuthenticator_ExpiredToken_ReturnsError verifies that an expired session yields an error from ValidateToken.
 func TestAuthenticator_ExpiredToken_ReturnsError(t *testing.T) {
 	t.Parallel()
 

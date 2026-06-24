@@ -1,12 +1,12 @@
 <script lang="ts">
   // ReminderRow — single row in the reminders list.
   //
-  // Shared between the reminders route (+page.svelte) and the RemindersView story
-  // wrapper so both exercise the real rendering path — no parallel mocks.
+  // Shared between the reminders route (+page.svelte) and the RemindersView story wrapper so both exercise the real
+  // rendering path — no parallel mocks.
   //
-  // Active rows render a tappable check-circle button (sibling to the row-body button)
-  // so keyboard users get two independent tab stops: check → row-body.
-  // Done rows render a decorative (non-interactive) check icon and only the row-body button.
+  // Active rows render a tappable check-circle button (sibling to the row-body button) so keyboard users get two
+  // independent tab stops: check → row-body. Done rows render a decorative (non-interactive) check icon and only the
+  // row-body button.
   //
   // Callback props are optional so the story wrapper can omit them without crashing.
 
@@ -33,8 +33,8 @@
 <li class="reminder-row {isDone ? 'reminder-row--done' : ''}">
   {#if !isDone}
     <!--
-      Check-circle: interactive button for active reminders.
-      A11y: sibling button (NOT nested inside the row-body button).
+      Check-circle: interactive button for active reminders. A11y: sibling button (NOT nested inside the row-body
+      button).
     -->
     <button
       type="button"

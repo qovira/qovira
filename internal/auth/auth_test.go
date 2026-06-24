@@ -1,8 +1,8 @@
 // Package auth_test exercises the exported surface of internal/auth.
 //
-// argon2id is deliberately slow by design; tests use an injected Params with tiny
-// cost (Memory=64 KiB, Time=1, Threads=1) so the suite stays well under a second
-// while still covering every code path.  Production defaults live in DefaultParams.
+// argon2id is deliberately slow by design; tests use an injected Params with tiny cost (Memory=64 KiB, Time=1,
+// Threads=1) so the suite stays well under a second while still covering every code path.  Production defaults live in
+// DefaultParams.
 package auth_test
 
 import (
@@ -13,8 +13,8 @@ import (
 	"github.com/qovira/qovira/internal/auth"
 )
 
-// fastParams returns minimal argon2id params that are valid but cheap enough for
-// unit tests.  Drive through the constructor so we also cover the NewHasher path.
+// fastParams returns minimal argon2id params that are valid but cheap enough for unit tests.  Drive through the
+// constructor so we also cover the NewHasher path.
 func fastHasher(t *testing.T) *auth.Hasher {
 	t.Helper()
 	return auth.NewHasher(auth.Params{
@@ -74,8 +74,8 @@ func TestHash_PHCFormat(t *testing.T) {
 	}
 }
 
-// TestHash_ProductionParams verifies that a Hasher built with DefaultParams
-// embeds the expected production values (m=65536, t=3, p=2) in the PHC string.
+// TestHash_ProductionParams verifies that a Hasher built with DefaultParams embeds the expected production values
+// (m=65536, t=3, p=2) in the PHC string.
 func TestHash_ProductionParams(t *testing.T) {
 	t.Parallel()
 
@@ -90,8 +90,8 @@ func TestHash_ProductionParams(t *testing.T) {
 	}
 }
 
-// TestHash_UniqueSalts verifies that hashing the same plaintext twice produces
-// different PHC strings (random salt per call).
+// TestHash_UniqueSalts verifies that hashing the same plaintext twice produces different PHC strings (random salt per
+// call).
 func TestHash_UniqueSalts(t *testing.T) {
 	t.Parallel()
 
@@ -191,10 +191,9 @@ func TestVerify_MalformedPHC(t *testing.T) {
 	}
 }
 
-// TestVerify_MalformedPHC_DegenParams covers PHC strings whose parameter values
-// are out of range for argon2id (p>255 truncation, and zero-valued m/t/p).
-// Each must return an error — previously p=256 silently truncated to Threads=0
-// and t=0/m=0 were accepted, causing argon2.IDKey to panic.
+// TestVerify_MalformedPHC_DegenParams covers PHC strings whose parameter values are out of range for argon2id (p>255
+// truncation, and zero-valued m/t/p). Each must return an error — previously p=256 silently truncated to Threads=0 and
+// t=0/m=0 were accepted, causing argon2.IDKey to panic.
 func TestVerify_MalformedPHC_DegenParams(t *testing.T) {
 	t.Parallel()
 
@@ -205,8 +204,7 @@ func TestVerify_MalformedPHC_DegenParams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Hash: %v", err)
 	}
-	// Extract the salt and hash segments from the valid PHC.
-	// Format: $argon2id$v=19$<params>$<salt>$<hash>
+	// Extract the salt and hash segments from the valid PHC. Format: $argon2id$v=19$<params>$<salt>$<hash>
 	parts := strings.SplitN(basePHC, "$", 6)
 	saltSeg := parts[4]
 	hashSeg := parts[5]
@@ -308,8 +306,8 @@ func TestNeedsRehash(t *testing.T) {
 	}
 }
 
-// TestNeedsRehash_EqualOrStronger explicitly verifies the boundary conditions
-// across each param dimension (m, t, p independently stronger).
+// TestNeedsRehash_EqualOrStronger explicitly verifies the boundary conditions across each param dimension (m, t, p
+// independently stronger).
 func TestNeedsRehash_EqualOrStronger(t *testing.T) {
 	t.Parallel()
 
@@ -398,8 +396,8 @@ func TestValidatePassword(t *testing.T) {
 	}
 }
 
-// TestValidatePassword_DefaultPolicy checks that the exported DefaultPolicy has
-// sensible defaults (min ≥ 10, max ≥ 512).
+// TestValidatePassword_DefaultPolicy checks that the exported DefaultPolicy has sensible defaults (min ≥ 10,
+// max ≥ 512).
 func TestValidatePassword_DefaultPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -423,8 +421,8 @@ func TestValidatePassword_DefaultPolicy(t *testing.T) {
 
 // ── AC5: Dummy-verify path ───────────────────────────────────────────────────
 
-// TestDummyVerify_IsValidPHC verifies that the dummy hash stored inside the
-// Hasher is a parseable, valid argon2id PHC string.
+// TestDummyVerify_IsValidPHC verifies that the dummy hash stored inside the Hasher is a parseable, valid argon2id PHC
+// string.
 func TestDummyVerify_IsValidPHC(t *testing.T) {
 	t.Parallel()
 
@@ -442,9 +440,8 @@ func TestDummyVerify_IsValidPHC(t *testing.T) {
 	}
 }
 
-// TestDummyVerify_ReturnsFalseNotError verifies that DummyVerify returns false
-// (not an error) — it is a genuine argon2id derivation against the dummy hash,
-// not a short-circuit.
+// TestDummyVerify_ReturnsFalseNotError verifies that DummyVerify returns false (not an error) — it is a genuine
+// argon2id derivation against the dummy hash, not a short-circuit.
 func TestDummyVerify_ReturnsFalseNotError(t *testing.T) {
 	t.Parallel()
 
@@ -462,10 +459,9 @@ func TestDummyVerify_ReturnsFalseNotError(t *testing.T) {
 
 // ── AC6: table-driven policy-boundary tests (already covered above) ──────────
 
-// TestVerify_ParamsDecodedFromPHC confirms that Verify re-derives using the
-// params *encoded in the PHC string*, not the Hasher's current params.  We
-// hash with cheap params, then call Verify on a Hasher with expensive (default)
-// params — it must still return true.
+// TestVerify_ParamsDecodedFromPHC confirms that Verify re-derives using the params *encoded in the PHC string*, not the
+// Hasher's current params.  We hash with cheap params, then call Verify on a Hasher with expensive (default) params —
+// it must still return true.
 func TestVerify_ParamsDecodedFromPHC(t *testing.T) {
 	t.Parallel()
 

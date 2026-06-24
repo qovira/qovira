@@ -1,5 +1,5 @@
-// ConfirmationCard interaction stories — adds play functions for the key behaviors
-// not covered by the static-state Svelte CSF stories:
+// ConfirmationCard interaction stories — adds play functions for the key behaviors not covered by the
+// static-state Svelte CSF stories:
 //
 //   DenyClick                    — resolveConfirmation called with "deny"; POST fires once.
 //   ApproveClick                 — resolveConfirmation called with "approve"; POST fires once.
@@ -13,10 +13,10 @@
 //                                  component's $derived `buttonsDisabled` covers this via
 //                                  `secondsRemaining === 0` from computeSecondsRemaining().
 //
-// NOTE: vi.useFakeTimers() is intentionally NOT used in these stories. In Vitest Browser
-// Mode (Storybook project), fake timers break the story rendering loop (Storybook's
-// internal timer-based rendering stalls). The expiry timer behavior is covered by the
-// "already-expired" path below and by the existing unit tests in confirmations.svelte.test.ts.
+// NOTE: vi.useFakeTimers() is intentionally NOT used in these stories. In Vitest Browser Mode (Storybook
+// project), fake timers break the story rendering loop (Storybook's internal timer-based rendering stalls).
+// The expiry timer behavior is covered by the "already-expired" path below and by the existing unit tests in
+// confirmations.svelte.test.ts.
 //
 // CSF 3 format (not Svelte CSF) because vi.mock hoisting is required for mocking Api.POST.
 
@@ -55,9 +55,8 @@ import { Api } from "$lib/api/index.js";
 import { resetConfirmations, confirmationRequired } from "$lib/stores/confirmations.svelte.js";
 
 // ---------------------------------------------------------------------------
-// Type helper for accessing Api.POST mock call arguments.
-// Api.POST is typed as Client<paths>["POST"] (a complex overloaded generic).
-// We cast the mock call args to the concrete shape that resolveConfirmation
+// Type helper for accessing Api.POST mock call arguments. Api.POST is typed as Client<paths>["POST"] (a
+// complex overloaded generic). We cast the mock call args to the concrete shape that resolveConfirmation
 // passes — a single `as Array<…>` cast (no double-cast through unknown).
 // ---------------------------------------------------------------------------
 
@@ -108,10 +107,10 @@ function makePendingEntry(callId: string): PendingConfirmation {
 }
 
 // ---------------------------------------------------------------------------
-// ExpiryTimerDisablesButtons — uses an already-expired card (no fake timers needed).
-// The component's buttonsDisabled = $derived(entry.state !== "pending" || secondsRemaining === 0).
-// An entry with state "expired" renders with no action buttons at all (via #if entry.state !== "expired").
-// So we test via state="pending" + expiresAt in the past → secondsRemaining=0 on first compute.
+// ExpiryTimerDisablesButtons — uses an already-expired card (no fake timers needed). The component's
+// buttonsDisabled = $derived(entry.state !== "pending" || secondsRemaining === 0). An entry with state
+// "expired" renders with no action buttons at all (via #if entry.state !== "expired"). So we test via
+// state="pending" + expiresAt in the past → secondsRemaining=0 on first compute.
 // ---------------------------------------------------------------------------
 export const ExpiryTimerDisablesButtons: Story = {
   args: {
@@ -261,21 +260,20 @@ export const NoDoubleResolveWhileResolving: Story = {
   play: async ({ canvas }) => {
     const approveBtn = await canvas.findByRole("button", { name: /approve/i });
 
-    // Click once — starts the in-flight resolve (sets resolving=true internally,
-    // which makes the button disabled via `disabled={buttonsDisabled || resolving}`).
+    // Click once — starts the in-flight resolve (sets resolving=true internally, which makes the button
+    // disabled via `disabled={buttonsDisabled || resolving}`).
     await userEvent.click(approveBtn);
 
     // Button must be disabled while resolving.
     await expect(approveBtn).toBeDisabled();
 
-    // A second userEvent.click on a disabled button is blocked by the browser —
-    // no click event fires, proving the disabled binding guards the UI.
+    // A second userEvent.click on a disabled button is blocked by the browser — no click event fires, proving
+    // the disabled binding guards the UI.
     await userEvent.click(approveBtn);
     await expect(vi.mocked(Api.POST)).toHaveBeenCalledTimes(1);
 
-    // A third click via fireEvent bypasses the disabled attribute to reach
-    // the onclick handler directly. The `if (buttonsDisabled || resolving) return;`
-    // early-return guard in resolve() prevents a second POST call.
+    // A third click via fireEvent bypasses the disabled attribute to reach the onclick handler directly. The
+    // `if (buttonsDisabled || resolving) return;` early-return guard in resolve() prevents a second POST call.
     await fireEvent.click(approveBtn);
     await expect(vi.mocked(Api.POST)).toHaveBeenCalledTimes(1);
   },

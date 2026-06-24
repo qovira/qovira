@@ -4,9 +4,8 @@ package httpx
 //
 //	recover → request-id → request-log → security-headers → auth → route
 //
-// Each middleware is a plain func(http.Handler) http.Handler (the Middleware
-// type defined in router.go).  All dependencies are injected as parameters so
-// the composition root can supply production vs test values without any
+// Each middleware is a plain func(http.Handler) http.Handler (the Middleware type defined in router.go).  All
+// dependencies are injected as parameters so the composition root can supply production vs test values without any
 // package-level state.
 //
 // Public symbols:
@@ -34,20 +33,19 @@ import (
 	"github.com/qovira/qovira/internal/store"
 )
 
-// Session cookie and CSRF constants. Exported so the auth handler (login) and
-// client-side code generators can reference the same names without
-// string-literal duplication.
+// Session cookie and CSRF constants. Exported so the auth handler (login) and client-side code generators can reference
+// the same names without string-literal duplication.
 const (
-	// SessionCookieName is the __Host- prefixed cookie that carries the Qovira
-	// session token. The __Host- prefix enforces Secure, no Domain, and Path=/.
+	// SessionCookieName is the __Host- prefixed cookie that carries the Qovira session token. The __Host- prefix
+	// enforces Secure, no Domain, and Path=/.
 	SessionCookieName = "__Host-qovira_session"
 
-	// CSRFCookieName is the non-HttpOnly cookie whose value the browser-side
-	// JavaScript reads and echoes as the CSRF-Token request header.
+	// CSRFCookieName is the non-HttpOnly cookie whose value the browser-side JavaScript reads and echoes as the
+	// CSRF-Token request header.
 	CSRFCookieName = "qovira_csrf"
 
-	// CSRFHeaderName is the request header that must match CSRFCookieName for
-	// unsafe (non-GET) cookie-authenticated requests.
+	// CSRFHeaderName is the request header that must match CSRFCookieName for unsafe (non-GET) cookie-authenticated
+	// requests.
 	CSRFHeaderName = "CSRF-Token"
 )
 
@@ -57,8 +55,8 @@ type TokenValidator interface {
 	ValidateToken(ctx context.Context, token string) (store.Principal, error)
 }
 
-// ContextWithPrincipal returns a new context carrying the given Principal. The auth middleware stores the
-// authenticated identity here; handlers and downstream layers retrieve it with PrincipalFromContext.
+// ContextWithPrincipal returns a new context carrying the given Principal. The auth middleware stores the authenticated
+// identity here; handlers and downstream layers retrieve it with PrincipalFromContext.
 func ContextWithPrincipal(ctx context.Context, p store.Principal) context.Context {
 	return context.WithValue(ctx, principalKey, p)
 }
@@ -70,8 +68,8 @@ func PrincipalFromContext(ctx context.Context) (store.Principal, bool) {
 	return p, ok
 }
 
-// StandardChain returns the ordered slice of cross-cutting middlewares for the
-// standard request path. The slice is ordered outermost-first:
+// StandardChain returns the ordered slice of cross-cutting middlewares for the standard request path. The slice is
+// ordered outermost-first:
 //
 //	[0] recover — catches panics from any inner layer
 //	[1] request-id — propagates or generates a correlation ID
@@ -154,11 +152,10 @@ func (g *responseGuard) Write(b []byte) (int, error) {
 	return g.ResponseWriter.Write(b)
 }
 
-// Unwrap exposes the wrapped ResponseWriter to http.ResponseController. Because
-// responseGuard embeds the http.ResponseWriter *interface*, only Header/Write/
-// WriteHeader are promoted — Flush and SetWriteDeadline are not. Without this
-// method the ResponseController dead-ends here and Flush returns ErrNotSupported,
-// breaking the /events SSE stream that flushes through this chain.
+// Unwrap exposes the wrapped ResponseWriter to http.ResponseController. Because responseGuard embeds the
+// http.ResponseWriter *interface*, only Header/Write/WriteHeader are promoted — Flush and SetWriteDeadline are not.
+// Without this method the ResponseController dead-ends here and Flush returns ErrNotSupported, breaking the /events
+// SSE stream that flushes through this chain.
 func (g *responseGuard) Unwrap() http.ResponseWriter {
 	return g.ResponseWriter
 }
@@ -234,9 +231,8 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-// Unwrap exposes the wrapped ResponseWriter to http.ResponseController. As with
-// responseGuard, statusRecorder embeds the http.ResponseWriter interface, so
-// Flush/SetWriteDeadline are not promoted; this method lets the controller reach
+// Unwrap exposes the wrapped ResponseWriter to http.ResponseController. As with responseGuard, statusRecorder embeds
+// the http.ResponseWriter interface, so Flush/SetWriteDeadline are not promoted; this method lets the controller reach
 // the real flusher so the /events SSE stream can flush through the log middleware.
 func (r *statusRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
@@ -250,8 +246,7 @@ func (r *statusRecorder) statusCode() int {
 	return r.status
 }
 
-// RequestLogMiddleware emits exactly one structured log line per request after
-// the handler returns. The line contains:
+// RequestLogMiddleware emits exactly one structured log line per request after the handler returns. The line contains:
 //
 //   - method  — HTTP verb
 //   - path    — URL path (no query string, no headers, no body)
@@ -270,21 +265,17 @@ func RequestLogMiddleware(logger *slog.Logger) Middleware {
 			start := time.Now()
 			rec := &statusRecorder{ResponseWriter: w}
 
-			// Emit the access-log line in a defer so it fires even when next
-			// panics. RecoverMiddleware (outermost) catches the panic after this
-			// defer runs, so the log line is always recorded once per request.
+			// Emit the access-log line in a defer so it fires even when next panics. RecoverMiddleware (outermost)
+			// catches the panic after this defer runs, so the log line is always recorded once per request.
 			//
-			// On the panic path, rec.statusCode() returns 0→200 because
-			// RecoverMiddleware (which is OUTER) hasn't had a chance to call
-			// WriteHeader(500) yet — that happens after this defer. We detect the
-			// panic by calling recover(); if non-nil we know a 500 is coming, so
-			// we record status=500 in the log, then re-panic so RecoverMiddleware
-			// still catches it and writes the actual 500 problem+json body. This
-			// preserves the full panic-recovery chain while recording the right
-			// status and level.
+			// On the panic path, rec.statusCode() returns 0→200 because RecoverMiddleware (which is OUTER) hasn't had
+			// a chance to call WriteHeader(500) yet — that happens after this defer. We detect the panic by calling
+			// recover(); if non-nil we know a 500 is coming, so we record status=500 in the log, then re-panic so
+			// RecoverMiddleware still catches it and writes the actual 500 problem+json body. This preserves the full
+			// panic-recovery chain while recording the right status and level.
 			defer func() {
-				// Detect whether a panic is in flight. If so, forcibly record
-				// 500 in the log entry and re-panic after logging.
+				// Detect whether a panic is in flight. If so, forcibly record 500 in the log entry and re-panic after
+				// logging.
 				v := recover()
 
 				status := rec.statusCode()
@@ -319,8 +310,7 @@ func RequestLogMiddleware(logger *slog.Logger) Middleware {
 	}
 }
 
-// SecurityHeadersMiddleware sets the v0.1 baseline security response headers
-// on every response:
+// SecurityHeadersMiddleware sets the v0.1 baseline security response headers on every response:
 //
 //   - X-Content-Type-Options: nosniff — prevents MIME sniffing
 //   - Content-Security-Policy: from spaCSP() — "default-src 'self'; script-src
@@ -343,15 +333,13 @@ func SecurityHeadersMiddleware() Middleware {
 	}
 }
 
-// SessionTokenFromRequest extracts the session token from r using the same
-// precedence the auth middleware uses:
+// SessionTokenFromRequest extracts the session token from r using the same precedence the auth middleware uses:
 //  1. [SessionCookieName] cookie — the primary browser path.
 //  2. Authorization: Bearer <token> header — the API / programmatic path.
 //
-// Returns the token string and viaCookie=true when the cookie was used.
-// Returns an empty token and viaCookie=false when neither source is present.
-// Exported so logout handlers can retrieve the current session token without
-// duplicating the extraction logic.
+// Returns the token string and viaCookie=true when the cookie was used. Returns an empty token and viaCookie=false when
+// neither source is present. Exported so logout handlers can retrieve the current session token without duplicating
+// the extraction logic.
 func SessionTokenFromRequest(r *http.Request) (token string, viaCookie bool) {
 	if t := sessionCookie(r); t != "" {
 		return t, true
@@ -359,26 +347,24 @@ func SessionTokenFromRequest(r *http.Request) (token string, viaCookie bool) {
 	return bearerToken(r), false
 }
 
-// AuthMiddleware authenticates each non-public request and places the resolved
-// [store.Principal] in the request context via [ContextWithPrincipal].
+// AuthMiddleware authenticates each non-public request and places the resolved [store.Principal] in the request context
+// via [ContextWithPrincipal].
 //
 // Token extraction order (cookie wins when both are present):
 //  1. Session cookie [SessionCookieName] — the primary browser path.
 //  2. Authorization: Bearer <token> header — the API / programmatic path.
 //
-// CSRF double-submit (cookie-authenticated requests only):
-// When the token was extracted via cookie AND the HTTP method is unsafe
-// (POST, PUT, PATCH, or DELETE), the [CSRFHeaderName] request header must be
-// present and must equal the [CSRFCookieName] cookie value (compared via
-// [crypto/subtle.ConstantTimeCompare]).  A missing or mismatched CSRF header
-// results in a 403 problem+json response with code "csrf_failed".  GET
-// requests and Bearer-authenticated requests are exempt.
+// CSRF double-submit (cookie-authenticated requests only): When the token was extracted via cookie AND the HTTP method
+// is unsafe (POST, PUT, PATCH, or DELETE), the [CSRFHeaderName] request header must be present and must equal the
+// [CSRFCookieName] cookie value (compared via [crypto/subtle.ConstantTimeCompare]).  A missing or mismatched CSRF
+// header results in a 403 problem+json response with code "csrf_failed".  GET requests and Bearer-authenticated
+// requests are exempt.
 //
-// Routes for which isPublic(r) returns true pass through without any token
-// check; no Principal is placed in context for those routes.
+// Routes for which isPublic(r) returns true pass through without any token check; no Principal is placed in context for
+// those routes.
 //
-// On missing or invalid token for a non-public route, the middleware writes a
-// 401 problem+json response with code "unauthenticated" and does not call next.
+// On missing or invalid token for a non-public route, the middleware writes a 401 problem+json response with code
+// "unauthenticated" and does not call next.
 func AuthMiddleware(validator TokenValidator, isPublic func(*http.Request) bool) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -411,8 +397,8 @@ func AuthMiddleware(validator TokenValidator, isPublic func(*http.Request) bool)
 				return
 			}
 
-			// CSRF double-submit check: required for cookie-authenticated unsafe
-			// methods only. Bearer-authed requests and safe methods are exempt.
+			// CSRF double-submit check: required for cookie-authenticated unsafe methods only. Bearer-authed
+			// requests and safe methods are exempt.
 			if viaCookie && isUnsafeMethod(r.Method) {
 				if !csrfValid(r) {
 					WriteProblem(w, r, Problem{
@@ -431,8 +417,8 @@ func AuthMiddleware(validator TokenValidator, isPublic func(*http.Request) bool)
 	}
 }
 
-// sessionCookie returns the value of the [SessionCookieName] cookie, or an
-// empty string when the cookie is absent or empty.
+// sessionCookie returns the value of the [SessionCookieName] cookie, or an empty string when the cookie is absent or
+// empty.
 func sessionCookie(r *http.Request) string {
 	c, err := r.Cookie(SessionCookieName)
 	if err != nil || c.Value == "" {
@@ -441,10 +427,9 @@ func sessionCookie(r *http.Request) string {
 	return c.Value
 }
 
-// isUnsafeMethod reports whether method requires CSRF protection. POST, PUT,
-// PATCH, and DELETE are state-changing (unsafe) per RFC 9110 §9.2.1 and
-// require the CSRF double-submit check for cookie-authenticated requests. GET,
-// HEAD, and OPTIONS are safe/idempotent and are exempt.
+// isUnsafeMethod reports whether method requires CSRF protection. POST, PUT, PATCH, and DELETE are state-changing
+// (unsafe) per RFC 9110 §9.2.1 and require the CSRF double-submit check for cookie-authenticated requests. GET, HEAD,
+// and OPTIONS are safe/idempotent and are exempt.
 func isUnsafeMethod(method string) bool {
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
@@ -454,9 +439,8 @@ func isUnsafeMethod(method string) bool {
 	}
 }
 
-// csrfValid returns true when the CSRF-Token request header matches the
-// qovira_csrf cookie value via constant-time comparison. Returns false when
-// either the header or the cookie is absent, or when they differ.
+// csrfValid returns true when the CSRF-Token request header matches the qovira_csrf cookie value via constant-time
+// comparison. Returns false when either the header or the cookie is absent, or when they differ.
 func csrfValid(r *http.Request) bool {
 	headerVal := r.Header.Get(CSRFHeaderName)
 	if headerVal == "" {
@@ -478,8 +462,7 @@ func bearerToken(r *http.Request) string {
 	if len(v) <= len(prefix) {
 		return ""
 	}
-	// RFC 7235: the auth-scheme token is case-insensitive, so accept "bearer" and any other casing of the scheme
-	// name.
+	// RFC 7235: the auth-scheme token is case-insensitive, so accept "bearer" and any other casing of the scheme name.
 	if !strings.EqualFold(v[:len(prefix)], prefix) {
 		return ""
 	}

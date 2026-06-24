@@ -12,8 +12,8 @@ import (
 	"github.com/qovira/qovira/internal/logging"
 )
 
-// jsonLine parses a single JSON log line captured in buf. It calls t.Fatal if
-// the buffer is empty or the content is not valid JSON.
+// jsonLine parses a single JSON log line captured in buf. It calls t.Fatal if the buffer is empty or the content is not
+// valid JSON.
 func jsonLine(t *testing.T, buf *bytes.Buffer) map[string]any {
 	t.Helper()
 	line := strings.TrimSpace(buf.String())
@@ -27,8 +27,8 @@ func jsonLine(t *testing.T, buf *bytes.Buffer) map[string]any {
 	return m
 }
 
-// cfg builds a minimal config.Config sufficient for NewLogger, with sensible
-// defaults for fields that logging ignores (MasterKey, DataDir, etc.).
+// cfg builds a minimal config.Config sufficient for NewLogger, with sensible defaults for fields that logging ignores
+// (MasterKey, DataDir, etc.).
 func cfg(level, format string) config.Config {
 	return config.Config{
 		MasterKey: config.Secret("placeholder-key-not-used-by-logger"),
@@ -37,8 +37,8 @@ func cfg(level, format string) config.Config {
 	}
 }
 
-// TestNewLogger_JSONFormat verifies that the JSON format emits valid JSON lines
-// containing the expected level, msg, and extra attributes.
+// TestNewLogger_JSONFormat verifies that the JSON format emits valid JSON lines containing the expected level, msg, and
+// extra attributes.
 func TestNewLogger_JSONFormat(t *testing.T) {
 	t.Parallel()
 
@@ -63,8 +63,7 @@ func TestNewLogger_JSONFormat(t *testing.T) {
 	}
 }
 
-// TestNewLogger_LevelHonored verifies that a debug message is suppressed at
-// info level and emitted at debug level.
+// TestNewLogger_LevelHonored verifies that a debug message is suppressed at info level and emitted at debug level.
 func TestNewLogger_LevelHonored(t *testing.T) {
 	t.Parallel()
 
@@ -94,8 +93,7 @@ func TestNewLogger_LevelHonored(t *testing.T) {
 	}
 }
 
-// TestNewLogger_FormatSwitch verifies that format "text" produces non-JSON
-// output and "json" produces parseable JSON.
+// TestNewLogger_FormatSwitch verifies that format "text" produces non-JSON output and "json" produces parseable JSON.
 func TestNewLogger_FormatSwitch(t *testing.T) {
 	t.Parallel()
 
@@ -133,8 +131,8 @@ func TestNewLogger_FormatSwitch(t *testing.T) {
 	}
 }
 
-// TestNewLogger_Redaction_SecretType verifies that a config.Secret value is
-// never written in plain text — it must appear as [REDACTED].
+// TestNewLogger_Redaction_SecretType verifies that a config.Secret value is never written in plain text — it must
+// appear as [REDACTED].
 func TestNewLogger_Redaction_SecretType(t *testing.T) {
 	t.Parallel()
 
@@ -153,9 +151,8 @@ func TestNewLogger_Redaction_SecretType(t *testing.T) {
 	}
 }
 
-// TestNewLogger_Redaction_SensitiveKey verifies that a raw string logged under
-// a sensitive attribute key (e.g. "password") has its value replaced with
-// [REDACTED], even though the value itself is not a config.Secret.
+// TestNewLogger_Redaction_SensitiveKey verifies that a raw string logged under a sensitive attribute key (e.g.
+// "password") has its value replaced with [REDACTED], even though the value itself is not a config.Secret.
 func TestNewLogger_Redaction_SensitiveKey(t *testing.T) {
 	t.Parallel()
 
@@ -188,12 +185,10 @@ func TestNewLogger_Redaction_SensitiveKey(t *testing.T) {
 
 			m := jsonLine(t, &buf)
 
-			// The key should still be present in the JSON output.
-			// slog lower-cases nothing by default, so check the key as given,
-			// but since JSON keys are case-sensitive and slog emits the key as
-			// provided, we can look up the normalised key in the parsed map.
-			// We check the raw line for the value leak, then parse for the
-			// redaction marker.
+			// The key should still be present in the JSON output. slog lower-cases nothing by default, so check the key
+			// as given, but since JSON keys are case-sensitive and slog emits the key as provided, we can look up the
+			// normalised key in the parsed map. We check the raw line for the value leak, then parse for the redaction
+			// marker.
 			if strings.Contains(buf.String(), tc.value) {
 				t.Errorf("key %q: log line leaked value %q\nline: %s", tc.key, tc.value, buf.String())
 			}
@@ -211,9 +206,8 @@ func TestNewLogger_Redaction_SensitiveKey(t *testing.T) {
 	}
 }
 
-// TestNewLogger_Redaction_Combined verifies that both paths — config.Secret
-// type AND a raw string under a sensitive key — yield [REDACTED] in the same
-// log line.
+// TestNewLogger_Redaction_Combined verifies that both paths — config.Secret type AND a raw string under a sensitive key
+// — yield [REDACTED] in the same log line.
 func TestNewLogger_Redaction_Combined(t *testing.T) {
 	t.Parallel()
 
@@ -236,11 +230,9 @@ func TestNewLogger_Redaction_Combined(t *testing.T) {
 		t.Errorf("log line leaked config.Secret token value %q\nline: %s", secretToken, line)
 	}
 
-	// Both redaction paths must emit the sentinel, not silently drop the
-	// attribute. Count occurrences: one for the sensitive-key path (password),
-	// one for the config.Secret LogValue path (token_field). A regression that
-	// drops an attribute rather than substituting [REDACTED] would yield a count
-	// less than 2 and make this assertion fail.
+	// Both redaction paths must emit the sentinel, not silently drop the attribute. Count occurrences: one for the
+	// sensitive-key path (password), one for the config.Secret LogValue path (token_field). A regression that drops an
+	// attribute rather than substituting [REDACTED] would yield a count less than 2 and make this assertion fail.
 	const sentinel = "[REDACTED]"
 	count := strings.Count(line, sentinel)
 	if count != 2 {
@@ -248,10 +240,9 @@ func TestNewLogger_Redaction_Combined(t *testing.T) {
 	}
 }
 
-// capturingHandler is a minimal slog.Handler implementation used for the
-// swap-point test. It records every slog.Record it receives so the test can
-// assert that the logger routes records through whatever handler is installed
-// at the NewHandler construction point.
+// capturingHandler is a minimal slog.Handler implementation used for the swap-point test. It records every slog.Record
+// it receives so the test can assert that the logger routes records through whatever handler is installed at the
+// NewHandler construction point.
 type capturingHandler struct {
 	records []slog.Record
 	level   slog.Level
@@ -277,18 +268,15 @@ func (h *capturingHandler) WithGroup(name string) slog.Handler {
 	return h
 }
 
-// TestNewHandler_SwapPoint verifies the handler seam: by substituting a
-// capturingHandler at the same construction point (slog.New), we prove that
-// all log calls flow through the installed handler without touching any call
-// site.
+// TestNewHandler_SwapPoint verifies the handler seam: by substituting a capturingHandler at the same construction point
+// (slog.New), we prove that all log calls flow through the installed handler without touching any call site.
 func TestNewHandler_SwapPoint(t *testing.T) {
 	t.Parallel()
 
 	capture := &capturingHandler{level: slog.LevelDebug}
 
-	// This mirrors how NewLogger composes things — pass any handler to slog.New.
-	// The test substitutes capturingHandler for the real handler returned by
-	// NewHandler, proving the seam works: nothing in the call sites cares which
+	// This mirrors how NewLogger composes things — pass any handler to slog.New. The test substitutes capturingHandler
+	// for the real handler returned by NewHandler, proving the seam works: nothing in the call sites cares which
 	// concrete handler is installed.
 	logger := slog.New(capture)
 	logger.Info("swap test message", "key", "value")
@@ -309,8 +297,8 @@ func TestNewHandler_SwapPoint(t *testing.T) {
 	}
 }
 
-// TestParseLevel verifies the level-mapping helper covers all four config
-// values and defaults to info for an unrecognised input.
+// TestParseLevel verifies the level-mapping helper covers all four config values and defaults to info for an
+// unrecognised input.
 func TestParseLevel(t *testing.T) {
 	t.Parallel()
 
@@ -341,8 +329,8 @@ func TestParseLevel(t *testing.T) {
 	}
 }
 
-// TestNewLogger_AllLevels verifies that all four log levels produce output at
-// the right threshold and carry the correct level label in the JSON.
+// TestNewLogger_AllLevels verifies that all four log levels produce output at the right threshold and carry the correct
+// level label in the JSON.
 func TestNewLogger_AllLevels(t *testing.T) {
 	t.Parallel()
 

@@ -34,8 +34,7 @@
     try {
       const result = await performLogin(email, password);
       if (result.ok) {
-        // Navigate home. The root-layout guard lets us through because the
-        // session store is now populated.
+        // Navigate home. The root-layout guard lets us through because the session store is now populated.
         await goto("/");
         return;
       }

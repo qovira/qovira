@@ -92,8 +92,7 @@ func buildHarnessWithClock(
 	return harness.NewWithClock(reg, gw, s, bus, cfg, harness.NewDiscardLogger(), nowFn)
 }
 
-// startAndWaitCompletion fires a turn and waits for message.completed or turn.failed.
-// Returns the full event snapshot.
+// startAndWaitCompletion fires a turn and waits for message.completed or turn.failed. Returns the full event snapshot.
 func startAndWaitCompletion(t *testing.T, h *harness.Harness, s *store.Store, p store.Principal, convID string, bus *fakeBus) []fakeEvent {
 	t.Helper()
 	scope := store.UserScope(p)
@@ -131,8 +130,7 @@ func startAndWaitCompletion(t *testing.T, h *harness.Harness, s *store.Store, p 
 
 // ── AC-1 and AC-2: system prompt contains user context and memory slot ────────
 
-// TestSystemPrompt_ContainsUserContext verifies that the assembled ChatRequest's
-// first message (system) contains:
+// TestSystemPrompt_ContainsUserContext verifies that the assembled ChatRequest's first message (system) contains:
 //   - formatted current time in the user's timezone
 //   - IANA timezone string
 //   - locale, language, display name
@@ -218,8 +216,8 @@ func TestSlidingWindow_DropsOldestAndPreservesBoundary(t *testing.T) {
 		t.Fatalf("UpsertConversation: %v", err)
 	}
 
-	// Insert history: group 0 = tool-call exchange (old), group 1 = plain (new).
-	// The tool-call group has a lot of content so it exceeds the 10-token budget.
+	// Insert history: group 0 = tool-call exchange (old), group 1 = plain (new). The tool-call group has a lot of
+	// content so it exceeds the 10-token budget.
 	bigContent := strings.Repeat("w", 200) // ~50 tokens via chars/4 heuristic
 	toolCallsJSON, err := json.Marshal([]gateway.ToolCall{{ID: "old_tc", Name: "tool", Arguments: json.RawMessage(`{}`)}})
 	if err != nil {
@@ -321,8 +319,7 @@ func roleList(msgs []gateway.Message) []string {
 
 // ── AC-5: ErrContextLength retry ──────────────────────────────────────────────
 
-// contextLengthThenSucceedChatter returns ErrContextLength for the first N calls
-// then succeeds.
+// contextLengthThenSucceedChatter returns ErrContextLength for the first N calls then succeeds.
 type contextLengthThenSucceedChatter struct {
 	mu        sync.Mutex
 	failsLeft int
@@ -374,9 +371,8 @@ func (c *alwaysContextLengthChatter) Chat(_ context.Context, _ gateway.ChatReque
 	return nil, gateway.ErrContextLength
 }
 
-// TestContextRetry_SucceedsAfterTrim verifies that the harness retries with a
-// harder trim after ErrContextLength and completes successfully when a later
-// attempt succeeds.
+// TestContextRetry_SucceedsAfterTrim verifies that the harness retries with a harder trim after ErrContextLength and
+// completes successfully when a later attempt succeeds.
 func TestContextRetry_SucceedsAfterTrim(t *testing.T) {
 	t.Parallel()
 
@@ -412,10 +408,9 @@ func TestContextRetry_SucceedsAfterTrim(t *testing.T) {
 	}
 }
 
-// TestContextRetry_ExhaustsAndEmitsGraceful verifies that when ErrContextLength
-// always fires, the harness exhausts the retry bound and emits exactly ONE
-// graceful message.completed{finishReason:"context_length"}.
-// It must NOT emit turn.failed alongside it.
+// TestContextRetry_ExhaustsAndEmitsGraceful verifies that when ErrContextLength always fires, the harness exhausts the
+// retry bound and emits exactly ONE graceful message.completed{finishReason:"context_length"}. It must NOT emit
+// turn.failed alongside it.
 func TestContextRetry_ExhaustsAndEmitsGraceful(t *testing.T) {
 	t.Parallel()
 
@@ -456,9 +451,9 @@ func TestContextRetry_ExhaustsAndEmitsGraceful(t *testing.T) {
 		t.Errorf("turn.failed count = %d, want 0 — context_length exhaust must NOT emit turn.failed", failedCount)
 	}
 
-	// The call count must be exactly 1 original attempt + MaxContextRetries (= 2).
-	// A regression that skips retries would call the gateway fewer times and still
-	// emit a graceful context_length terminal — the lower bound catches it.
+	// The call count must be exactly 1 original attempt + MaxContextRetries (= 2). A regression that skips retries
+	// would call the gateway fewer times and still emit a graceful context_length terminal — the lower bound catches
+	// it.
 	const wantCallCount = 1 + 2 // 1 original + MaxContextRetries
 	if gw.callCount != wantCallCount {
 		t.Errorf("gateway called %d times, want exactly %d (1 original + 2 retries)", gw.callCount, wantCallCount)
@@ -482,17 +477,16 @@ func TestContextRetry_BoundedRetries(t *testing.T) {
 	convID := id.New()
 	_ = startAndWaitCompletion(t, h, s, p, convID, bus)
 
-	// Total calls must be exactly 1 original attempt + maxRetries. The lower bound
-	// catches a regression that emits the graceful terminal after fewer retries than
-	// configured (e.g. off-by-one in the retry counter).
+	// Total calls must be exactly 1 original attempt + maxRetries. The lower bound catches a regression that emits the
+	// graceful terminal after fewer retries than configured (e.g. off-by-one in the retry counter).
 	wantCallCount := 1 + maxRetries
 	if gw.callCount != wantCallCount {
 		t.Errorf("gateway called %d times, want exactly %d (1 + MaxContextRetries=%d)", gw.callCount, wantCallCount, maxRetries)
 	}
 }
 
-// TestContextRetry_DefaultConfigApplied verifies that zero-value Config applies the
-// default MaxContextRetries (2) and HistoryTokenBudget (50_000).
+// TestContextRetry_DefaultConfigApplied verifies that zero-value Config applies the default MaxContextRetries (2) and
+// HistoryTokenBudget (50_000).
 func TestContextRetry_DefaultConfigApplied(t *testing.T) {
 	t.Parallel()
 
@@ -508,9 +502,8 @@ func TestContextRetry_DefaultConfigApplied(t *testing.T) {
 	convID := id.New()
 	_ = startAndWaitCompletion(t, h, s, p, convID, bus)
 
-	// Default MaxContextRetries=2 → exactly 3 calls (1 original + 2 retries).
-	// The lower bound catches a regression where the default is not applied and
-	// the harness calls once and immediately emits the graceful terminal.
+	// Default MaxContextRetries=2 → exactly 3 calls (1 original + 2 retries). The lower bound catches a regression
+	// where the default is not applied and the harness calls once and immediately emits the graceful terminal.
 	const wantCallCount = 1 + 2 // default MaxContextRetries=2
 	if gw.callCount != wantCallCount {
 		t.Errorf("gateway called %d times with default config, want exactly %d (1 original + 2 default retries)", gw.callCount, wantCallCount)
@@ -519,9 +512,9 @@ func TestContextRetry_DefaultConfigApplied(t *testing.T) {
 
 // ── FIX 2: stream-level ErrContextLength must not consume step budget ────────
 
-// streamCLThenSucceedChatter behaves like contextLengthThenSucceedChatter but
-// returns ErrContextLength as a STREAM-LEVEL error (after setup succeeds), not
-// at the Chat() call level. This exercises the stream-level CL branch in run().
+// streamCLThenSucceedChatter behaves like contextLengthThenSucceedChatter but returns ErrContextLength as a
+// STREAM-LEVEL error (after setup succeeds), not at the Chat() call level. This exercises the stream-level CL branch
+// in run().
 type streamCLThenSucceedChatter struct {
 	mu        sync.Mutex
 	failsLeft int
@@ -576,11 +569,9 @@ func (c *alwaysStreamCLChatter) Chat(_ context.Context, _ gateway.ChatRequest) (
 	}, nil
 }
 
-// TestContextRetry_StreamLevel_DoesNotConsumeStepBudget verifies that a
-// stream-level ErrContextLength retries without advancing the step counter.
-// The gateway is called failFirst times with a stream-level CL error, then
-// succeeds. The turn must complete with finishReason "stop", not "step_cap",
-// meaning the CL retries did NOT burn step budget.
+// TestContextRetry_StreamLevel_DoesNotConsumeStepBudget verifies that a stream-level ErrContextLength retries without
+// advancing the step counter. The gateway is called failFirst times with a stream-level CL error, then succeeds. The
+// turn must complete with finishReason "stop", not "step_cap", meaning the CL retries did NOT burn step budget.
 func TestContextRetry_StreamLevel_DoesNotConsumeStepBudget(t *testing.T) {
 	t.Parallel()
 
@@ -588,9 +579,8 @@ func TestContextRetry_StreamLevel_DoesNotConsumeStepBudget(t *testing.T) {
 	p := makeTestUserWithProfile(t, s, "UTC", "en-US", "en", "Stream CL Person")
 	bus := &fakeBus{}
 
-	// Fail twice at stream level, then succeed. With MaxContextRetries=2 and
-	// StepCap=2, if each stream-CL retry consumed a step the turn would exhaust
-	// the step cap before reaching the success; it must NOT do that.
+	// Fail twice at stream level, then succeed. With MaxContextRetries=2 and StepCap=2, if each stream-CL retry
+	// consumed a step the turn would exhaust the step cap before reaching the success; it must NOT do that.
 	gw := newStreamCLChatter(2, []gateway.Chunk{{TextDelta: "stream retry ok"}, {Done: true}})
 
 	h := buildHarnessWithClock(t, s, gw, bus, time.Now,
@@ -621,19 +611,18 @@ func TestContextRetry_StreamLevel_DoesNotConsumeStepBudget(t *testing.T) {
 	if failedCount != 0 {
 		t.Errorf("turn.failed count = %d, want 0", failedCount)
 	}
-	// The stream-CL retries must not be "free" in both directions: if the harness
-	// retried fewer than MaxContextRetries times it would still reach the success
-	// path early — but here gw fails 2 times then succeeds, so callCount must be 3.
+	// The stream-CL retries must not be "free" in both directions: if the harness retried fewer than MaxContextRetries
+	// times it would still reach the success path early — but here gw fails 2 times then succeeds, so callCount must
+	// be 3.
 	const wantCallCount = 3 // 2 stream-CL failures + 1 success
 	if gw.callCount != wantCallCount {
 		t.Errorf("gateway called %d times, want exactly %d (2 stream-CL failures + 1 success)", gw.callCount, wantCallCount)
 	}
 }
 
-// TestContextRetry_StreamLevel_ExhaustsGracefully verifies that when stream-level
-// ErrContextLength always fires the harness exhausts maxContextRetries, emits
-// exactly ONE message.completed{finishReason:"context_length"}, and calls the
-// gateway at most 1+maxContextRetries times.
+// TestContextRetry_StreamLevel_ExhaustsGracefully verifies that when stream-level ErrContextLength always fires the
+// harness exhausts maxContextRetries, emits exactly ONE message.completed{finishReason:"context_length"}, and calls
+// the gateway at most 1+maxContextRetries times.
 func TestContextRetry_StreamLevel_ExhaustsGracefully(t *testing.T) {
 	t.Parallel()
 
@@ -670,9 +659,9 @@ func TestContextRetry_StreamLevel_ExhaustsGracefully(t *testing.T) {
 	if failedCount != 0 {
 		t.Errorf("turn.failed count = %d, want 0 — stream CL exhaust must not emit turn.failed", failedCount)
 	}
-	// Exact lower+upper bound: MaxContextRetries=2 → exactly 3 calls (1 original + 2
-	// stream-CL retries). Under-retrying (e.g. retrying only once) would still emit a
-	// graceful context_length terminal, so the lower bound is load-bearing here.
+	// Exact lower+upper bound: MaxContextRetries=2 → exactly 3 calls (1 original + 2 stream-CL retries). Under-retrying
+	// (e.g. retrying only once) would still emit a graceful context_length terminal, so the lower bound is load-bearing
+	// here.
 	const wantCallCount = 1 + 2 // 1 original + MaxContextRetries=2
 	if gw.callCount != wantCallCount {
 		t.Errorf("gateway called %d times, want exactly %d (1 original + MaxContextRetries=2 retries)", gw.callCount, wantCallCount)

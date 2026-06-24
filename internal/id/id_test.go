@@ -8,12 +8,10 @@ import (
 	"github.com/qovira/qovira/internal/id"
 )
 
-// crockfordAlphabet is the set of valid characters in a Crockford base32 ULID.
-// ULIDs must NOT contain I, L, O, or U.
+// crockfordAlphabet is the set of valid characters in a Crockford base32 ULID. ULIDs must NOT contain I, L, O, or U.
 const crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-// isValidCrockford reports whether every rune in s belongs to the Crockford
-// base32 alphabet.
+// isValidCrockford reports whether every rune in s belongs to the Crockford base32 alphabet.
 func isValidCrockford(s string) bool {
 	for _, c := range s {
 		found := false
@@ -42,8 +40,8 @@ func TestNew_Length(t *testing.T) {
 	}
 }
 
-// TestNew_CrockfordAlphabet verifies that generated ids only contain valid
-// Crockford base32 characters (no I, L, O, or U).
+// TestNew_CrockfordAlphabet verifies that generated ids only contain valid Crockford base32 characters (no I, L, O,
+// or U).
 func TestNew_CrockfordAlphabet(t *testing.T) {
 	t.Parallel()
 
@@ -79,9 +77,8 @@ func TestNew_CrockfordAlphabet(t *testing.T) {
 	}
 }
 
-// TestNew_Monotonic generates a large sequence of ids in a tight loop and
-// asserts that they are already sorted in lexicographic order (monotonic) with
-// no duplicates.  Because the loop is tight, many ids will share the same
+// TestNew_Monotonic generates a large sequence of ids in a tight loop and asserts that they are already sorted in
+// lexicographic order (monotonic) with no duplicates.  Because the loop is tight, many ids will share the same
 // millisecond, exercising the within-millisecond monotonic increment.
 func TestNew_Monotonic(t *testing.T) {
 	t.Parallel()
@@ -92,8 +89,8 @@ func TestNew_Monotonic(t *testing.T) {
 		ids[i] = id.New()
 	}
 
-	// Assert sorted order — the slice must already be in ascending
-	// lexicographic order (monotonic generation guarantee).
+	// Assert sorted order — the slice must already be in ascending lexicographic order (monotonic generation
+	// guarantee).
 	for i := 1; i < n; i++ {
 		if ids[i] <= ids[i-1] {
 			t.Fatalf("ids not monotonically increasing at index %d: %q <= %q", i, ids[i], ids[i-1])
@@ -109,8 +106,8 @@ func TestNew_Monotonic(t *testing.T) {
 		seen[v] = struct{}{}
 	}
 
-	// Double-check with sort.SliceIsSorted to make the failure message clearer
-	// in case the monotonic property is violated.
+	// Double-check with sort.SliceIsSorted to make the failure message clearer in case the monotonic property is
+	// violated.
 	if !sort.StringsAreSorted(ids) {
 		t.Fatal("id sequence is not sorted — monotonic property violated")
 	}

@@ -6,9 +6,8 @@ package gateway
 //   - GET  /v1/models              → JSON model list
 //   - POST /v1/chat/completions    → SSE stream
 //
-// The "unreachable" case uses a server that is closed before the probe runs.
-// For "bad key", the handler returns 401 when the bearer token does not match
-// an expected sentinel.
+// The "unreachable" case uses a server that is closed before the probe runs. For "bad key", the handler returns
+// 401 when the bearer token does not match an expected sentinel.
 //
 // All tests run under -race.
 
@@ -77,9 +76,8 @@ func writeSSEProbe(w http.ResponseWriter, payload string) {
 //     if mismatched); returns modelsBody as JSON.
 //   - On POST /v1/chat/completions: streams chatSSE as an SSE response.
 //
-// If wantKey is empty, no bearer validation is performed.
-// If customHandler is non-nil it replaces the default routing entirely,
-// allowing individual test cases to inject arbitrary per-path behaviour.
+// If wantKey is empty, no bearer validation is performed. If customHandler is non-nil it replaces the default
+// routing entirely, allowing individual test cases to inject arbitrary per-path behaviour.
 func newProbeServer(t *testing.T, wantKey, modelsBody, chatSSE string, customHandler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 
@@ -125,8 +123,7 @@ func newProbeServer(t *testing.T, wantKey, modelsBody, chatSSE string, customHan
 	return srv
 }
 
-// newProbeGateway builds a Gateway pointed at srv with the given API key and
-// model name.
+// newProbeGateway builds a Gateway pointed at srv with the given API key and model name.
 func newProbeGateway(t *testing.T, baseURL, apiKey, model string) *Gateway {
 	t.Helper()
 	fs := newFakeSettings(
@@ -150,8 +147,8 @@ func TestProbe_TableDriven(t *testing.T) {
 	tests := []struct {
 		name string
 
-		// server setup — empty chatSSE means no chat endpoint needed.
-		// customHandler, when non-nil, replaces the default routing entirely.
+		// server setup — empty chatSSE means no chat endpoint needed. customHandler, when non-nil, replaces the
+		// default routing entirely.
 		serverKey     string           // key the server expects (empty = no auth check)
 		modelsBody    string           // JSON to return from /v1/models
 		chatSSE       string           // SSE payload from /v1/chat/completions
@@ -264,8 +261,7 @@ func TestProbe_TableDriven(t *testing.T) {
 			wantModelServed: false,
 		},
 
-		// (a) Chat endpoint responds with application/json (not SSE):
-		// Streaming=false, ToolCalling=false, Err=nil.
+		// (a) Chat endpoint responds with application/json (not SSE): Streaming=false, ToolCalling=false, Err=nil.
 		{
 			name:   "chat_non_streaming_content_type",
 			apiKey: goodKey,
@@ -292,8 +288,8 @@ func TestProbe_TableDriven(t *testing.T) {
 			wantStreaming:   false,
 		},
 
-		// (b) Chat endpoint responds with text/event-stream but garbage JSON:
-		// Streaming=false, Err wraps ErrUpstreamProtocol.
+		// (b) Chat endpoint responds with text/event-stream but garbage JSON: Streaming=false, Err wraps
+		// ErrUpstreamProtocol.
 		{
 			name:   "chat_malformed_sse_json",
 			apiKey: goodKey,
@@ -319,8 +315,7 @@ func TestProbe_TableDriven(t *testing.T) {
 			wantErrIs:       ErrUpstreamProtocol,
 		},
 
-		// (c) Models step succeeds but chat step returns 500:
-		// Reachable=true, ModelServed=true, Err wraps ErrUpstream.
+		// (c) Models step succeeds but chat step returns 500: Reachable=true, ModelServed=true, Err wraps ErrUpstream.
 		{
 			name:   "chat_step_non2xx_500",
 			apiKey: goodKey,
@@ -346,8 +341,7 @@ func TestProbe_TableDriven(t *testing.T) {
 			wantErrIs:       ErrUpstream,
 		},
 
-		// (d) Models step returns 500 (non-auth, non-2xx):
-		// Reachable=true, Err wraps ErrUpstream, no step 2.
+		// (d) Models step returns 500 (non-auth, non-2xx): Reachable=true, Err wraps ErrUpstream, no step 2.
 		{
 			name:   "models_step_non2xx_500",
 			apiKey: goodKey,
@@ -367,8 +361,8 @@ func TestProbe_TableDriven(t *testing.T) {
 			wantErrIs:       ErrUpstream,
 		},
 
-		// (e) Models step returns 200 with non-JSON body:
-		// Reachable=true, Err non-nil (decode error), ModelServed=false.
+		// (e) Models step returns 200 with non-JSON body: Reachable=true, Err non-nil (decode error),
+		//     ModelServed=false.
 		{
 			name:   "models_step_malformed_json",
 			apiKey: goodKey,
@@ -483,9 +477,9 @@ func TestModelsEndpointURL(t *testing.T) {
 	}
 }
 
-// TestChatEndpointURL_StillPasses verifies that refactoring chatEndpointURL to
-// call joinEndpointURL did not change its observable behaviour.  The canonical test
-// lives in client_test.go; this is a smoke-check that the delegation is correct.
+// TestChatEndpointURL_StillPasses verifies that refactoring chatEndpointURL to call joinEndpointURL did not change its
+// observable behaviour.  The canonical test lives in client_test.go; this is a smoke-check that the delegation is
+// correct.
 func TestChatEndpointURL_AfterRefactor(t *testing.T) {
 	t.Parallel()
 
@@ -501,20 +495,18 @@ func TestChatEndpointURL_AfterRefactor(t *testing.T) {
 
 // ── Concurrent-use safety ─────────────────────────────────────────────────────
 
-// TestGateway_ConcurrentUse locks in the package-doc claim that "each exported
-// type in this package is safe for concurrent use". It fires N concurrent
-// [Gateway.Chat] calls and N concurrent [Gateway.Probe] calls against a shared
-// Gateway and httptest.Server, fully drains every returned iterator, and relies
-// on -race to surface any data races.
+// TestGateway_ConcurrentUse locks in the package-doc claim that "each exported type in this package is safe for
+// concurrent use". It fires N concurrent [Gateway.Chat] calls and N concurrent [Gateway.Probe] calls against a
+// shared Gateway and httptest.Server, fully drains every returned iterator, and relies on -race to surface any
+// data races.
 //
-// The Chat fan-out counts successful drains and asserts all N completed, so a
-// regression that makes every Chat setup silently fail cannot produce a false
-// green.
+// The Chat fan-out counts successful drains and asserts all N completed, so a regression that makes every Chat
+// setup silently fail cannot produce a false green.
 //
 // Run with: go test -race ./internal/gateway/...
 func TestGateway_ConcurrentUse(t *testing.T) {
-	// Do NOT call t.Parallel() — this test's own goroutine fan-out already
-	// exercises concurrency and -race catches races within a single test.
+	// Do NOT call t.Parallel() — this test's own goroutine fan-out already exercises concurrency and -race catches
+	// races within a single test.
 
 	const N = 8 // goroutines per method
 
@@ -527,28 +519,26 @@ func TestGateway_ConcurrentUse(t *testing.T) {
 
 	// N concurrent Chat calls — each fully drains its iterator.
 	for range N {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			seq, err := gw.Chat(context.Background(), ChatRequest{
 				Messages: []Message{{Role: "user", Content: "hi"}},
 			})
 			if err != nil {
 				return // setup error — counted as not drained
 			}
-			for range seq {
+			// Fully drain the iterator (observing any per-yield error) so the gateway goroutine runs to completion.
+			for _, streamErr := range seq {
+				_ = streamErr
 			}
 			chatDrains.Add(1)
-		}()
+		})
 	}
 
 	// N concurrent Probe calls.
 	for range N {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			gw.Probe(context.Background(), RoleChat)
-		}()
+		})
 	}
 
 	wg.Wait()

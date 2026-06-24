@@ -3,13 +3,13 @@ package reminders_test
 // tools_test.go — TDD tests for Module.Tools() (slice 5: AI tool adapters).
 //
 // Acceptance criteria (each independently verified):
-//  1. Tool-vs-REST equivalence: create via tool and via REST produce the same row,
-//     same reminder.created event, and same fire-job EnqueueRequest.
+//  1. Tool-vs-REST equivalence: create via tool and via REST produce the same row, same reminder.created event,
+//     and same fire-job EnqueueRequest.
 //  2. update/complete/delete route to Service methods and emit the same events.
 //  3. Risk tiers: create/update/complete = RiskWrite, delete = RiskDestructive.
 //  4. Validation errors (bad dueAt/rrule/tz) surface as *capability.ToolError.
-//  5. Five tools are registered on the capability registry (four write/destructive
-//     from slice 5 + list_reminders RiskRead from slice 6).
+//  5. Five tools are registered on the capability registry (four write/destructive from slice 5 + list_reminders
+//     RiskRead from slice 6).
 
 import (
 	"context"
@@ -55,8 +55,8 @@ func encodeArgs(t *testing.T, v any) json.RawMessage {
 
 // ── AC5: Tools() returns five tools registered on the registry ───────────────
 
-// TestTools_ReturnsFiveTools verifies that Module.Tools() returns exactly five
-// tools: the four write/destructive tools and the new list_reminders read tool.
+// TestTools_ReturnsFiveTools verifies that Module.Tools() returns exactly five tools: the four write/destructive tools
+// and the new list_reminders read tool.
 func TestTools_ReturnsFiveTools(t *testing.T) {
 	t.Parallel()
 
@@ -85,8 +85,8 @@ func TestTools_ReturnsFiveTools(t *testing.T) {
 	}
 }
 
-// TestTools_RegisteredOnCapabilityRegistry verifies that all five tools appear
-// in the capability registry after reg.Add(module).
+// TestTools_RegisteredOnCapabilityRegistry verifies that all five tools appear in the capability registry after
+// reg.Add(module).
 func TestTools_RegisteredOnCapabilityRegistry(t *testing.T) {
 	t.Parallel()
 
@@ -179,13 +179,12 @@ func TestTools_HaveSchemas(t *testing.T) {
 
 // ── AC1: create_reminder tool-vs-REST equivalence ────────────────────────────
 
-// TestTool_CreateReminder_SameAsRESTCreate verifies that calling the
-// create_reminder tool produces the same persisted row, same reminder.created
-// event type, and same fire-job EnqueueRequest shape as POST /api/v1/reminders.
+// TestTool_CreateReminder_SameAsRESTCreate verifies that calling the create_reminder tool produces the same persisted
+// row, same reminder.created event type, and same fire-job EnqueueRequest shape as POST /api/v1/reminders.
 //
-// "Same shape" means: identical field values on the persisted reminder (title,
-// notes, dueAt, tz, autoComplete, status), same event Type, same EnqueueRequest
-// Kind/Key/RunAt/Recurrence. The IDs naturally differ between the two calls.
+// "Same shape" means: identical field values on the persisted reminder (title, notes, dueAt, tz, autoComplete,
+// status), same event Type, same EnqueueRequest Kind/Key/RunAt/Recurrence. The IDs naturally differ between the two
+// calls.
 func TestTool_CreateReminder_SameAsRESTCreate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -243,8 +242,7 @@ func TestTool_CreateReminder_SameAsRESTCreate(t *testing.T) {
 
 	toolReminder, ok := toolRes.(reminders.Reminder)
 	if !ok {
-		// Try JSON round-trip in case the tool returns a concrete type that needs
-		// marshalling.
+		// Try JSON round-trip in case the tool returns a concrete type that needs marshalling.
 		b, _ := json.Marshal(toolRes)
 		if unmarshalErr := json.Unmarshal(b, &toolReminder); unmarshalErr != nil {
 			t.Fatalf("create_reminder result not a Reminder; got %T: %v", toolRes, toolRes)
@@ -307,8 +305,8 @@ func TestTool_CreateReminder_SameAsRESTCreate(t *testing.T) {
 
 // ── AC2: update_reminder routes to Service.Update ─────────────────────────────
 
-// TestTool_UpdateReminder_EmitsUpdatedEvent verifies that update_reminder calls
-// Service.Update and emits the same "reminder.updated" event as the PATCH path.
+// TestTool_UpdateReminder_EmitsUpdatedEvent verifies that update_reminder calls Service.Update and emits the same
+// "reminder.updated" event as the PATCH path.
 func TestTool_UpdateReminder_EmitsUpdatedEvent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -368,8 +366,8 @@ func TestTool_UpdateReminder_EmitsUpdatedEvent(t *testing.T) {
 	}
 }
 
-// TestTool_UpdateReminder_AbsentFieldsPreserved verifies the merge semantics:
-// fields not present in the tool args are left unchanged in the Service.
+// TestTool_UpdateReminder_AbsentFieldsPreserved verifies the merge semantics: fields not present in the tool args are
+// left unchanged in the Service.
 func TestTool_UpdateReminder_AbsentFieldsPreserved(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -424,8 +422,8 @@ func TestTool_UpdateReminder_AbsentFieldsPreserved(t *testing.T) {
 	}
 }
 
-// TestTool_CompleteReminder_EmitsCompletedEvent verifies that complete_reminder
-// calls Service.Complete and emits "reminder.completed".
+// TestTool_CompleteReminder_EmitsCompletedEvent verifies that complete_reminder calls Service.Complete and emits
+// "reminder.completed".
 func TestTool_CompleteReminder_EmitsCompletedEvent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -478,8 +476,8 @@ func TestTool_CompleteReminder_EmitsCompletedEvent(t *testing.T) {
 	}
 }
 
-// TestTool_DeleteReminder_EmitsDeletedEvent verifies that delete_reminder calls
-// Service.Delete and emits "reminder.deleted".
+// TestTool_DeleteReminder_EmitsDeletedEvent verifies that delete_reminder calls Service.Delete and emits
+// "reminder.deleted".
 func TestTool_DeleteReminder_EmitsDeletedEvent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -526,8 +524,8 @@ func TestTool_DeleteReminder_EmitsDeletedEvent(t *testing.T) {
 
 // ── AC4: ValidationError → *capability.ToolError ─────────────────────────────
 
-// TestTool_CreateReminder_BadDueAt_ReturnsToolError verifies that a malformed
-// dueAt from the model surfaces as *capability.ToolError (model-correctable).
+// TestTool_CreateReminder_BadDueAt_ReturnsToolError verifies that a malformed dueAt from the model surfaces as
+// *capability.ToolError (model-correctable).
 func TestTool_CreateReminder_BadDueAt_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -566,8 +564,8 @@ func TestTool_CreateReminder_BadDueAt_ReturnsToolError(t *testing.T) {
 	}
 }
 
-// TestTool_CreateReminder_BadRrule_ReturnsToolError verifies that an invalid
-// RRULE string surfaces as *capability.ToolError.
+// TestTool_CreateReminder_BadRrule_ReturnsToolError verifies that an invalid RRULE string surfaces as
+// *capability.ToolError.
 func TestTool_CreateReminder_BadRrule_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -604,9 +602,9 @@ func TestTool_CreateReminder_BadRrule_ReturnsToolError(t *testing.T) {
 	}
 }
 
-// TestTool_CreateReminder_BadRrule_MessageIsClean verifies that the *capability.ToolError
-// message produced for an invalid RRULE does not contain raw library error text
-// and does include a helpful FREQ= example so the model can self-correct.
+// TestTool_CreateReminder_BadRrule_MessageIsClean verifies that the *capability.ToolError message produced for an
+// invalid RRULE does not contain raw library error text and does include a helpful FREQ= example so the model can
+// self-correct.
 func TestTool_CreateReminder_BadRrule_MessageIsClean(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -648,8 +646,8 @@ func TestTool_CreateReminder_BadRrule_MessageIsClean(t *testing.T) {
 	}
 }
 
-// TestTool_CreateReminder_BadTz_ReturnsToolError verifies that an invalid IANA
-// timezone string surfaces as *capability.ToolError.
+// TestTool_CreateReminder_BadTz_ReturnsToolError verifies that an invalid IANA timezone string surfaces as
+// *capability.ToolError.
 func TestTool_CreateReminder_BadTz_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -686,8 +684,8 @@ func TestTool_CreateReminder_BadTz_ReturnsToolError(t *testing.T) {
 	}
 }
 
-// TestTool_UpdateReminder_BadDueAt_ReturnsToolError verifies that update_reminder
-// with a malformed dueAt surfaces as *capability.ToolError.
+// TestTool_UpdateReminder_BadDueAt_ReturnsToolError verifies that update_reminder with a malformed dueAt surfaces as
+// *capability.ToolError.
 func TestTool_UpdateReminder_BadDueAt_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -727,9 +725,8 @@ func TestTool_UpdateReminder_BadDueAt_ReturnsToolError(t *testing.T) {
 	}
 }
 
-// TestTool_CompleteReminder_NotFound_ReturnsToolError verifies that complete_reminder
-// with a non-existent or other-user's id surfaces as *capability.ToolError (not a
-// plain infrastructure error).
+// TestTool_CompleteReminder_NotFound_ReturnsToolError verifies that complete_reminder with a non-existent or
+// other-user's id surfaces as *capability.ToolError (not a plain infrastructure error).
 func TestTool_CompleteReminder_NotFound_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -757,8 +754,8 @@ func TestTool_CompleteReminder_NotFound_ReturnsToolError(t *testing.T) {
 	}
 }
 
-// TestTool_DeleteReminder_NotFound_ReturnsToolError verifies that delete_reminder
-// with a non-existent id surfaces as *capability.ToolError.
+// TestTool_DeleteReminder_NotFound_ReturnsToolError verifies that delete_reminder with a non-existent id surfaces as
+// *capability.ToolError.
 func TestTool_DeleteReminder_NotFound_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -786,8 +783,8 @@ func TestTool_DeleteReminder_NotFound_ReturnsToolError(t *testing.T) {
 	}
 }
 
-// TestTool_UpdateReminder_NotFound_ReturnsToolError verifies that update_reminder
-// with a non-existent id surfaces as *capability.ToolError.
+// TestTool_UpdateReminder_NotFound_ReturnsToolError verifies that update_reminder with a non-existent id surfaces as
+// *capability.ToolError.
 func TestTool_UpdateReminder_NotFound_ReturnsToolError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -820,8 +817,8 @@ func TestTool_UpdateReminder_NotFound_ReturnsToolError(t *testing.T) {
 
 // ── AC2: side-by-side event equivalence (update/complete/delete) ──────────────
 
-// TestTool_UpdateReminder_SameEventAsREST asserts that the tool path and the
-// Service-direct path emit the same event type for a plain field update.
+// TestTool_UpdateReminder_SameEventAsREST asserts that the tool path and the Service-direct path emit the same event
+// type for a plain field update.
 func TestTool_UpdateReminder_SameEventAsREST(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -896,8 +893,8 @@ func TestTool_UpdateReminder_SameEventAsREST(t *testing.T) {
 	}
 }
 
-// TestTool_CompleteReminder_SameEventAsREST asserts that the tool emits the
-// same "reminder.completed" event as Service.Complete.
+// TestTool_CompleteReminder_SameEventAsREST asserts that the tool emits the same "reminder.completed" event as
+// Service.Complete.
 func TestTool_CompleteReminder_SameEventAsREST(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -968,8 +965,8 @@ func TestTool_CompleteReminder_SameEventAsREST(t *testing.T) {
 	}
 }
 
-// TestTool_DeleteReminder_SameEventAsREST asserts that the tool emits the same
-// "reminder.deleted" event as Service.Delete.
+// TestTool_DeleteReminder_SameEventAsREST asserts that the tool emits the same "reminder.deleted" event as
+// Service.Delete.
 func TestTool_DeleteReminder_SameEventAsREST(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -1041,8 +1038,8 @@ func TestTool_DeleteReminder_SameEventAsREST(t *testing.T) {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// reminderFromResult extracts a reminders.Reminder from a capability.Result.
-// It handles both direct type assertion and JSON round-trip for typed returns.
+// reminderFromResult extracts a reminders.Reminder from a capability.Result. It handles both direct type assertion
+// and JSON round-trip for typed returns.
 func reminderFromResult(t *testing.T, res capability.Result) reminders.Reminder {
 	t.Helper()
 	if r, ok := res.(reminders.Reminder); ok {

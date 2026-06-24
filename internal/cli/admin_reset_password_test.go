@@ -16,12 +16,11 @@ import (
 
 // ── test harness ──────────────────────────────────────────────────────────────
 
-// adminTestKey is the SQLCipher master key for all admin-command tests. Must be
-// at least 16 bytes to pass config validation.
+// adminTestKey is the SQLCipher master key for all admin-command tests. Must be at least 16 bytes to pass config
+// validation.
 const adminTestKey = "admin-test-key-which-is-long-enough"
 
-// fastAdminParams is a minimal-cost argon2id set so test hashing is fast while
-// still exercising the real code path.
+// fastAdminParams is a minimal-cost argon2id set so test hashing is fast while still exercising the real code path.
 var fastAdminParams = auth.Params{
 	Memory:  64,
 	Time:    1,
@@ -33,11 +32,9 @@ var fastAdminParams = auth.Params{
 // fastAdminPolicy requires 8 rune minimum so short test passwords are accepted.
 var fastAdminPolicy = auth.Policy{MinLen: 8, MaxLen: 64}
 
-// openAdminStore opens a fully-migrated SQLCipher store in a temp dir, seeds a
-// user with email and password "original-pass", and returns everything needed
-// to drive assertions. The store handle is returned so tests can read back
-// raw db.User rows (including PasswordHash) via db.New(s.Reader()). Cleanup is
-// registered with t.Cleanup.
+// openAdminStore opens a fully-migrated SQLCipher store in a temp dir, seeds a user with email and password
+// "original-pass", and returns everything needed to drive assertions. The store handle is returned so tests can read
+// back raw db.User rows (including PasswordHash) via db.New(s.Reader()). Cleanup is registered with t.Cleanup.
 func openAdminStore(t *testing.T, email string) (s *store.Store, dataDir string, hasher *auth.Hasher, svc *auth.Service, sessions *auth.Sessions, user auth.User) {
 	t.Helper()
 
@@ -80,9 +77,8 @@ func openAdminStore(t *testing.T, email string) (s *store.Store, dataDir string,
 	return s, dataDir, hasher, svc, sessions, user
 }
 
-// runAdminCmd sets env vars via t.Setenv, then delegates to runCmd. Callers
-// must not mark the parent test t.Parallel() because t.Setenv is incompatible
-// with parallel execution.
+// runAdminCmd sets env vars via t.Setenv, then delegates to runCmd. Callers must not mark the parent test t.Parallel()
+// because t.Setenv is incompatible with parallel execution.
 func runAdminCmd(t *testing.T, env map[string]string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	for k, v := range env {
@@ -91,8 +87,8 @@ func runAdminCmd(t *testing.T, env map[string]string, args ...string) (stdout, s
 	return runCmd(t, args...)
 }
 
-// mintTokens creates n sessions for userID and returns their plaintext tokens
-// so the test can later assert that Lookup returns ErrSessionNotFound.
+// mintTokens creates n sessions for userID and returns their plaintext tokens so the test can later assert that Lookup
+// returns ErrSessionNotFound.
 func mintTokens(t *testing.T, sessions *auth.Sessions, userID string, n int) []string {
 	t.Helper()
 	tokens := make([]string, n)
@@ -131,14 +127,12 @@ func adminEnv(dataDir string) map[string]string {
 
 // ── AC1 + AC2: success path — hash updated and sessions wiped ─────────────────
 
-// TestAdminResetPassword_Success verifies that reset-password with --password
-// succeeds (AC1), all pre-existing sessions are wiped (AC2), and the old
-// password no longer verifies against the persisted hash (AC1 negative check).
+// TestAdminResetPassword_Success verifies that reset-password with --password succeeds (AC1), all pre-existing sessions
+// are wiped (AC2), and the old password no longer verifies against the persisted hash (AC1 negative check).
 //
-// AC1 is verified end-to-end: after the command runs we read back the raw
-// db.User row (which carries PasswordHash) via db.New(s.Reader()).GetUserByEmail
-// and call Hasher.Verify against the PHC the command itself wrote — no
-// intermediate hash or UpdatePasswordHash call from the test.
+// AC1 is verified end-to-end: after the command runs we read back the raw db.User row (which carries PasswordHash) via
+// db.New(s.Reader()).GetUserByEmail and call Hasher.Verify against the PHC the command itself wrote — no intermediate
+// hash or UpdatePasswordHash call from the test.
 func TestAdminResetPassword_Success(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	const email = "reset-success@example.com"
@@ -164,8 +158,8 @@ func TestAdminResetPassword_Success(t *testing.T) {
 		t.Error("AC2: sessions still exist after reset-password")
 	}
 
-	// AC1: read back the PHC the command persisted directly from the DB layer —
-	// no intermediate Hash or UpdatePasswordHash from the test side.
+	// AC1: read back the PHC the command persisted directly from the DB layer — no intermediate Hash or
+	// UpdatePasswordHash from the test side.
 	row, err := db.New(s.Reader()).GetUserByEmail(context.Background(), strings.ToLower(strings.TrimSpace(email)))
 	if err != nil {
 		t.Fatalf("GetUserByEmail: %v", err)
@@ -192,9 +186,8 @@ func TestAdminResetPassword_Success(t *testing.T) {
 
 // ── AC3: policy violation is a no-op ─────────────────────────────────────────
 
-// TestAdminResetPassword_PolicyViolation verifies that a too-short new password
-// causes a non-zero exit and leaves both the existing hash and sessions intact.
-// auth.DefaultPolicy requires 12 runes minimum; "short" is 5 runes.
+// TestAdminResetPassword_PolicyViolation verifies that a too-short new password causes a non-zero exit and leaves both
+// the existing hash and sessions intact. auth.DefaultPolicy requires 12 runes minimum; "short" is 5 runes.
 func TestAdminResetPassword_PolicyViolation(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	const email = "policy-fail@example.com"
@@ -241,8 +234,8 @@ func TestAdminResetPassword_PolicyViolation(t *testing.T) {
 
 // ── AC4: unknown email → non-zero exit ───────────────────────────────────────
 
-// TestAdminResetPassword_UnknownEmail verifies that an unknown email address
-// yields a non-zero exit and a clear not-found message.
+// TestAdminResetPassword_UnknownEmail verifies that an unknown email address yields a non-zero exit and a clear
+// not-found message.
 func TestAdminResetPassword_UnknownEmail(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	const seed = "seed@example.com"
@@ -263,9 +256,8 @@ func TestAdminResetPassword_UnknownEmail(t *testing.T) {
 
 // ── AC5: --password-file trims trailing newline ───────────────────────────────
 
-// TestAdminResetPassword_PasswordFile verifies that --password-file reads the
-// file, strips a trailing newline (like shell echo or Docker secrets produce),
-// and succeeds with the trimmed value.
+// TestAdminResetPassword_PasswordFile verifies that --password-file reads the file, strips a trailing newline (like
+// shell echo or Docker secrets produce), and succeeds with the trimmed value.
 func TestAdminResetPassword_PasswordFile(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	const email = "pwfile@example.com"
@@ -298,8 +290,8 @@ func TestAdminResetPassword_PasswordFile(t *testing.T) {
 	}
 }
 
-// TestAdminResetPassword_PasswordFileNoTrailingNewline verifies that a file
-// without a trailing newline is also accepted (trim is idempotent).
+// TestAdminResetPassword_PasswordFileNoTrailingNewline verifies that a file without a trailing newline is also accepted
+// (trim is idempotent).
 func TestAdminResetPassword_PasswordFileNoTrailingNewline(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	const email = "pwfile-notrim@example.com"
@@ -321,8 +313,8 @@ func TestAdminResetPassword_PasswordFileNoTrailingNewline(t *testing.T) {
 
 // ── AC6: store requires master key ────────────────────────────────────────────
 
-// TestAdminResetPassword_NoMasterKey verifies that the command fails fast when
-// QOVIRA_MASTER_KEY is absent (config validation rejects it before any DB work).
+// TestAdminResetPassword_NoMasterKey verifies that the command fails fast when QOVIRA_MASTER_KEY is absent (config
+// validation rejects it before any DB work).
 func TestAdminResetPassword_NoMasterKey(t *testing.T) {
 	t.Parallel()
 
@@ -338,8 +330,7 @@ func TestAdminResetPassword_NoMasterKey(t *testing.T) {
 
 // ── flag-conflict guard ───────────────────────────────────────────────────────
 
-// TestAdminResetPassword_BothPasswordFlags verifies that supplying both
-// --password and --password-file is rejected.
+// TestAdminResetPassword_BothPasswordFlags verifies that supplying both --password and --password-file is rejected.
 func TestAdminResetPassword_BothPasswordFlags(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	const email = "both-flags@example.com"
@@ -361,8 +352,8 @@ func TestAdminResetPassword_BothPasswordFlags(t *testing.T) {
 
 // ── password never leaks into output ─────────────────────────────────────────
 
-// TestAdminResetPassword_PasswordNotInOutput verifies that the plaintext
-// password never appears in stdout or stderr on the success path.
+// TestAdminResetPassword_PasswordNotInOutput verifies that the plaintext password never appears in stdout or stderr on
+// the success path.
 func TestAdminResetPassword_PasswordNotInOutput(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	const email = "no-leak@example.com"

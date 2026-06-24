@@ -1,6 +1,6 @@
 // Tests for the conversation store rune logic.
-// Rune environment: node + Svelte compiler (vitest project "runes").
-// Uses flushSync to drain $derived updates synchronously.
+// Rune environment: node + Svelte compiler (vitest project "runes"). Uses flushSync to drain $derived updates
+// synchronously.
 import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -146,8 +146,8 @@ describe("applyStreamingDelta()", () => {
     const msg = getConversationHistory()[0];
     expect(msg?.role).toBe("assistant");
     expect(msg?.content).toBe("Hello");
-    // The streaming slot has a temporary placeholder id (not the real server id).
-    // Narrow to StreamingHistoryMessage to access the streaming marker.
+    // The streaming slot has a temporary placeholder id (not the real server id). Narrow to StreamingHistoryMessage to
+    // access the streaming marker.
     expect(msg !== undefined && isStreaming(msg) && msg.streaming).toBe(true);
   });
 
@@ -271,13 +271,12 @@ describe("finalizeStreamingMessage()", () => {
   });
 
   it("delta for a non-active conversation does not touch the active thread (guard in caller)", () => {
-    // The guard lives in the client/router, but we verify the store is side-effect-free
-    // when applyStreamingDelta is not called for the wrong conversation.
+    // The guard lives in the client/router, but we verify the store is side-effect-free when applyStreamingDelta is
+    // not called for the wrong conversation.
     setActiveConversation("conv-active", [makeMessage({ id: "m1", content: "A" })]);
     flushSync();
 
-    // Caller guards — does NOT call applyStreamingDelta for a different conversationId.
-    // Store stays pristine.
+    // Caller guards — does NOT call applyStreamingDelta for a different conversationId. Store stays pristine.
     expect(getConversationHistory()).toHaveLength(1);
     expect(getConversationHistory()[0]?.content).toBe("A");
   });
@@ -313,8 +312,8 @@ describe("resetConversation()", () => {
 
 describe("conversationId routing invariant", () => {
   it("applyStreamingDelta appends to the active history (guard is the caller's responsibility)", () => {
-    // The store itself doesn't filter by conversationId — the router/client does.
-    // We verify the store accumulates correctly when called.
+    // The store itself doesn't filter by conversationId — the router/client does. We verify the store accumulates
+    // correctly when called.
     setActiveConversation("conv-active", [makeMessage({ id: "m1", content: "A" })]);
     flushSync();
 
@@ -414,9 +413,8 @@ describe("appendMessage()", () => {
 });
 
 // ---------------------------------------------------------------------------
-// sessionStorage persistence — the active conversation id survives a reload
-// (reload-resilience, AC #4). The runes env is node (no sessionStorage), so we
-// install an in-memory Storage mock around these tests.
+// sessionStorage persistence — the active conversation id survives a reload (reload-resilience, AC #4). The runes env
+// is node (no sessionStorage), so we install an in-memory Storage mock around these tests.
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = "qovira:active-conversation";
@@ -476,19 +474,18 @@ describe("active-conversation persistence", () => {
 // ---------------------------------------------------------------------------
 // sendChatMessage — Fix #1 (M4): chat-send orchestration
 //
-// sendChatMessage(postFn, conversationId, text) encapsulates the POST /messages
-// flow so it is testable without rendering a route component:
+// sendChatMessage(postFn, conversationId, text) encapsulates the POST /messages flow so it is testable without
+// rendering a route component:
 //   - On success (data defined): calls appendMessage and returns null (no restore).
-//   - On problem+json error (result.error defined, no throw): returns text so
-//     the caller can restore the composer, and records a turn failure.
+//   - On problem+json error (result.error defined, no throw): returns text so the caller can restore the composer, and
+//     records a turn failure.
 //   - On thrown network error (postFn throws): same as the returned-error path.
 //
-// The postFn parameter is a narrow async function that takes (conversationId,
-// text) and resolves to the Api.POST FetchResponse shape — injected so tests
-// provide a hand fake without vi.mock.
+// The postFn parameter is a narrow async function that takes (conversationId, text) and resolves to the Api.POST
+// FetchResponse shape — injected so tests provide a hand fake without vi.mock.
 //
-// These tests MUST fail if the `result.error` branch is removed from
-// sendChatMessage (the original bug: text was silently dropped on 4xx/5xx).
+// These tests MUST fail if the `result.error` branch is removed from sendChatMessage (the original bug: text was
+// silently dropped on 4xx/5xx).
 // ---------------------------------------------------------------------------
 
 /** Minimal MessageResponse shape matching the server's 202 body. */
@@ -508,9 +505,8 @@ function makeSuccessPost(msg: MinimalMessageResponse): PostMessageFn {
 
 /** Build a postFn fake that resolves with a problem+json error (does NOT throw). */
 function makeErrorPost(errorPayload: object): PostMessageFn {
-  // Params required by type but unused — satisfied positionally.
-  // Cast via unknown: the error branch shape has data?: never which conflicts
-  // with { data: undefined } literally; at runtime both mean "no data".
+  // Params required by type but unused — satisfied positionally. Cast via unknown: the error branch shape has
+  // data?: never which conflicts with { data: undefined } literally; at runtime both mean "no data".
   return () =>
     Promise.resolve({ data: undefined, error: errorPayload, response: new Response() } as unknown as Awaited<
       ReturnType<PostMessageFn>
@@ -577,9 +573,9 @@ describe("sendChatMessage() — Fix #1 (M4): send-error handling", () => {
   // ---------------------------------------------------------------------------
   // Problem+json (returned error — the bug path, Fix #1 / M4)
   //
-  // The Api wrapper resolves { data: undefined, error: ProblemError } for 4xx/5xx.
-  // It does NOT throw. Before the fix, the error was ignored: text was cleared,
-  // nothing was appended, no error was shown — the user's message vanished silently.
+  // The Api wrapper resolves { data: undefined, error: ProblemError } for 4xx/5xx. It does NOT throw. Before the fix,
+  // the error was ignored: text was cleared, nothing was appended, no error was shown — the user's message vanished
+  // silently.
   // ---------------------------------------------------------------------------
 
   it("on returned problem+json error: returns the original text so the composer can be restored", async () => {
@@ -588,8 +584,7 @@ describe("sendChatMessage() — Fix #1 (M4): send-error handling", () => {
     const restoreText = await sendChatMessage(postFn, CONV_ID, "my typed message");
     flushSync();
 
-    // MUST return the text — this is the fix. Without the result.error branch,
-    // this returns null and the test fails.
+    // MUST return the text — this is the fix. Without the result.error branch, this returns null and the test fails.
     expect(restoreText).toBe("my typed message");
   });
 

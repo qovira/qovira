@@ -38,8 +38,8 @@ type ConversationDetail struct {
 	Messages  []HistoryMessage `json:"messages"`
 }
 
-// HistoryMessage is one message in the conversation history response.
-// Optional fields (ToolCalls, ToolCallID, FinishReason) are omitted when absent.
+// HistoryMessage is one message in the conversation history response. Optional fields (ToolCalls, ToolCallID,
+// FinishReason) are omitted when absent.
 type HistoryMessage struct {
 	ID           string          `json:"id"`
 	Role         string          `json:"role"`
@@ -53,8 +53,8 @@ type HistoryMessage struct {
 
 // ── Cursor helpers ────────────────────────────────────────────────────────────
 
-// convListCursor is the internal structure encoded into the opaque pagination cursor
-// for the conversations list. The keyset is (UpdatedAt DESC, ID DESC).
+// convListCursor is the internal structure encoded into the opaque pagination cursor for the conversations list. The
+// keyset is (UpdatedAt DESC, ID DESC).
 type convListCursor struct {
 	UpdatedAt string `json:"u"` // RFC 3339 UTC
 	ID        string `json:"i"`
@@ -66,8 +66,8 @@ func encodeConvCursor(updatedAt, id string) string {
 	return base64.RawStdEncoding.EncodeToString(raw)
 }
 
-// decodeConvCursor reverses encodeConvCursor. Returns an error when the input
-// is not valid base64 or its JSON is malformed.
+// decodeConvCursor reverses encodeConvCursor. Returns an error when the input is not valid base64 or its JSON is
+// malformed.
 func decodeConvCursor(cursor string) (updatedAt, id string, err error) {
 	raw, err := base64.RawStdEncoding.DecodeString(cursor)
 	if err != nil {
@@ -85,16 +85,13 @@ func decodeConvCursor(cursor string) (updatedAt, id string, err error) {
 
 // ── Preview truncation ────────────────────────────────────────────────────────
 
-// maxPreviewRunes is the maximum number of Unicode code points in a preview
-// before it is truncated with "...".
+// maxPreviewRunes is the maximum number of Unicode code points in a preview before it is truncated with "...".
 const maxPreviewRunes = 80
 
-// previewString coerces the generated preview column (typed interface{} because
-// it comes from a COALESCE expression) to a string. The query coalesces a missing
-// preview to an empty string, guaranteeing a non-NULL value; in practice the
-// SQLCipher driver returns a string, but a driver returning []byte for a TEXT
-// column is also handled. Any other shape (or nil) yields an empty string rather
-// than panicking — a missing preview, never a crash.
+// previewString coerces the generated preview column (typed interface{} because it comes from a COALESCE expression)
+// to a string. The query coalesces a missing preview to an empty string, guaranteeing a non-NULL value; in practice
+// the SQLCipher driver returns a string, but a driver returning []byte for a TEXT column is also handled. Any other
+// shape (or nil) yields an empty string rather than panicking — a missing preview, never a crash.
 func previewString(v any) string {
 	switch s := v.(type) {
 	case string:
@@ -106,8 +103,8 @@ func previewString(v any) string {
 	}
 }
 
-// truncatePreview returns content truncated to maxPreviewRunes runes with "..."
-// appended when truncation occurs. Returns the original string when short enough.
+// truncatePreview returns content truncated to maxPreviewRunes runes with "..." appended when truncation occurs.
+// Returns the original string when short enough.
 func truncatePreview(content string) string {
 	if utf8.RuneCountInString(content) <= maxPreviewRunes {
 		return content
@@ -118,8 +115,8 @@ func truncatePreview(content string) string {
 
 // ── List known params ─────────────────────────────────────────────────────────
 
-// listConvKnownParams is the set of accepted query parameter names for GET
-// /api/v1/conversations. Unknown names are rejected with 400 unknown_query_param.
+// listConvKnownParams is the set of accepted query parameter names for GET /api/v1/conversations. Unknown names are
+// rejected with 400 unknown_query_param.
 var listConvKnownParams = map[string]struct{}{
 	"cursor": {},
 	"limit":  {},
@@ -252,8 +249,8 @@ func (h *Harness) handleListConversations(w http.ResponseWriter, r *http.Request
 
 // handleGetConversation handles GET /api/v1/conversations/{id}.
 //
-// Returns the full chronological message history for the conversation.
-// 404 when the conversation doesn't exist or belongs to another user.
+// Returns the full chronological message history for the conversation. 404 when the conversation doesn't exist or
+// belongs to another user.
 func (h *Harness) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	principal, ok := httpx.PrincipalFromContext(r.Context())
 	if !ok {
@@ -319,9 +316,9 @@ func (h *Harness) handleGetConversation(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// historyMessageFromRow converts a db.ListMessagesRow to a HistoryMessage.
-// Nullable fields (ToolCalls, ToolCallID, FinishReason) are omitted when absent.
-// Tool message content is JSON — passed through verbatim as a string (not re-encoded).
+// historyMessageFromRow converts a db.ListMessagesRow to a HistoryMessage. Nullable fields (ToolCalls, ToolCallID,
+// FinishReason) are omitted when absent. Tool message content is JSON — passed through verbatim as a string (not
+// re-encoded).
 func historyMessageFromRow(m db.ListMessagesRow) HistoryMessage {
 	msg := HistoryMessage{
 		ID:        m.ID,

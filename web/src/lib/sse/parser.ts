@@ -1,9 +1,8 @@
 // SSE wire-frame parser.
 //
-// Parses raw SSE text (as accumulated in a read buffer) into typed SseFrame
-// objects. Each frame is terminated by a blank line ("\n\n" or "\r\n\r\n").
-// Incomplete frames at the end of a chunk are NOT returned — the caller must
-// buffer across reads and pass the remainder back on the next call.
+// Parses raw SSE text (as accumulated in a read buffer) into typed SseFrame objects. Each frame is terminated by a
+// blank line ("\n\n" or "\r\n\r\n"). Incomplete frames at the end of a chunk are NOT returned — the caller must buffer
+// across reads and pass the remainder back on the next call.
 //
 // Wire format per the SSE spec (HTML Living Standard, §9.2.6):
 //   event: <name>   -- optional; absent means "message"
@@ -26,20 +25,18 @@ export interface SseFrame {
 /**
  * Parse all complete SSE frames from a raw text buffer.
  *
- * Returns only frames that have at least a data field (pure comment frames
- * like ": ping\n\n" produce no output). Incomplete frames (no trailing blank
- * line) are silently dropped — the caller is responsible for buffering the
+ * Returns only frames that have at least a data field (pure comment frames like ": ping\n\n" produce no output).
+ * Incomplete frames (no trailing blank line) are silently dropped — the caller is responsible for buffering the
  * remainder across stream reads.
  */
 export function parseFrames(text: string): SseFrame[] {
   // Normalise CRLF → LF, then split on the blank-line frame boundary.
   const normalised = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  // A frame is terminated by "\n\n". Split on that separator.
-  // If the text ends with "\n\n" the last element is ""; if the text does NOT
-  // end with "\n\n" the last element is an incomplete frame and must be dropped.
+  // A frame is terminated by "\n\n". Split on that separator. If the text ends with "\n\n" the last element is ""; if
+  // the text does NOT end with "\n\n" the last element is an incomplete frame and must be dropped.
   const rawFrames = normalised.split("\n\n");
-  // Drop the last element: it is either "" (the trailing blank line after a
-  // complete frame — no content) or an incomplete frame with no blank terminator.
+  // Drop the last element: it is either "" (the trailing blank line after a complete frame — no content) or an
+  // incomplete frame with no blank terminator.
   const completeFrames = rawFrames.slice(0, -1);
 
   const result: SseFrame[] = [];

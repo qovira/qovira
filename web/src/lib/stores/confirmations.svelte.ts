@@ -1,18 +1,15 @@
 // Confirmation store — module-level singleton, reset on logout.
 //
-// Holds pending, resolved, and expired tool-confirmation cards for the active
-// conversation. Keyed by callId. Mirrors the tool-calls persistence pattern:
-// each entry carries an assistantMessageId so the card stays attached to the
+// Holds pending, resolved, and expired tool-confirmation cards for the active conversation. Keyed by callId. Mirrors
+// the tool-calls persistence pattern: each entry carries an assistantMessageId so the card stays attached to the
 // assistant turn that produced the confirmation.required event.
 //
-// While the turn is suspended (waiting on the user's decision) the
-// assistantMessageId is the in-flight streaming-slot sentinel
-// (STREAMING_SENTINEL_ID), the SAME anchor tool chips and streaming text use, so
-// the card renders under the in-flight assistant slot. The SSE client opens that
-// slot (ensureStreamingSlot) when the suspending turn emitted no preceding text.
-// When message.completed eventually fires (after the turn re-enters and finishes),
-// finalizeConfirmationsForMessage retags all in-flight entries to the real
-// messageId so the cards persist inline under the finalized turn.
+// While the turn is suspended (waiting on the user's decision) the assistantMessageId is the in-flight streaming-slot
+// sentinel (STREAMING_SENTINEL_ID), the SAME anchor tool chips and streaming text use, so the card renders under the
+// in-flight assistant slot. The SSE client opens that slot (ensureStreamingSlot) when the suspending turn emitted no
+// preceding text. When message.completed eventually fires (after the turn re-enters and finishes),
+// finalizeConfirmationsForMessage retags all in-flight entries to the real messageId so the cards persist inline under
+// the finalized turn.
 //
 // State machine per callId:
 //   confirmation.required  → state "pending"  (approve/deny card)
@@ -100,8 +97,8 @@ export function getConfirmations(): ConfirmationEntry[] {
 /**
  * Returns confirmation entries for a specific assistant message turn.
  *
- * During the suspension window, pass STREAMING_SENTINEL_ID to get in-flight
- * entries. After finalization, pass the real messageId.
+ * During the suspension window, pass STREAMING_SENTINEL_ID to get in-flight entries. After finalization, pass the real
+ * messageId.
  * Reactive — reads derive from this automatically.
  *
  * @param assistantMessageId - The message id (or sentinel) of the owning turn.
@@ -142,8 +139,8 @@ export function confirmationRequired(payload: ConfirmationRequiredPayload): void
 /**
  * Record that the user resolved a pending confirmation (approve or deny).
  *
- * Transitions the matching entry from "pending" to "resolved". No-op when the
- * callId is unknown or the entry is already in a terminal state.
+ * Transitions the matching entry from "pending" to "resolved". No-op when the callId is unknown or the entry is
+ * already in a terminal state.
  *
  * @param callId   - The callId from the originating confirmation.required event.
  * @param decision - The user's decision: "approve" or "deny".
@@ -211,9 +208,8 @@ export function confirmationExpired(callId: string): void {
 /**
  * Retag all confirmation entries from oldId to newId.
  *
- * Called alongside finalizeToolCallsForMessage when message.completed fires.
- * Confirmation entries are tagged with STREAMING_SENTINEL_ID while the turn is
- * suspended; this retag makes them persist under the real messageId after the
+ * Called alongside finalizeToolCallsForMessage when message.completed fires. Confirmation entries are tagged with
+ * STREAMING_SENTINEL_ID while the turn is suspended; this retag makes them persist under the real messageId after the
  * turn re-enters and the message.completed event arrives.
  *
  * @param oldId - The id to retag from (typically STREAMING_SENTINEL_ID).
@@ -241,19 +237,15 @@ export function resetConfirmations(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * POST the user's decision to the server and, only on success, record it in
- * the store.
+ * POST the user's decision to the server and, only on success, record it in the store.
  *
- * The Api wrapper does NOT throw on problem+json errors — it returns
- * `{ error: ProblemError }`. This function checks the returned error before
- * calling confirmationResolved, so a 409/404/422 response never falsely
- * flips the card to "Approved"/"Denied". A genuine network throw (the only
- * path the old catch handled) is also swallowed here so the caller can
- * unconditionally clear the `resolving` flag in a finally block.
+ * The Api wrapper does NOT throw on problem+json errors — it returns `{ error: ProblemError }`. This function checks
+ * the returned error before calling confirmationResolved, so a 409/404/422 response never falsely flips the card to
+ * "Approved"/"Denied". A genuine network throw (the only path the old catch handled) is also swallowed here so the
+ * caller can unconditionally clear the `resolving` flag in a finally block.
  *
- * On any error the card is left in its current state (pending or, if a
- * concurrent SSE event arrived, expired) — the user can retry or the expiry
- * path greys the card via the existing mechanism.
+ * On any error the card is left in its current state (pending or, if a concurrent SSE event arrived, expired) — the
+ * user can retry or the expiry path greys the card via the existing mechanism.
  *
  * @param entry    - The confirmation entry being resolved.
  * @param decision - The user's decision: "approve" or "deny".
@@ -265,16 +257,13 @@ export async function resolveConfirmation(entry: PendingConfirmation, decision: 
       body: { decision },
     });
     if (result.error !== undefined) {
-      // Server returned a problem+json error (409 already-resolved/expired,
-      // 404 unknown callId, 422 validation). Leave the card pending so the
-      // user can retry or the expiry path handles it naturally.
+      // Server returned a problem+json error (409 already-resolved/expired, 404 unknown callId, 422 validation). Leave
+      // the card pending so the user can retry or the expiry path handles it naturally.
       return;
     }
-    // 202 success — record the decision optimistically.
-    // The harness re-enters via SSE after this.
+    // 202 success — record the decision optimistically. The harness re-enters via SSE after this.
     confirmationResolved(entry.callId, decision);
   } catch {
-    // Genuine network throw (fetch failed, no response).
-    // Leave the card pending so the user can retry.
+    // Genuine network throw (fetch failed, no response). Leave the card pending so the user can retry.
   }
 }

@@ -4,14 +4,13 @@ package gateway
 
 // scripted.go — ScriptedChatter for deterministic E2E testing (e2e build tag only).
 //
-// ScriptedChatter implements harness.Chatter and emits a deterministic sequence
-// of streaming deltas, tool calls, and completion events per turn, driven by a
-// JSON script fixture.  It is physically absent from the default binary.
+// ScriptedChatter implements harness.Chatter and emits a deterministic sequence of streaming deltas, tool calls,
+// and completion events per turn, driven by a JSON script fixture.  It is physically absent from the default
+// binary.
 //
 // # Script fixture schema
 //
-// A fixture is a JSON object with a top-level "rules" array.  Each rule has a
-// "match" and a "rounds" array:
+// A fixture is a JSON object with a top-level "rules" array.  Each rule has a "match" and a "rounds" array:
 //
 //	{
 //	  "rules": [
@@ -45,39 +44,34 @@ package gateway
 //   - When both fields are non-empty the rule matches when EITHER condition holds.
 //   - The first matching rule wins (rules are evaluated in order).
 //
-// Round selection is stateless: the round index equals the number of non-user
-// (assistant or tool) messages that follow the latest user message in the
-// ChatRequest history.  Round 0 is the first response; round 1 is the response
-// after a tool result has been added to history; and so on.  This lets a
-// multi-round tool loop terminate correctly without any mutable per-conversation
-// state in the scripted provider.
+// Round selection is stateless: the round index equals the number of non-user (assistant or tool) messages that
+// follow the latest user message in the ChatRequest history.  Round 0 is the first response; round 1 is the
+// response after a tool result has been added to history; and so on.  This lets a multi-round tool loop
+// terminate correctly without any mutable per-conversation state in the scripted provider.
 //
-// When no rule matches, or the round index exceeds the rule's rounds array, the
-// provider emits a safe default reply (a short text delta + Done) rather than
-// hanging, and logs a warning.
+// When no rule matches, or the round index exceeds the rule's rounds array, the provider emits a safe default
+// reply (a short text delta + Done) rather than hanging, and logs a warning.
 //
 // # Result templating ($fromResult)
 //
-// A tool call's arguments may reference values from earlier tool results so that
-// E2E fixtures can, for example, create a reminder in one turn and then delete it
-// by its real server-generated id in a later turn.
+// A tool call's arguments may reference values from earlier tool results so that E2E fixtures can, for example,
+// create a reminder in one turn and then delete it by its real server-generated id in a later turn.
 //
 // Reference form — anywhere inside a tool call's arguments JSON, a value may be:
 //
 //	{"$fromResult": {"callId": "<earlier call id>", "path": "<dot path>"}}
 //
-// At emit time the scripted provider scans req.Messages for a message with
-// Role=="tool" && ToolCallID==callId (last match wins), JSON-parses its Content,
-// traverses the dot-separated path (numeric segments index into arrays, e.g.
-// "items.0.id"), and substitutes the resolved JSON value in place.
+// At emit time the scripted provider scans req.Messages for a message with Role=="tool" && ToolCallID==callId
+// (last match wins), JSON-parses its Content, traverses the dot-separated path (numeric segments index into
+// arrays, e.g. "items.0.id"), and substitutes the resolved JSON value in place.
 //
 // Example fixture fragment:
 //
 //	{ "toolCall": { "name": "delete_reminder",
 //	  "arguments": { "id": { "$fromResult": { "callId": "c-create-dentist", "path": "id" } } } } }
 //
-// For the create_reminder tool, the result JSON shape is the full Reminder
-// object returned by the service (same shape as the REST response):
+// For the create_reminder tool, the result JSON shape is the full Reminder object returned by the service (same
+// shape as the REST response):
 //
 //	{
 //	  "id":           "01JXXXXXXXXXXXXXXXXXXXXX",
@@ -93,15 +87,13 @@ package gateway
 //
 // To reference the generated id in a later tool call, use path "id".
 //
-// IMPORTANT: only tool calls whose id is explicitly set in the fixture (via the
-// "id" field on the toolCall object) are referenceable — auto-generated ids
-// (when "id" is omitted) receive a random value that cannot be predicted in the
-// fixture. Always set an explicit id on any tool call you intend to reference.
+// IMPORTANT: only tool calls whose id is explicitly set in the fixture (via the "id" field on the toolCall object)
+// are referenceable — auto-generated ids (when "id" is omitted) receive a random value that cannot be predicted
+// in the fixture. Always set an explicit id on any tool call you intend to reference.
 //
-// Fail-loud behaviour: if a reference cannot resolve — no matching tool message,
-// malformed result JSON, or a path segment that doesn't exist or indexes out of
-// range — Chat yields an error from the iterator and stops. Resolution errors
-// are never silent.
+// Fail-loud behaviour: if a reference cannot resolve — no matching tool message, malformed result JSON, or a
+// path segment that doesn't exist or indexes out of range — Chat yields an error from the iterator and stops.
+// Resolution errors are never silent.
 
 import (
 	"context"
@@ -129,13 +121,13 @@ type scriptFixture struct {
 type scriptRule struct {
 	// Match describes how to select this rule from the latest user message.
 	Match scriptMatch `json:"match"`
-	// Rounds is the ordered sequence of model responses; each round corresponds
-	// to one Chat call on the same conversation turn.
+	// Rounds is the ordered sequence of model responses; each round corresponds to one Chat call on the same
+	// conversation turn.
 	Rounds []scriptRound `json:"rounds"`
 }
 
-// scriptMatch describes the match condition for a rule.
-// Contains and Prefix are OR-ed; an empty string means "not checked".
+// scriptMatch describes the match condition for a rule. Contains and Prefix are OR-ed; an empty string means
+// "not checked".
 type scriptMatch struct {
 	// Contains is a case-insensitive substring that must appear in the user message.
 	Contains string `json:"contains,omitempty"`
@@ -149,20 +141,19 @@ type scriptRound struct {
 	Chunks []scriptChunk `json:"chunks"`
 }
 
-// scriptChunk describes one Chunk to emit.  Exactly one of TextDelta, ToolCall,
-// or Done should be meaningful per chunk (mirroring the Chunk type).
-// DelayMs is the time in milliseconds to wait before yielding this chunk, so a
+// scriptChunk describes one Chunk to emit.  Exactly one of TextDelta, ToolCall, or Done should be meaningful per
+// chunk (mirroring the Chunk type). DelayMs is the time in milliseconds to wait before yielding this chunk, so a
 // turn can be observed mid-stream.
 type scriptChunk struct {
 	// TextDelta is non-empty for text-content chunks.
 	TextDelta string `json:"textDelta,omitempty"`
-	// ToolCall, when non-nil, describes a tool call to emit.  The ID is
-	// auto-generated by ScriptedChatter if not explicitly provided.
+	// ToolCall, when non-nil, describes a tool call to emit.  The ID is auto-generated by ScriptedChatter if not
+	// explicitly provided.
 	ToolCall *scriptToolCall `json:"toolCall,omitempty"`
 	// Done marks the terminal chunk for this round.
 	Done bool `json:"done,omitempty"`
-	// DelayMs is the number of milliseconds to sleep before yielding this chunk.
-	// Keep values small in fixtures (e.g. 1–5 ms) to keep tests fast.
+	// DelayMs is the number of milliseconds to sleep before yielding this chunk. Keep values small in fixtures (e.g.
+	// 1–5 ms) to keep tests fast.
 	DelayMs int `json:"delayMs,omitempty"`
 }
 
@@ -172,22 +163,22 @@ type scriptToolCall struct {
 	ID string `json:"id,omitempty"`
 	// Name is the tool name (e.g. "create_reminder").
 	Name string `json:"name"`
-	// Arguments is the raw JSON arguments object.  Provided as json.RawMessage
-	// so any valid JSON object is accepted without an intermediate type.
+	// Arguments is the raw JSON arguments object.  Provided as json.RawMessage so any valid JSON object is accepted
+	// without an intermediate type.
 	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
 // ── ScriptedChatter ───────────────────────────────────────────────────────────
 
-// ScriptedChatter implements harness.Chatter with a deterministic scripted
-// response sequence loaded from a JSON fixture.  It is safe for concurrent use.
+// ScriptedChatter implements harness.Chatter with a deterministic scripted response sequence loaded from a JSON
+// fixture.  It is safe for concurrent use.
 type ScriptedChatter struct {
 	rules  []scriptRule
 	logger *slog.Logger
 }
 
-// NewScriptedChatterFromJSON constructs a ScriptedChatter from raw JSON fixture bytes.
-// Returns an error if the JSON is malformed.
+// NewScriptedChatterFromJSON constructs a ScriptedChatter from raw JSON fixture bytes. Returns an error if the
+// JSON is malformed.
 func NewScriptedChatterFromJSON(data []byte) (*ScriptedChatter, error) {
 	var fix scriptFixture
 	if err := json.Unmarshal(data, &fix); err != nil {
@@ -199,8 +190,7 @@ func NewScriptedChatterFromJSON(data []byte) (*ScriptedChatter, error) {
 	}, nil
 }
 
-// NewScriptedChatterFromFile constructs a ScriptedChatter by reading a fixture
-// file from the given path.
+// NewScriptedChatterFromFile constructs a ScriptedChatter by reading a fixture file from the given path.
 func NewScriptedChatterFromFile(path string) (*ScriptedChatter, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -209,22 +199,20 @@ func NewScriptedChatterFromFile(path string) (*ScriptedChatter, error) {
 	return NewScriptedChatterFromJSON(data)
 }
 
-// Chat implements harness.Chatter.  It selects the matching rule and round
-// index from req's message history, then returns an iterator that yields each
-// chunk (honouring per-chunk DelayMs and ctx cancellation).
+// Chat implements harness.Chatter.  It selects the matching rule and round index from req's message history,
+// then returns an iterator that yields each chunk (honouring per-chunk DelayMs and ctx cancellation).
 //
-// Rule and round selection is entirely stateless — no per-conversation state is
-// kept in ScriptedChatter.  See the package-level comment for the algorithm.
+// Rule and round selection is entirely stateless — no per-conversation state is kept in ScriptedChatter.  See
+// the package-level comment for the algorithm.
 //
-// $fromResult references in tool call arguments are resolved against
-// req.Messages at emit time.  If a reference cannot be resolved the iterator
-// yields an error and stops.
+// $fromResult references in tool call arguments are resolved against req.Messages at emit time.  If a reference
+// cannot be resolved the iterator yields an error and stops.
 func (sc *ScriptedChatter) Chat(ctx context.Context, req ChatRequest) (iter.Seq2[Chunk, error], error) {
 	chunks := sc.selectChunks(req)
 	seq := func(yield func(Chunk, error) bool) {
 		for _, sc := range chunks {
-			// Honour DelayMs before yielding — this lets a consumer observe a
-			// turn mid-stream (e.g. Playwright checking SSE events mid-turn).
+			// Honour DelayMs before yielding — this lets a consumer observe a turn mid-stream (e.g. Playwright checking
+			// SSE events mid-turn).
 			if sc.DelayMs > 0 {
 				delay := time.Duration(sc.DelayMs) * time.Millisecond
 				select {
@@ -257,8 +245,8 @@ func (sc *ScriptedChatter) Chat(ctx context.Context, req ChatRequest) (iter.Seq2
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// selectChunks picks the scriptChunks to emit for this Chat call.
-// It is the core of the stateless round-selection logic.
+// selectChunks picks the scriptChunks to emit for this Chat call. It is the core of the stateless
+// round-selection logic.
 func (sc *ScriptedChatter) selectChunks(req ChatRequest) []scriptChunk {
 	// 1. Find the latest user message index.
 	latestUserIdx := -1
@@ -311,9 +299,8 @@ func (sc *ScriptedChatter) selectChunks(req ChatRequest) []scriptChunk {
 	return defaultChunks()
 }
 
-// matchesRule reports whether the rule's match condition is satisfied by the
-// given user message.  Matching is case-insensitive.  When both Contains and
-// Prefix are non-empty, either condition suffices.
+// matchesRule reports whether the rule's match condition is satisfied by the given user message.  Matching is
+// case-insensitive.  When both Contains and Prefix are non-empty, either condition suffices.
 func matchesRule(m scriptMatch, userMsg string) bool {
 	lower := strings.ToLower(userMsg)
 	if m.Contains != "" && strings.Contains(lower, strings.ToLower(m.Contains)) {
@@ -325,10 +312,9 @@ func matchesRule(m scriptMatch, userMsg string) bool {
 	return false
 }
 
-// toChunk converts a scriptChunk into a gateway Chunk for emission.
-// msgs is the full ChatRequest.Messages slice used to resolve $fromResult
-// references in tool call arguments.  A resolution failure is returned as an
-// error; the caller must stop iteration and surface it.
+// toChunk converts a scriptChunk into a gateway Chunk for emission. msgs is the full ChatRequest.Messages slice
+// used to resolve $fromResult references in tool call arguments.  A resolution failure is returned as an error;
+// the caller must stop iteration and surface it.
 func toChunk(chunk scriptChunk, msgs []Message) (Chunk, error) {
 	if chunk.ToolCall != nil {
 		callID := chunk.ToolCall.ID
@@ -359,15 +345,13 @@ func toChunk(chunk scriptChunk, msgs []Message) (Chunk, error) {
 	}, nil
 }
 
-// resolveArguments walks the raw JSON arguments, replaces any $fromResult
-// marker objects with the resolved value from msgs, and re-marshals the result.
-// Arguments with no $fromResult markers are semantically equivalent to the
-// input — object keys may be reordered and whitespace normalised by the
-// decode-and-re-marshal round-trip, but all values are preserved faithfully.
+// resolveArguments walks the raw JSON arguments, replaces any $fromResult marker objects with the resolved value
+// from msgs, and re-marshals the result. Arguments with no $fromResult markers are semantically equivalent to
+// the input — object keys may be reordered and whitespace normalised by the decode-and-re-marshal round-trip,
+// but all values are preserved faithfully.
 func resolveArguments(args json.RawMessage, msgs []Message) (json.RawMessage, error) {
-	// Unmarshal into any so we can walk and mutate the tree. UseNumber keeps
-	// numeric literals as json.Number so they re-marshal without float64
-	// rounding (an integer id or count survives the round-trip intact).
+	// Unmarshal into any so we can walk and mutate the tree. UseNumber keeps numeric literals as json.Number so they
+	// re-marshal without float64 rounding (an integer id or count survives the round-trip intact).
 	var tree any
 	dec := json.NewDecoder(strings.NewReader(string(args)))
 	dec.UseNumber()
@@ -387,17 +371,15 @@ func resolveArguments(args json.RawMessage, msgs []Message) (json.RawMessage, er
 	return out, nil
 }
 
-// resolveNode recursively walks a decoded JSON value and replaces any
-// map[string]any that carries the "$fromResult" marker key with the looked-up
-// value from msgs.
+// resolveNode recursively walks a decoded JSON value and replaces any map[string]any that carries the "$fromResult"
+// marker key with the looked-up value from msgs.
 func resolveNode(node any, msgs []Message) (any, error) {
 	switch v := node.(type) {
 	case map[string]any:
-		// Check for the $fromResult marker first — if present, resolve and
-		// return the looked-up value directly (do not recurse into it). The
-		// marker must be the sole key: a sibling key signals a fixture mistake
-		// (a typo, or a misplaced reference) whose siblings would otherwise be
-		// silently dropped, so fail loud rather than guess the author's intent.
+		// Check for the $fromResult marker first — if present, resolve and return the looked-up value directly (do
+		// not recurse into it). The marker must be the sole key: a sibling key signals a fixture mistake (a typo,
+		// or a misplaced reference) whose siblings would otherwise be silently dropped, so fail loud rather than
+		// guess the author's intent.
 		if ref, ok := v["$fromResult"]; ok {
 			if len(v) != 1 {
 				return nil, fmt.Errorf(
@@ -441,9 +423,8 @@ type fromResultRef struct {
 	Path   string `json:"path"`
 }
 
-// resolveFromResult decodes the value of the "$fromResult" key and performs the
-// lookup against msgs.  It returns the resolved value (any — string/number/bool/
-// object/array) or an error.
+// resolveFromResult decodes the value of the "$fromResult" key and performs the lookup against msgs.  It returns
+// the resolved value (any — string/number/bool/object/array) or an error.
 func resolveFromResult(ref any, msgs []Message) (any, error) {
 	// Re-marshal and re-unmarshal via fromResultRef for type-safe field access.
 	refBytes, err := json.Marshal(ref)
@@ -471,8 +452,7 @@ func resolveFromResult(ref any, msgs []Message) (any, error) {
 		return nil, fmt.Errorf("scripted: resolve $fromResult: no tool result message found for callId %q", r.CallID)
 	}
 
-	// Parse the result JSON. UseNumber preserves numeric fidelity through the
-	// later re-marshal (see resolveArguments).
+	// Parse the result JSON. UseNumber preserves numeric fidelity through the later re-marshal (see resolveArguments).
 	var result any
 	rdec := json.NewDecoder(strings.NewReader(content))
 	rdec.UseNumber()
@@ -480,9 +460,8 @@ func resolveFromResult(ref any, msgs []Message) (any, error) {
 		return nil, fmt.Errorf("scripted: resolve $fromResult: parse result content for callId %q: %w", r.CallID, err)
 	}
 
-	// A path is required: extracting a specific value is the whole point, and an
-	// empty/misspelled path key (decoding to "") must not silently substitute the
-	// entire result object.
+	// A path is required: extracting a specific value is the whole point, and an empty/misspelled path key (decoding
+	// to "") must not silently substitute the entire result object.
 	if r.Path == "" {
 		return nil, fmt.Errorf("scripted: resolve $fromResult: path is required (callId %q)", r.CallID)
 	}
@@ -490,8 +469,8 @@ func resolveFromResult(ref any, msgs []Message) (any, error) {
 	return traversePath(result, segments, r.CallID, r.Path)
 }
 
-// traversePath walks the decoded JSON value following the dot-separated path
-// segments.  Numeric segments index into arrays.
+// traversePath walks the decoded JSON value following the dot-separated path segments.  Numeric segments index
+// into arrays.
 func traversePath(node any, segments []string, callID, fullPath string) (any, error) {
 	if len(segments) == 0 {
 		return node, nil
@@ -534,8 +513,8 @@ func traversePath(node any, segments []string, callID, fullPath string) (any, er
 	}
 }
 
-// defaultChunks returns the safe-default chunk sequence emitted when no rule
-// matches or the round index is out of range.
+// defaultChunks returns the safe-default chunk sequence emitted when no rule matches or the round index is out
+// of range.
 func defaultChunks() []scriptChunk {
 	return []scriptChunk{
 		{TextDelta: "[scripted provider: no matching script for this turn]"},

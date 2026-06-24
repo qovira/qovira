@@ -13,9 +13,8 @@ import (
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// newChatGateway builds a Gateway whose settings point at the provided
-// httptest.Server URL and uses the fast test resilience config (no real sleep,
-// tiny timeouts). The test is cleaned up automatically via t.Cleanup.
+// newChatGateway builds a Gateway whose settings point at the provided httptest.Server URL and uses the fast test
+// resilience config (no real sleep, tiny timeouts). The test is cleaned up automatically via t.Cleanup.
 func newChatGateway(t *testing.T, srv *httptest.Server) *Gateway {
 	t.Helper()
 	fs := newFakeSettings(
@@ -26,8 +25,7 @@ func newChatGateway(t *testing.T, srv *httptest.Server) *Gateway {
 	return newTestGateway(t, fs)
 }
 
-// collectChunks drives an iter.Seq2[Chunk, error] to completion and returns
-// all chunks and the first error encountered.
+// collectChunks drives an iter.Seq2[Chunk, error] to completion and returns all chunks and the first error encountered.
 func collectChunks(t *testing.T, seq func(yield func(Chunk, error) bool)) ([]Chunk, error) {
 	t.Helper()
 	var chunks []Chunk
@@ -44,9 +42,8 @@ func collectChunks(t *testing.T, seq func(yield func(Chunk, error) bool)) ([]Chu
 
 // ── AC1: streaming SSE yields correct Chunk sequence ─────────────────────────
 
-// TestChat_TextAndToolsStream verifies that Chat against an httptest.Server
-// streaming canned SSE yields text deltas + complete tool calls + Done with
-// Usage (AC1).
+// TestChat_TextAndToolsStream verifies that Chat against an httptest.Server streaming canned SSE yields text deltas +
+// complete tool calls + Done with Usage (AC1).
 func TestChat_TextAndToolsStream(t *testing.T) {
 	t.Parallel()
 
@@ -139,9 +136,8 @@ func TestChat_TextAndToolsStream(t *testing.T) {
 
 // ── AC2: outbound request has correct shape ───────────────────────────────────
 
-// TestChat_GoldenRequest verifies that the outbound POST to the endpoint
-// contains the correct JSON body: stream:true, Authorization: Bearer, and all
-// the mapped fields (AC2).
+// TestChat_GoldenRequest verifies that the outbound POST to the endpoint contains the correct JSON body: stream:true,
+// Authorization: Bearer, and all the mapped fields (AC2).
 func TestChat_GoldenRequest(t *testing.T) {
 	t.Parallel()
 
@@ -299,8 +295,7 @@ func TestChat_GoldenRequest(t *testing.T) {
 	}
 }
 
-// TestChat_GoldenRequest_NilOptionals verifies that nil Temperature and
-// MaxTokens are omitted from the request body.
+// TestChat_GoldenRequest_NilOptionals verifies that nil Temperature and MaxTokens are omitted from the request body.
 func TestChat_GoldenRequest_NilOptionals(t *testing.T) {
 	t.Parallel()
 
@@ -344,8 +339,7 @@ func TestChat_GoldenRequest_NilOptionals(t *testing.T) {
 	}
 }
 
-// TestChat_ToolChoiceModes verifies that all ToolChoice variants map to the
-// correct wire representations.
+// TestChat_ToolChoiceModes verifies that all ToolChoice variants map to the correct wire representations.
 func TestChat_ToolChoiceModes(t *testing.T) {
 	t.Parallel()
 
@@ -481,9 +475,8 @@ func TestChat_NonOK_Setup(t *testing.T) {
 
 // ── AC6: transport break mid-stream surfaces as a per-yield error ─────────────
 
-// TestChat_MidStreamTransportBreak verifies that a broken connection after the
-// 2xx response header arrives surfaces as a per-yield error on the iterator,
-// never panics, and never re-emits (AC6).
+// TestChat_MidStreamTransportBreak verifies that a broken connection after the 2xx response header arrives surfaces as
+// a per-yield error on the iterator, never panics, and never re-emits (AC6).
 //
 // Headline invariants:
 //  1. The iterator yields the text chunk before the break ("hi").
@@ -521,8 +514,7 @@ func TestChat_MidStreamTransportBreak(t *testing.T) {
 		t.Fatalf("Chat: unexpected setup error: %v", err)
 	}
 
-	// Drive the iterator, counting every yield so we can assert the
-	// no-re-emit invariant (yieldCount must be bounded).
+	// Drive the iterator, counting every yield so we can assert the no-re-emit invariant (yieldCount must be bounded).
 	var chunks []Chunk
 	var iterErr error
 	var yieldCount int
@@ -546,15 +538,14 @@ func TestChat_MidStreamTransportBreak(t *testing.T) {
 		t.Errorf("expected to see 'hi' text chunk before break; got: %v", chunks)
 	}
 
-	// Invariant 2: exactly two yields — the text chunk and then the error.
-	// A higher count would mean the iterator re-emitted after the error.
+	// Invariant 2: exactly two yields — the text chunk and then the error. A higher count would mean the iterator
+	// re-emitted after the error.
 	if yieldCount != 2 {
 		t.Errorf("yieldCount = %d, want 2 (one text chunk + one error yield); chunks = %v", yieldCount, chunks)
 	}
 
-	// Invariant 3: the error must be present and wrap ErrUpstreamProtocol.
-	// The abrupt TCP close surfaces as a scanner "unexpected EOF" which the
-	// stream layer maps to ErrMalformedStream → ErrUpstreamProtocol.
+	// Invariant 3: the error must be present and wrap ErrUpstreamProtocol. The abrupt TCP close surfaces as a scanner
+	// "unexpected EOF" which the stream layer maps to ErrMalformedStream → ErrUpstreamProtocol.
 	if iterErr == nil {
 		t.Error("expected a non-nil iterator error after mid-stream transport break")
 	} else if !errors.Is(iterErr, ErrUpstreamProtocol) {
@@ -562,9 +553,8 @@ func TestChat_MidStreamTransportBreak(t *testing.T) {
 	}
 }
 
-// TestChat_NoReemitAfterError verifies that once the iterator yields an error
-// it stops — no additional chunks are emitted afterward. We achieve this by
-// asserting the body was fully consumed (drainClose called) so the connection
+// TestChat_NoReemitAfterError verifies that once the iterator yields an error it stops — no additional chunks are
+// emitted afterward. We achieve this by asserting the body was fully consumed (drainClose called) so the connection
 // resource is freed.
 func TestChat_NoReemitAfterError(t *testing.T) {
 	t.Parallel()

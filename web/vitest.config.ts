@@ -9,11 +9,10 @@ import viteConfig from "./vite.config";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// SvelteKit provides the `$lib` alias and the `$app/*` virtual modules at build
-// time via its Vite plugin, which is not loaded under vitest. Mirror `$lib` so
-// test runtime resolves it the same way the app build does, and alias
-// `$app/navigation` to a stub so it is resolvable; suites that assert on
-// navigation override the stub with `vi.mock("$app/navigation", …)`.
+// SvelteKit provides the `$lib` alias and the `$app/*` virtual modules at build time via its Vite
+// plugin, which is not loaded under vitest. Mirror `$lib` so test runtime resolves it the same way
+// the app build does, and alias `$app/navigation` to a stub so it is resolvable; suites that assert
+// on navigation override the stub with `vi.mock("$app/navigation", …)`.
 const alias = {
   $lib: fileURLToPath(new URL("./src/lib", import.meta.url)),
   "$app/navigation": fileURLToPath(new URL("./src/tests/stubs/app-navigation.ts", import.meta.url)),
@@ -45,8 +44,8 @@ export default mergeConfig(
           },
         },
         {
-          // conditions adds "svelte" so @qovira/ui (svelte-condition-only exports)
-          // is resolvable from .svelte.test.ts suites that mock or import UI packages.
+          // conditions adds "svelte" so @qovira/ui (svelte-condition-only exports) is resolvable
+          // from .svelte.test.ts suites that mock or import UI packages.
           resolve: { alias, conditions: ["svelte", "import", "default"] },
           plugins: [svelte()],
           test: {
@@ -64,10 +63,9 @@ export default mergeConfig(
           },
         },
         {
-          // conditions adds "svelte" to the export-condition list so packages
-          // that only export under a "svelte" condition (e.g. @qovira/ui) are
-          // resolvable in the happy-dom test environment. SvelteKit's Vite plugin
-          // adds this condition at build time; here we mirror it for tests.
+          // conditions adds "svelte" to the export-condition list so packages that only export under
+          // a "svelte" condition (e.g. @qovira/ui) are resolvable in the happy-dom test environment.
+          // SvelteKit's Vite plugin adds this condition at build time; here we mirror it for tests.
           resolve: { alias, conditions: ["svelte", "browser", "import", "default"] },
           test: {
             name: "browser",
@@ -76,10 +74,9 @@ export default mergeConfig(
             exclude: ["src/**/*.svelte.test.ts", "src/lib/**/*.jsdom.test.ts"],
           },
         },
-        // Storybook story-as-tests — Vitest Browser Mode, Playwright/chromium.
-        // @storybook/addon-vitest transforms every *.stories.svelte / *.stories.ts
-        // into a test that renders the story and runs its play() function.
-        // CI: pnpm exec playwright install --with-deps chromium before this runs.
+        // Storybook story-as-tests — Vitest Browser Mode, Playwright/chromium. @storybook/addon-vitest
+        // transforms every *.stories.svelte / *.stories.ts into a test that renders the story and runs
+        // its play() function. CI: pnpm exec playwright install --with-deps chromium before this runs.
         {
           extends: true,
           plugins: [storybookTest({ configDir: path.join(dirname, ".storybook") })],

@@ -1,18 +1,16 @@
 <script lang="ts">
-  // ToolCallChip — renders the lifecycle of a single tool call inline in the
-  // assistant turn.
+  // ToolCallChip — renders the lifecycle of a single tool call inline in the assistant turn.
   //
   // States:
   //   started   → in-progress chip showing the argsSummary
   //   completed → entity card linking the affected row (or a calm "Done" for unknown shapes)
   //   failed    → soft recoverable error showing the model-safe error text
   //
-  // Security: argsSummary and error text flow through renderSafeMarkdown()
-  // before {@html} — the same pipeline used for assistant message content.
-  // No untrusted content is ever placed in {@html} without sanitization.
+  // Security: argsSummary and error text flow through renderSafeMarkdown() before {@html} — the same pipeline used for
+  // assistant message content. No untrusted content is ever placed in {@html} without sanitization.
   //
-  // list_reminders (RiskRead) resolves quietly: it shows no entity card link,
-  // just a minimal "Done" chip that fades into the background.
+  // list_reminders (RiskRead) resolves quietly: it shows no entity card link, just a minimal "Done" chip that fades
+  // into the background.
 
   import type { ToolCallEntry } from "$lib/stores/tool-calls.svelte.js";
   import { renderSafeMarkdown } from "$lib/markdown/sanitize.js";
@@ -49,8 +47,8 @@
   const { entry }: Props = $props();
 
   // ---------------------------------------------------------------------------
-  // Reminder tool names — the only entity-producing tools in v0.1.
-  // list_reminders is a read and resolves quietly (no entity card).
+  // Reminder tool names — the only entity-producing tools in v0.1. list_reminders is a read and resolves quietly (no
+  // entity card).
   // ---------------------------------------------------------------------------
 
   const REMINDER_WRITE_TOOLS = new Set(["create_reminder", "update_reminder", "complete_reminder", "delete_reminder"]);
@@ -74,8 +72,8 @@
   });
 
   // ---------------------------------------------------------------------------
-  // Derived: reminder entity from completed result (null when shape unrecognized).
-  // Parsed defensively — result is opaque unknown.
+  // Derived: reminder entity from completed result (null when shape unrecognized). Parsed defensively — result is
+  // opaque unknown.
   // ---------------------------------------------------------------------------
 
   function parseReminderResult(result: unknown): ReminderResult | null {
@@ -102,8 +100,8 @@
 
 {#if entry.state === "started"}
   <!--
-    In-progress chip: shows the in-progress label and the argsSummary.
-    argsSummary is model-produced JSON — sanitized before {@html}.
+    In-progress chip: shows the in-progress label and the argsSummary. argsSummary is model-produced JSON — sanitized
+    before {@html}.
   -->
   <div class="tool-chip tool-chip--started" role="status" aria-live="polite">
     <span class="tool-chip__spinner" aria-hidden="true"></span>
@@ -116,8 +114,7 @@
     <!-- Routine reads (list_reminders) resolve without visual noise. -->
   {:else if reminderEntity !== null}
     <!--
-      Entity card: links to /reminders (the reminders surface owns the row).
-      No per-id route exists in v0.1.
+      Entity card: links to /reminders (the reminders surface owns the row). No per-id route exists in v0.1.
     -->
     <a
       href="/reminders"
@@ -143,8 +140,7 @@
   {/if}
 {:else if entry.state === "failed"}
   <!--
-    Soft recoverable error: model-safe error text only.
-    error text is server-produced — sanitized before {@html}.
+    Soft recoverable error: model-safe error text only. error text is server-produced — sanitized before {@html}.
   -->
   <div class="tool-chip tool-chip--failed" role="alert">
     <span class="tool-chip__error-label">{tool_chip_error_label()}</span>

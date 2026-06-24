@@ -24,8 +24,8 @@ import (
 	"github.com/qovira/qovira/internal/store/db"
 )
 
-// ptrTrue and ptrFalse are pointers to bool literals, used wherever a *bool
-// argument is required. Using package-level variables avoids a helper function.
+// ptrTrue and ptrFalse are pointers to bool literals, used wherever a *bool argument is required. Using
+// package-level variables avoids a helper function.
 var (
 	ptrTrue  = func() *bool { b := true; return &b }()
 	ptrFalse = func() *bool { b := false; return &b }()
@@ -33,9 +33,8 @@ var (
 
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
-// fakeProducer records Enqueue, Reschedule, and Cancel calls and allows
-// controlled returns. The Reschedule field was extended in the
-// edit/complete/delete slice (AC1 guard test).
+// fakeProducer records Enqueue, Reschedule, and Cancel calls and allows controlled returns. The Reschedule
+// field was extended in the edit/complete/delete slice (AC1 guard test).
 type fakeProducer struct {
 	mu            sync.Mutex
 	enqueued      []scheduler.EnqueueRequest
@@ -165,8 +164,8 @@ func (f *fakeRegistrar) dispatch(ctx context.Context, kind string, job scheduler
 
 const testKey = "a-sufficiently-long-passphrase-for-sqlcipher-reminders"
 
-// openMigratedStore opens a fresh SQLCipher database on a temp file and runs
-// all migrations. It is closed via t.Cleanup. Never use ":memory:".
+// openMigratedStore opens a fresh SQLCipher database on a temp file and runs all migrations. It is closed via
+// t.Cleanup. Never use ":memory:".
 func openMigratedStore(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
@@ -185,8 +184,8 @@ func openMigratedStore(t *testing.T) *store.Store {
 	return s
 }
 
-// seedUser inserts a minimal user row directly so reminder tests have a valid
-// user_id without pulling in internal/auth.
+// seedUser inserts a minimal user row directly so reminder tests have a valid user_id without pulling in
+// internal/auth.
 func seedUser(t *testing.T, s *store.Store, userID, tz string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -208,8 +207,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 }
 
-// newTestModule builds a reminders.Module wired to the given fakes.  Returns
-// the module and the fakeRegistrar so tests can dispatch the fire handler.
+// newTestModule builds a reminders.Module wired to the given fakes.  Returns the module and the fakeRegistrar
+// so tests can dispatch the fire handler.
 func newTestModule(
 	t *testing.T,
 	st *store.Store,
@@ -229,8 +228,8 @@ func newScopeFor(userID string) store.Scope {
 
 // ── AC1: migration creates the table and index ─────────────────────────────
 
-// TestMigration_RemindersTable verifies that running migrations creates the
-// reminders table with all expected columns and the composite index.
+// TestMigration_RemindersTable verifies that running migrations creates the reminders table with all expected
+// columns and the composite index.
 func TestMigration_RemindersTable(t *testing.T) {
 	t.Parallel()
 	st := openMigratedStore(t)
@@ -300,9 +299,8 @@ VALUES ('R1','U1','Test',NULL,'2026-01-01T00:00:00Z',NULL,'UTC',1,'active',NULL,
 
 // ── AC2: POST /api/v1/reminders → 201 + Location ──────────────────────────
 
-// TestService_Create_Success verifies the Service.Create happy path:
-// persists the row, publishes reminder.created, enqueues a one-shot fire-job,
-// and stores the returned fire_job_id.
+// TestService_Create_Success verifies the Service.Create happy path: persists the row, publishes
+// reminder.created, enqueues a one-shot fire-job, and stores the returned fire_job_id.
 func TestService_Create_Success(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -884,9 +882,8 @@ func TestFireHandler_DeletedReminder_Permanent(t *testing.T) {
 	_ = permErr
 }
 
-// isPermanentError reports whether err is or wraps a permanent scheduler error.
-// It delegates to scheduler.IsPermanent so the check is structurally correct
-// and decoupled from the internal message string.
+// isPermanentError reports whether err is or wraps a permanent scheduler error. It delegates to
+// scheduler.IsPermanent so the check is structurally correct and decoupled from the internal message string.
 func isPermanentError(err error) bool {
 	return scheduler.IsPermanent(err)
 }
@@ -1045,8 +1042,8 @@ func TestService_Get_NotFound(t *testing.T) {
 	}
 }
 
-// isNotFoundError reports whether err wraps ErrNotFound.
-// It uses errors.Is so the check works correctly regardless of wrapping depth.
+// isNotFoundError reports whether err wraps ErrNotFound. It uses errors.Is so the check works correctly
+// regardless of wrapping depth.
 func isNotFoundError(err error) bool {
 	return errors.Is(err, reminders.ErrNotFound)
 }
@@ -1106,19 +1103,15 @@ func TestHTTP_Create_MalformedBody(t *testing.T) {
 
 // ── AC2 compensation: enqueue failure cleans up the row ──────────────────
 
-// TestService_Create_EnqueueFailure_CleansUpRow verifies that when Enqueue
-// returns an error after the row has been inserted, Create deletes the orphan
-// row (best-effort) and returns the original enqueue error.
+// TestService_Create_EnqueueFailure_CleansUpRow verifies that when Enqueue returns an error after the row has
+// been inserted, Create deletes the orphan row (best-effort) and returns the original enqueue error.
 //
-// The stamp-failure compensation path (Cancel + delete after SetReminderFireJobID
-// fails) requires injecting a failure into SetReminderFireJobID. From the
-// external test package this would require closing or replacing the write
-// connection, which would distort the production store's API surface. That
-// third path is therefore not covered by this test suite; the production code
-// carries a Cancel + deleteReminder sequence in that branch (reminders.go
-// ~419-432) that is compiler-verified by the existing build but not exercised
-// by a test. Any future refactor that moves SetReminderFireJobID behind an
-// injectable interface should add that coverage then.
+// The stamp-failure compensation path (Cancel + delete after SetReminderFireJobID fails) requires injecting a
+// failure into SetReminderFireJobID. From the external test package this would require closing or replacing the
+// write connection, which would distort the production store's API surface. That third path is therefore not
+// covered by this test suite; the production code carries a Cancel + deleteReminder sequence in that branch
+// (reminders.go ~419-432) that is compiler-verified by the existing build but not exercised by a test. Any
+// future refactor that moves SetReminderFireJobID behind an injectable interface should add that coverage then.
 func TestService_Create_EnqueueFailure_CleansUpRow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -1158,12 +1151,12 @@ func TestService_Create_EnqueueFailure_CleansUpRow(t *testing.T) {
 
 // ── AC5 extension: invalid profile tz falls back to UTC ──────────────────
 
-// TestService_Create_InvalidProfileTzFallsBackToUTC seeds a user whose profile
-// timezone is syntactically invalid ("Mars/Phobos"). Service.Create must still
-// succeed and snapshot tz as "UTC", locking the AC5 silent-fallback behavior.
+// TestService_Create_InvalidProfileTzFallsBackToUTC seeds a user whose profile timezone is syntactically invalid
+// ("Mars/Phobos"). Service.Create must still succeed and snapshot tz as "UTC", locking the AC5 silent-fallback
+// behavior.
 //
-// An explicitly supplied invalid tz still triggers a 422 (covered by
-// TestHTTP_Create_Validation/"invalid tz") — this case is distinct.
+// An explicitly supplied invalid tz still triggers a 422 (covered by TestHTTP_Create_Validation/"invalid tz") —
+// this case is distinct.
 func TestService_Create_InvalidProfileTzFallsBackToUTC(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -1192,9 +1185,8 @@ func TestService_Create_InvalidProfileTzFallsBackToUTC(t *testing.T) {
 
 // ── List / filter acceptance criteria ────────────────────────────────────
 
-// listResponse is the decoded JSON envelope for GET /api/v1/reminders.
-// NextCursor is *string so it decodes JSON null as nil (last page) vs. a
-// non-nil pointer to the opaque cursor string (more pages exist).
+// listResponse is the decoded JSON envelope for GET /api/v1/reminders. NextCursor is *string so it decodes JSON
+// null as nil (last page) vs. a non-nil pointer to the opaque cursor string (more pages exist).
 type listResponse struct {
 	Data       []reminders.Reminder `json:"data"`
 	Pagination struct {
@@ -1203,8 +1195,8 @@ type listResponse struct {
 	} `json:"pagination"`
 }
 
-// listRequest builds and fires GET /api/v1/reminders with the given query params
-// against the router, authenticated as userID.
+// listRequest builds and fires GET /api/v1/reminders with the given query params against the router,
+// authenticated as userID.
 func listRequest(t *testing.T, router *httpx.Router, userID string, params url.Values) *httptest.ResponseRecorder {
 	t.Helper()
 	u := "/api/v1/reminders"
@@ -1218,8 +1210,8 @@ func listRequest(t *testing.T, router *httpx.Router, userID string, params url.V
 	return w
 }
 
-// decodeListResponse decodes the response body into a listResponse, failing the
-// test immediately if anything goes wrong.
+// decodeListResponse decodes the response body into a listResponse, failing the test immediately if anything
+// goes wrong.
 func decodeListResponse(t *testing.T, w *httptest.ResponseRecorder) listResponse {
 	t.Helper()
 	if w.Code != http.StatusOK {
@@ -1232,9 +1224,9 @@ func decodeListResponse(t *testing.T, w *httptest.ResponseRecorder) listResponse
 	return resp
 }
 
-// seedReminder is a compact helper for seeding a reminder with a specific status.
-// It creates via the service (exercising the full create path), then if status is
-// "completed" it updates the row directly to avoid pulling in the complete slice.
+// seedReminder is a compact helper for seeding a reminder with a specific status. It creates via the service
+// (exercising the full create path), then if status is "completed" it updates the row directly to avoid pulling
+// in the complete slice.
 func seedReminder(
 	t *testing.T, svc *reminders.Service, st *store.Store, scope store.Scope,
 	title string, dueAt time.Time, status string,
@@ -1267,8 +1259,8 @@ func seedReminder(
 
 // ── AC1 (List): user isolation and dueAt order ────────────────────────────
 
-// TestList_UserIsolation_And_Order verifies that GET /api/v1/reminders returns
-// only the authenticated user's reminders, ordered by dueAt ascending.
+// TestList_UserIsolation_And_Order verifies that GET /api/v1/reminders returns only the authenticated user's
+// reminders, ordered by dueAt ascending.
 func TestList_UserIsolation_And_Order(t *testing.T) {
 	t.Parallel()
 	st := openMigratedStore(t)
@@ -1394,8 +1386,8 @@ func TestList_CursorPagination(t *testing.T) {
 	}
 
 	// 3. Over-max clamps to 100.
-	// Seed extra rows so 200 is beyond the real set (30 rows); clamping just means the
-	// single page returns all 30 with hasMore=false.
+	// Seed extra rows so 200 is beyond the real set (30 rows); clamping just means the single page returns all 30
+	// with hasMore=false.
 	w = listRequest(t, router, userID, url.Values{"limit": {"200"}})
 	resp = decodeListResponse(t, w)
 	if len(resp.Data) != total {
@@ -1461,8 +1453,8 @@ func TestList_StatusFilter(t *testing.T) {
 
 // ── AC4 (List): due-date window filters ──────────────────────────────────
 
-// TestList_DueDateWindow verifies ?dueBefore and ?dueAfter filters, individually
-// and combined, and combined with ?status.
+// TestList_DueDateWindow verifies ?dueBefore and ?dueAfter filters, individually and combined, and combined
+// with ?status.
 func TestList_DueDateWindow(t *testing.T) {
 	t.Parallel()
 	st := openMigratedStore(t)
@@ -1522,8 +1514,8 @@ func TestList_DueDateWindow(t *testing.T) {
 		t.Errorf("dueAfter+dueBefore window: got %d items, want 1", len(rab.Data))
 	}
 
-	// dueBefore + status=completed -> only r5 (due T+5h, completed), but r5 is outside
-	// the before window; combine dueAfter=T+4h with status=completed -> only r5.
+	// dueBefore + status=completed -> only r5 (due T+5h, completed), but r5 is outside the before window;
+	// combine dueAfter=T+4h with status=completed -> only r5.
 	wcs := listRequest(t, router, userID, url.Values{
 		"dueAfter": {before},
 		"status":   {"completed"},
@@ -1557,8 +1549,8 @@ func TestList_DueDateWindow(t *testing.T) {
 
 // ── AC5 (List): index plan ────────────────────────────────────────────────
 
-// eqpRows executes EXPLAIN QUERY PLAN for the given SQL + args and returns
-// the detail strings from each plan row.
+// eqpRows executes EXPLAIN QUERY PLAN for the given SQL + args and returns the detail strings from each plan
+// row.
 func eqpRows(t *testing.T, st *store.Store, sql string, args ...any) []string {
 	t.Helper()
 	rows, err := st.Reader().QueryContext(context.Background(), "EXPLAIN QUERY PLAN\n"+sql, args...)
@@ -1581,8 +1573,8 @@ func eqpRows(t *testing.T, st *store.Store, sql string, args ...any) []string {
 	return plans
 }
 
-// assertIndexPlan checks a slice of EQP plan details for index usage and
-// absence of full-scan / temp-sort indicators.
+// assertIndexPlan checks a slice of EQP plan details for index usage and absence of full-scan / temp-sort
+// indicators.
 func assertIndexPlan(t *testing.T, label string, plans []string) {
 	t.Helper()
 	t.Logf("EXPLAIN QUERY PLAN [%s]:", label)
@@ -1622,13 +1614,12 @@ func assertIndexPlan(t *testing.T, label string, plans []string) {
 	}
 }
 
-// TestListReminders_IndexPlan verifies via EXPLAIN QUERY PLAN that the
-// ListReminders query uses the reminders_user_due index on (user_id, due_at, id)
-// and produces no USE TEMP B-TREE FOR ORDER BY on either the no-status default
-// path or the status=active filtered path.
+// TestListReminders_IndexPlan verifies via EXPLAIN QUERY PLAN that the ListReminders query uses the
+// reminders_user_due index on (user_id, due_at, id) and produces no USE TEMP B-TREE FOR ORDER BY on either the
+// no-status default path or the status=active filtered path.
 //
-// Real rows are seeded so the SQLite query planner sees a non-empty table — an
-// empty table can produce degenerate plans that differ from production.
+// Real rows are seeded so the SQLite query planner sees a non-empty table — an empty table can produce
+// degenerate plans that differ from production.
 func TestListReminders_IndexPlan(t *testing.T) {
 	t.Parallel()
 	st := openMigratedStore(t)
@@ -1646,8 +1637,8 @@ func TestListReminders_IndexPlan(t *testing.T) {
 		seedReminder(t, svc, st, scope, fmt.Sprintf("plan row %d", i), base.Add(time.Duration(i)*time.Minute), "active")
 	}
 
-	// The SQL emitted by sqlc for ListReminders (positional ?N params).
-	// Keep in sync with the generated listReminders constant in reminders.sql.go.
+	// The SQL emitted by sqlc for ListReminders (positional ?N params). Keep in sync with the generated
+	// listReminders constant in reminders.sql.go.
 	const listSQL = `SELECT id, user_id, title, notes, due_at, rrule, tz,
        auto_complete, status, completed_at, last_fired_at,
        fire_job_id, created_at, updated_at
@@ -1697,8 +1688,8 @@ func TestList_MalformedCursor(t *testing.T) {
 
 // ── Service.List direct test ──────────────────────────────────────────────
 
-// TestService_List_FullFidelity verifies that Service.List returns the full
-// Reminder domain object (including notes), matching what Get returns.
+// TestService_List_FullFidelity verifies that Service.List returns the full Reminder domain object (including
+// notes), matching what Get returns.
 func TestService_List_FullFidelity(t *testing.T) {
 	t.Parallel()
 	st := openMigratedStore(t)
@@ -1746,8 +1737,7 @@ func TestService_List_FullFidelity(t *testing.T) {
 	}
 }
 
-// TestList_Unauthenticated verifies that GET /api/v1/reminders without a
-// principal returns 401.
+// TestList_Unauthenticated verifies that GET /api/v1/reminders without a principal returns 401.
 func TestList_Unauthenticated(t *testing.T) {
 	t.Parallel()
 	st := openMigratedStore(t)
@@ -1768,13 +1758,11 @@ func TestList_Unauthenticated(t *testing.T) {
 
 // ── AC5 (List): unknown query params → 400 ───────────────────────────────
 
-// TestList_UnknownQueryParam verifies that GET /api/v1/reminders rejects any
-// query parameter outside the known set (cursor, limit, status, dueBefore,
-// dueAfter) with 400 Bad Request per the HTTP house guide ("reject unknown
-// filter params rather than silently ignoring them").
+// TestList_UnknownQueryParam verifies that GET /api/v1/reminders rejects any query parameter outside the known
+// set (cursor, limit, status, dueBefore, dueAfter) with 400 Bad Request per the HTTP house guide ("reject
+// unknown filter params rather than silently ignoring them").
 //
-// A typo'd param like ?staus=completed must 400, not silently return the
-// unfiltered list with wrong data.
+// A typo'd param like ?staus=completed must 400, not silently return the unfiltered list with wrong data.
 func TestList_UnknownQueryParam(t *testing.T) {
 	t.Parallel()
 	st := openMigratedStore(t)
@@ -1824,8 +1812,8 @@ func TestList_UnknownQueryParam(t *testing.T) {
 	}
 }
 
-// TestList_NextCursorNullOnLastPage verifies that the last page of a list
-// response carries nextCursor=null (not "") per the HTTP house guide.
+// TestList_NextCursorNullOnLastPage verifies that the last page of a list response carries nextCursor=null (not
+// "") per the HTTP house guide.
 func TestList_NextCursorNullOnLastPage(t *testing.T) {
 	t.Parallel()
 	st := openMigratedStore(t)
@@ -1860,8 +1848,7 @@ func TestList_NextCursorNullOnLastPage(t *testing.T) {
 		t.Errorf("expected nextCursor=null on last page, got %q", *resp.Pagination.NextCursor)
 	}
 
-	// Verify raw JSON contains "nextCursor":null not "nextCursor":"".
-	// Re-issue the request to get the raw body.
+	// Verify raw JSON contains "nextCursor":null not "nextCursor":"". Re-issue the request to get the raw body.
 	w2 := listRequest(t, router, userID, url.Values{"limit": {"10"}})
 	raw := w2.Body.String()
 	if strings.Contains(raw, `"nextCursor":""`) {
@@ -1871,8 +1858,7 @@ func TestList_NextCursorNullOnLastPage(t *testing.T) {
 		t.Errorf("last-page JSON must contain nextCursor:null; got: %s", raw)
 	}
 
-	// Verify a first page (hasMore=true) emits a non-null cursor.
-	// Seed enough rows for a second page.
+	// Verify a first page (hasMore=true) emits a non-null cursor. Seed enough rows for a second page.
 	for i := range 30 {
 		seedReminder(t, svc, st, scope, fmt.Sprintf("extra %d", i), base.Add(time.Duration(i+3)*time.Hour), "active")
 	}
@@ -1899,9 +1885,8 @@ func TestList_NextCursorNullOnLastPage(t *testing.T) {
 
 // ── AC1: PATCH dueAt → Reschedule ────────────────────────────────────────────
 
-// TestService_Update_DueAt_Reschedules verifies that Update with a new dueAt on
-// an active reminder updates the row AND calls Reschedule on the producer with
-// the existing fire_job_id and the new canonical time.
+// TestService_Update_DueAt_Reschedules verifies that Update with a new dueAt on an active reminder updates the
+// row AND calls Reschedule on the producer with the existing fire_job_id and the new canonical time.
 func TestService_Update_DueAt_Reschedules(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -1966,8 +1951,8 @@ func TestService_Update_DueAt_Reschedules(t *testing.T) {
 	}
 }
 
-// TestHTTP_Patch_DueAt_200 verifies PATCH /api/v1/reminders/{id} with a new
-// dueAt returns 200 and the updated reminder JSON.
+// TestHTTP_Patch_DueAt_200 verifies PATCH /api/v1/reminders/{id} with a new dueAt returns 200 and the updated
+// reminder JSON.
 func TestHTTP_Patch_DueAt_200(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2017,8 +2002,8 @@ func TestHTTP_Patch_DueAt_200(t *testing.T) {
 
 // ── AC2: PATCH {status:"completed"} → Complete ───────────────────────────────
 
-// TestService_Complete_CancelsJob verifies that Complete sets status=completed,
-// sets completed_at, and Cancels the fire-job.
+// TestService_Complete_CancelsJob verifies that Complete sets status=completed, sets completed_at, and Cancels
+// the fire-job.
 func TestService_Complete_CancelsJob(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2060,8 +2045,7 @@ func TestService_Complete_CancelsJob(t *testing.T) {
 
 	// Cancel was called with the original job ID.
 	cancelled := prod.allCancelled()
-	// First cancel may be from Create compensation (not in this path); find the
-	// cancel matching the original job.
+	// First cancel may be from Create compensation (not in this path); find the cancel matching the original job.
 	var found bool
 	for _, jid := range cancelled {
 		if jid == origJobID {
@@ -2085,20 +2069,17 @@ func TestService_Complete_CancelsJob(t *testing.T) {
 	}
 }
 
-// TestService_Complete_Idempotent verifies that calling Complete on an already-
-// completed reminder does not error and does not cancel any additional job.
+// TestService_Complete_Idempotent verifies that calling Complete on an already-completed reminder does not error
+// and does not cancel any additional job.
 //
 // Production-code contract pinned here:
-//   - The first Complete: cancels the original fire-job and publishes
-//     reminder.completed once.
-//   - The second Complete: the fire_job_id is already cleared (NULL) so the
-//     cancel guard (`row.FireJobID.Valid && row.FireJobID.String != ""`) is
-//     false; no additional Cancel is issued. Another UpdateReminder write and
-//     a second reminder.completed publish do occur (the production code runs
-//     both unconditionally on every Complete call). This test pins that
-//     contract: the cancelled-job slice must contain the original job id
-//     exactly once, and reminder.completed must be published exactly twice
-//     (once per Complete call).
+//   - The first Complete: cancels the original fire-job and publishes reminder.completed once.
+//   - The second Complete: the fire_job_id is already cleared (NULL) so the cancel guard
+//     (`row.FireJobID.Valid && row.FireJobID.String != ""`) is false; no additional Cancel is issued. Another
+//     UpdateReminder write and a second reminder.completed publish do occur (the production code runs both
+//     unconditionally on every Complete call). This test pins that contract: the cancelled-job slice must
+//     contain the original job id exactly once, and reminder.completed must be published exactly twice (once per
+//     Complete call).
 func TestService_Complete_Idempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2134,9 +2115,8 @@ func TestService_Complete_Idempotent(t *testing.T) {
 		t.Fatalf("Complete (2nd, idempotent): %v", err)
 	}
 
-	// The cancelled list must still contain the original job id exactly once.
-	// No additional Cancel must have been issued by the second Complete (the
-	// fire_job_id was cleared after the first Complete; the cancel guard skips).
+	// The cancelled list must still contain the original job id exactly once. No additional Cancel must have been
+	// issued by the second Complete (the fire_job_id was cleared after the first Complete; the cancel guard skips).
 	cancelledAfterSecond := prod.allCancelled()
 	if len(cancelledAfterSecond) != len(cancelledAfterFirst) {
 		t.Errorf("second Complete must not Cancel any additional job: cancelled before=%v, after=%v",
@@ -2155,8 +2135,8 @@ func TestService_Complete_Idempotent(t *testing.T) {
 			origJobID, count, cancelledAfterSecond)
 	}
 
-	// reminder.completed must be published exactly twice (once per Complete call).
-	// The production code runs the publish unconditionally on every Complete.
+	// reminder.completed must be published exactly twice (once per Complete call). The production code runs the
+	// publish unconditionally on every Complete.
 	var completedCount int
 	for _, e := range bus.allEvents() {
 		if e.userID == userID && e.event.Type == "reminder.completed" {
@@ -2168,8 +2148,7 @@ func TestService_Complete_Idempotent(t *testing.T) {
 	}
 }
 
-// TestHTTP_Patch_Complete_200 verifies PATCH with status:"completed" routes to
-// Complete and returns 200.
+// TestHTTP_Patch_Complete_200 verifies PATCH with status:"completed" routes to Complete and returns 200.
 func TestHTTP_Patch_Complete_200(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2218,9 +2197,8 @@ func TestHTTP_Patch_Complete_200(t *testing.T) {
 
 // ── AC3: PATCH {status:"active"} on completed → re-open ──────────────────────
 
-// TestService_Update_Reopen_EnqueuesNewJob verifies that Update with
-// status="active" on a completed reminder clears completedAt, enqueues a fresh
-// fire-job, stores the new fire_job_id, and emits reminder.updated.
+// TestService_Update_Reopen_EnqueuesNewJob verifies that Update with status="active" on a completed reminder
+// clears completedAt, enqueues a fresh fire-job, stores the new fire_job_id, and emits reminder.updated.
 func TestService_Update_Reopen_EnqueuesNewJob(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2311,8 +2289,8 @@ func TestService_Update_Reopen_EnqueuesNewJob(t *testing.T) {
 	}
 }
 
-// TestHTTP_Patch_Reopen_200 verifies PATCH {status:"active"} on a completed
-// reminder returns 200 with the re-opened reminder.
+// TestHTTP_Patch_Reopen_200 verifies PATCH {status:"active"} on a completed reminder returns 200 with the
+// re-opened reminder.
 func TestHTTP_Patch_Reopen_200(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2364,8 +2342,8 @@ func TestHTTP_Patch_Reopen_200(t *testing.T) {
 
 // ── AC4: DELETE → 204 ────────────────────────────────────────────────────────
 
-// TestService_Delete_CancelsJobAndRemovesRow verifies that Delete removes the
-// row, Cancels the fire-job, and publishes reminder.deleted.
+// TestService_Delete_CancelsJobAndRemovesRow verifies that Delete removes the row, Cancels the fire-job, and
+// publishes reminder.deleted.
 func TestService_Delete_CancelsJobAndRemovesRow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2481,8 +2459,8 @@ func TestHTTP_Delete_204(t *testing.T) {
 
 // ── AC6: user-scoping ─────────────────────────────────────────────────────────
 
-// TestService_Update_OtherUser_NotFound verifies that Update on another user's
-// reminder returns ErrNotFound (not a mutation of the wrong row).
+// TestService_Update_OtherUser_NotFound verifies that Update on another user's reminder returns ErrNotFound (not
+// a mutation of the wrong row).
 func TestService_Update_OtherUser_NotFound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2517,8 +2495,7 @@ func TestService_Update_OtherUser_NotFound(t *testing.T) {
 	}
 }
 
-// TestService_Complete_OtherUser_NotFound verifies that Complete on another
-// user's reminder returns ErrNotFound.
+// TestService_Complete_OtherUser_NotFound verifies that Complete on another user's reminder returns ErrNotFound.
 func TestService_Complete_OtherUser_NotFound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2552,8 +2529,7 @@ func TestService_Complete_OtherUser_NotFound(t *testing.T) {
 	}
 }
 
-// TestService_Delete_OtherUser_NotFound verifies that Delete on another user's
-// reminder returns ErrNotFound.
+// TestService_Delete_OtherUser_NotFound verifies that Delete on another user's reminder returns ErrNotFound.
 func TestService_Delete_OtherUser_NotFound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2587,8 +2563,7 @@ func TestService_Delete_OtherUser_NotFound(t *testing.T) {
 	}
 }
 
-// TestHTTP_Patch_OtherUser_404 verifies that PATCH on another user's reminder
-// returns 404.
+// TestHTTP_Patch_OtherUser_404 verifies that PATCH on another user's reminder returns 404.
 func TestHTTP_Patch_OtherUser_404(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2627,8 +2602,7 @@ func TestHTTP_Patch_OtherUser_404(t *testing.T) {
 	}
 }
 
-// TestHTTP_Delete_OtherUser_404 verifies that DELETE on another user's reminder
-// returns 404.
+// TestHTTP_Delete_OtherUser_404 verifies that DELETE on another user's reminder returns 404.
 func TestHTTP_Delete_OtherUser_404(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2667,9 +2641,8 @@ func TestHTTP_Delete_OtherUser_404(t *testing.T) {
 
 // ── Guard test: dueAt change on COMPLETED reminder does NOT Reschedule ────────
 
-// TestService_Update_DueAt_Completed_NoReschedule verifies that changing dueAt
-// on a completed reminder (no active fire-job) updates the row but does NOT
-// call Reschedule — there is no live job to reschedule.
+// TestService_Update_DueAt_Completed_NoReschedule verifies that changing dueAt on a completed reminder (no
+// active fire-job) updates the row but does NOT call Reschedule — there is no live job to reschedule.
 func TestService_Update_DueAt_Completed_NoReschedule(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2726,9 +2699,8 @@ func TestService_Update_DueAt_Completed_NoReschedule(t *testing.T) {
 
 // ── Merge semantics: null clears nullable fields ──────────────────────────────
 
-// TestService_Update_NullClears verifies that PATCH merge semantics correctly
-// handle null (clear nullable fields) vs absent (leave unchanged) for notes and
-// rrule. Semantics: absent→unchanged; null→clear; value→set.
+// TestService_Update_NullClears verifies that PATCH merge semantics correctly handle null (clear nullable
+// fields) vs absent (leave unchanged) for notes and rrule. Semantics: absent→unchanged; null→clear; value→set.
 func TestService_Update_MergeSemantics_NullClears(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2798,13 +2770,11 @@ func TestService_Update_MergeSemantics_NullClears(t *testing.T) {
 // ── Item 1 / Item 2: combined-PATCH correctness ───────────────────────────────
 
 // TestHTTP_Patch_StatusCompleted_WithOtherFields verifies that PATCH with
-// {"status":"completed","title":"NewTitle"} persists BOTH the completion AND the
-// title change in one atomic write, and emits exactly one "reminder.completed"
-// event (not "reminder.updated").
+// {"status":"completed","title":"NewTitle"} persists BOTH the completion AND the title change in one atomic
+// write, and emits exactly one "reminder.completed" event (not "reminder.updated").
 //
-// Before the fix, patchHandler routed to Service.Complete the moment
-// body.Status=="completed", discarding the merged UpdateInput that carried the
-// title change.
+// Before the fix, patchHandler routed to Service.Complete the moment body.Status=="completed", discarding the
+// merged UpdateInput that carried the title change.
 func TestHTTP_Patch_StatusCompleted_WithOtherFields(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2896,10 +2866,9 @@ func TestHTTP_Patch_StatusCompleted_WithOtherFields(t *testing.T) {
 	}
 }
 
-// TestService_Update_StatusCompleted_EmitsCompletedEvent verifies that calling
-// Update with status="completed" on an active reminder emits "reminder.completed",
-// not "reminder.updated". This covers the Update code path directly (as opposed
-// to via HTTP).
+// TestService_Update_StatusCompleted_EmitsCompletedEvent verifies that calling Update with status="completed"
+// on an active reminder emits "reminder.completed", not "reminder.updated". This covers the Update code path
+// directly (as opposed to via HTTP).
 func TestService_Update_StatusCompleted_EmitsCompletedEvent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2951,9 +2920,8 @@ func TestService_Update_StatusCompleted_EmitsCompletedEvent(t *testing.T) {
 	}
 }
 
-// TestService_Complete_EmitsCompletedEvent verifies Service.Complete emits
-// "reminder.completed" (it already does — this test documents the contract so
-// any future refactor can't accidentally regress the event type).
+// TestService_Complete_EmitsCompletedEvent verifies Service.Complete emits "reminder.completed" (it already
+// does — this test documents the contract so any future refactor can't accidentally regress the event type).
 func TestService_Complete_EmitsCompletedEvent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2991,9 +2959,8 @@ func TestService_Complete_EmitsCompletedEvent(t *testing.T) {
 	}
 }
 
-// TestService_Update_Reopen_EmitsUpdatedEvent verifies that re-opening a
-// completed reminder (status: active) emits "reminder.updated", not
-// "reminder.completed".
+// TestService_Update_Reopen_EmitsUpdatedEvent verifies that re-opening a completed reminder (status: active)
+// emits "reminder.updated", not "reminder.completed".
 func TestService_Update_Reopen_EmitsUpdatedEvent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3056,8 +3023,8 @@ func TestService_Update_Reopen_EmitsUpdatedEvent(t *testing.T) {
 	}
 }
 
-// TestService_Update_PlainField_EmitsUpdatedEvent verifies a plain field update
-// (no status change) emits "reminder.updated".
+// TestService_Update_PlainField_EmitsUpdatedEvent verifies a plain field update (no status change) emits
+// "reminder.updated".
 func TestService_Update_PlainField_EmitsUpdatedEvent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3113,9 +3080,9 @@ func TestService_Update_PlainField_EmitsUpdatedEvent(t *testing.T) {
 	}
 }
 
-// TestService_Update_Active_AlreadyActive_NoNewJob verifies that calling Update
-// with status="active" on an already-active reminder is a no-op: no new fire-job
-// is enqueued (no duplicate job) and the reminder stays active.
+// TestService_Update_Active_AlreadyActive_NoNewJob verifies that calling Update with status="active" on an
+// already-active reminder is a no-op: no new fire-job is enqueued (no duplicate job) and the reminder stays
+// active.
 func TestService_Update_Active_AlreadyActive_NoNewJob(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3169,9 +3136,8 @@ func TestService_Update_Active_AlreadyActive_NoNewJob(t *testing.T) {
 // AC5: rrule change via Update cancels old job + enqueues fresh recurring one.
 // AC6: DST-spanning rule keeps wall-clock time.
 
-// TestCreate_RecurringFireJob_Arms_RecurringJob verifies AC1: creating a reminder
-// with a valid rrule enqueues a RECURRING fire-job (Recurrence field set with
-// RRULE and TZ), while a one-shot reminder gets nil Recurrence.
+// TestCreate_RecurringFireJob_Arms_RecurringJob verifies AC1: creating a reminder with a valid rrule enqueues a
+// RECURRING fire-job (Recurrence field set with RRULE and TZ), while a one-shot reminder gets nil Recurrence.
 func TestCreate_RecurringFireJob_Arms_RecurringJob(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3218,8 +3184,8 @@ func TestCreate_RecurringFireJob_Arms_RecurringJob(t *testing.T) {
 	}
 }
 
-// TestCreate_OneShotReminder_NilRecurrence verifies that a reminder without an
-// rrule still enqueues with nil Recurrence (regression guard for AC1).
+// TestCreate_OneShotReminder_NilRecurrence verifies that a reminder without an rrule still enqueues with nil
+// Recurrence (regression guard for AC1).
 func TestCreate_OneShotReminder_NilRecurrence(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3251,8 +3217,8 @@ func TestCreate_OneShotReminder_NilRecurrence(t *testing.T) {
 	}
 }
 
-// TestCreate_MalformedRrule_ValidationError verifies AC2: a malformed rrule on
-// Create returns a ValidationError (→ 422 at the REST layer).
+// TestCreate_MalformedRrule_ValidationError verifies AC2: a malformed rrule on Create returns a ValidationError
+// (→ 422 at the REST layer).
 func TestCreate_MalformedRrule_ValidationError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3346,8 +3312,8 @@ func TestHTTP_Create_MalformedRrule_422(t *testing.T) {
 	}
 }
 
-// TestUpdate_MalformedRrule_ValidationError verifies AC2: a malformed rrule on
-// Update also returns a ValidationError.
+// TestUpdate_MalformedRrule_ValidationError verifies AC2: a malformed rrule on Update also returns a
+// ValidationError.
 func TestUpdate_MalformedRrule_ValidationError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3392,10 +3358,9 @@ func TestUpdate_MalformedRrule_ValidationError(t *testing.T) {
 	}
 }
 
-// TestCreate_MalformedRrule_DetailIsClean verifies that the ValidationError
-// Detail for a bad rrule is model-safe: it must not embed the raw library error
-// text (no ": " separator that would precede Go/library internals) and must
-// include the RFC 5545 example string so the model/client knows how to fix it.
+// TestCreate_MalformedRrule_DetailIsClean verifies that the ValidationError Detail for a bad rrule is
+// model-safe: it must not embed the raw library error text (no ": " separator that would precede Go/library
+// internals) and must include the RFC 5545 example string so the model/client knows how to fix it.
 func TestCreate_MalformedRrule_DetailIsClean(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3432,12 +3397,10 @@ func TestCreate_MalformedRrule_DetailIsClean(t *testing.T) {
 	if detail == "" {
 		t.Fatalf("no /rrule field error; got: %+v", valErr.Fields)
 	}
-	// Must not leak library error text: the old format was "...: <libErr>" where
-	// libErr is teambition/rrule-go's raw message. Guard against it by checking
-	// the detail does not contain a colon followed by non-example content that
-	// would indicate wrapped error interpolation.
-	// More directly: the detail must NOT contain " is not a valid RFC 5545 RRULE string:"
-	// (the old prefix+colon that introduced the library error).
+	// Must not leak library error text: the old format was "...: <libErr>" where libErr is teambition/rrule-go's
+	// raw message. Guard against it by checking the detail does not contain a colon followed by non-example content
+	// that would indicate wrapped error interpolation. More directly: the detail must NOT contain
+	// " is not a valid RFC 5545 RRULE string:" (the old prefix+colon that introduced the library error).
 	if strings.Contains(detail, "string: ") {
 		t.Errorf("rrule Detail leaks library error text (contains 'string: …'): %q", detail)
 	}
@@ -3447,9 +3410,8 @@ func TestCreate_MalformedRrule_DetailIsClean(t *testing.T) {
 	}
 }
 
-// TestCreate_MalformedTz_DetailIsClean verifies that the ValidationError Detail
-// for a bad tz includes an IANA example (e.g. America/Los_Angeles) so the
-// model/client knows the expected format.
+// TestCreate_MalformedTz_DetailIsClean verifies that the ValidationError Detail for a bad tz includes an IANA
+// example (e.g. America/Los_Angeles) so the model/client knows the expected format.
 func TestCreate_MalformedTz_DetailIsClean(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3491,15 +3453,13 @@ func TestCreate_MalformedTz_DetailIsClean(t *testing.T) {
 	}
 }
 
-// TestFireHandler_Recurring_AdvancesDueAt verifies AC3: the fire handler's
-// recurring branch advances due_at to the next occurrence, keeps status=active,
-// and stamps last_fired_at. Also verifies auto_complete is ignored for recurring
-// reminders (tested with both true and false).
+// TestFireHandler_Recurring_AdvancesDueAt verifies AC3: the fire handler's recurring branch advances due_at to
+// the next occurrence, keeps status=active, and stamps last_fired_at. Also verifies auto_complete is ignored for
+// recurring reminders (tested with both true and false).
 //
-// The anchor must be in the past relative to time.Now() so that the fire handler
-// (which uses time.Now() internally) can advance to the next occurrence strictly
-// after now. We use a Monday in 2020; FREQ=WEEKLY advances to the next Monday
-// after the real "now" at test run time.
+// The anchor must be in the past relative to time.Now() so that the fire handler (which uses time.Now()
+// internally) can advance to the next occurrence strictly after now. We use a Monday in 2020; FREQ=WEEKLY
+// advances to the next Monday after the real "now" at test run time.
 func TestFireHandler_Recurring_AdvancesDueAt(t *testing.T) {
 	t.Parallel()
 	for _, autoComplete := range []bool{true, false} {
@@ -3516,9 +3476,8 @@ func TestFireHandler_Recurring_AdvancesDueAt(t *testing.T) {
 			seedUser(t, st, userID, "UTC")
 			scope := newScopeFor(userID)
 
-			// Anchor: 2020-01-06 08:00:00 UTC (a Monday, well in the past).
-			// FREQ=WEEKLY anchored here; "next occurrence after time.Now()" will be
-			// the first Monday >= now+1s, which is strictly after the anchor.
+			// Anchor: 2020-01-06 08:00:00 UTC (a Monday, well in the past). FREQ=WEEKLY anchored here; "next
+			// occurrence after time.Now()" will be the first Monday >= now+1s, which is strictly after the anchor.
 			anchor := time.Date(2020, 1, 6, 8, 0, 0, 0, time.UTC)
 
 			ac := autoComplete
@@ -3604,10 +3563,9 @@ func TestFireHandler_Recurring_AdvancesDueAt(t *testing.T) {
 	}
 }
 
-// TestFireHandler_Recurring_Idempotency verifies AC4: running the recurring fire
-// handler twice in rapid succession does NOT double-advance due_at. Because the
-// advance is "next occurrence strictly after now" and both runs share approximately
-// the same "now", both compute the same next occurrence. The test asserts that
+// TestFireHandler_Recurring_Idempotency verifies AC4: running the recurring fire handler twice in rapid
+// succession does NOT double-advance due_at. Because the advance is "next occurrence strictly after now" and
+// both runs share approximately the same "now", both compute the same next occurrence. The test asserts that
 // due_at is identical after the first and second run.
 //
 // The anchor is in the distant past (2020) so time.Now() > anchor at test run time.
@@ -3624,9 +3582,8 @@ func TestFireHandler_Recurring_Idempotency(t *testing.T) {
 	seedUser(t, st, userID, "UTC")
 	scope := newScopeFor(userID)
 
-	// Anchor: 2020-01-01 08:00:00 UTC (well in the past). FREQ=DAILY.
-	// Both handler runs execute with time.Now() (2026-era), so both compute
-	// the same "next occurrence after now" — typically tomorrow at 08:00 UTC.
+	// Anchor: 2020-01-01 08:00:00 UTC (well in the past). FREQ=DAILY. Both handler runs execute with time.Now()
+	// (2026-era), so both compute the same "next occurrence after now" — typically tomorrow at 08:00 UTC.
 	anchor := time.Date(2020, 1, 1, 8, 0, 0, 0, time.UTC)
 	r, err := svc.Create(ctx, scope, reminders.CreateInput{
 		Title:        "Daily task",
@@ -3663,9 +3620,8 @@ func TestFireHandler_Recurring_Idempotency(t *testing.T) {
 		t.Errorf("due_at did not advance after first run; still %q", dueAfterFirst)
 	}
 
-	// Second run in rapid succession (simulating a reclaim within the lease window).
-	// "now" has not passed the newly-advanced due_at, so both runs must compute
-	// the same next occurrence.
+	// Second run in rapid succession (simulating a reclaim within the lease window). "now" has not passed the
+	// newly-advanced due_at, so both runs must compute the same next occurrence.
 	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
 		t.Fatalf("fire handler (second run): %v", err)
 	}
@@ -3705,9 +3661,8 @@ func TestFireHandler_Recurring_Idempotency(t *testing.T) {
 	}
 }
 
-// TestUpdate_RruleChange_CancelsAndReenqueues verifies AC5: changing the rrule
-// via Update cancels the old fire-job and enqueues a fresh recurring one with
-// Recurrence set.
+// TestUpdate_RruleChange_CancelsAndReenqueues verifies AC5: changing the rrule via Update cancels the old
+// fire-job and enqueues a fresh recurring one with Recurrence set.
 func TestUpdate_RruleChange_CancelsAndReenqueues(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3778,9 +3733,8 @@ func TestUpdate_RruleChange_CancelsAndReenqueues(t *testing.T) {
 	}
 }
 
-// TestUpdate_RruleCleared_CancelsAndReenqueuesOneShot verifies AC5 for the
-// recurring→one-shot path: clearing rrule (null) on an active recurring reminder
-// cancels the old job and enqueues a one-shot (nil Recurrence).
+// TestUpdate_RruleCleared_CancelsAndReenqueuesOneShot verifies AC5 for the recurring→one-shot path: clearing
+// rrule (null) on an active recurring reminder cancels the old job and enqueues a one-shot (nil Recurrence).
 func TestUpdate_RruleCleared_CancelsAndReenqueuesOneShot(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3830,9 +3784,8 @@ func TestUpdate_RruleCleared_CancelsAndReenqueuesOneShot(t *testing.T) {
 	var foundOneShot bool
 	for _, req := range enqueued {
 		if req.Key == "reminder:"+r.ID && req.Recurrence == nil {
-			// There may be two: one from Create (rrule=FREQ=DAILY, recurring) and one
-			// from the clear (nil Recurrence). We want the latter.
-			// The first from Create would have Recurrence set; this one has nil.
+			// There may be two: one from Create (rrule=FREQ=DAILY, recurring) and one from the clear (nil
+			// Recurrence). We want the latter. The first from Create would have Recurrence set; this one has nil.
 			foundOneShot = true
 		}
 	}
@@ -3852,17 +3805,15 @@ func TestUpdate_RruleCleared_CancelsAndReenqueuesOneShot(t *testing.T) {
 	}
 }
 
-// TestFireHandler_Recurring_DST verifies AC6: a daily 8am rule across a US
-// spring-forward DST boundary keeps wall-clock time (8am local, not 7am/9am UTC).
+// TestFireHandler_Recurring_DST verifies AC6: a daily 8am rule across a US spring-forward DST boundary keeps
+// wall-clock time (8am local, not 7am/9am UTC).
 //
-// The anchor is 2020-01-01 08:00 ET (EST, UTC-5) = 13:00 UTC — far in the past
-// so time.Now() (2026-era) is always after it. The RRULE engine computes the
-// next daily 08:00 ET occurrence after now; because we're currently in EDT (UTC-4)
-// in June, that occurrence will be 08:00 ET = 12:00 UTC, not 13:00 UTC.
+// The anchor is 2020-01-01 08:00 ET (EST, UTC-5) = 13:00 UTC — far in the past so time.Now() (2026-era) is
+// always after it. The RRULE engine computes the next daily 08:00 ET occurrence after now; because we're
+// currently in EDT (UTC-4) in June, that occurrence will be 08:00 ET = 12:00 UTC, not 13:00 UTC.
 //
-// The core property: whatever the next occurrence is, its wall-clock hour in
-// America/New_York must be 8am. If the implementation were naively computing
-// "now + 24h" it would drift by an hour across DST boundaries.
+// The core property: whatever the next occurrence is, its wall-clock hour in America/New_York must be 8am. If
+// the implementation were naively computing "now + 24h" it would drift by an hour across DST boundaries.
 func TestFireHandler_Recurring_DST(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3882,9 +3833,8 @@ func TestFireHandler_Recurring_DST(t *testing.T) {
 		t.Fatalf("LoadLocation: %v", err)
 	}
 
-	// Anchor: 2020-01-01 08:00 ET (EST, UTC-5) = 13:00 UTC.
-	// The handler will be dispatched "now" (2026-era), computing the next daily
-	// 08:00 ET occurrence after now. The result must have Hour()==8 in ET.
+	// Anchor: 2020-01-01 08:00 ET (EST, UTC-5) = 13:00 UTC. The handler will be dispatched "now" (2026-era),
+	// computing the next daily 08:00 ET occurrence after now. The result must have Hour()==8 in ET.
 	anchor := time.Date(2020, 1, 1, 8, 0, 0, 0, loc).UTC()
 
 	r, err := svc.Create(ctx, scope, reminders.CreateInput{
@@ -3920,8 +3870,8 @@ func TestFireHandler_Recurring_DST(t *testing.T) {
 		t.Fatalf("parse due_at %q: %v", row.DueAt, parseErr)
 	}
 
-	// Core property: wall-clock hour must be 8am in the reminder's timezone.
-	// This holds regardless of DST offset (EST UTC-5 or EDT UTC-4).
+	// Core property: wall-clock hour must be 8am in the reminder's timezone. This holds regardless of DST offset
+	// (EST UTC-5 or EDT UTC-4).
 	nextDueLocal := nextDue.In(loc)
 	if nextDueLocal.Hour() != 8 {
 		t.Errorf("DST test: next due_at=%v (local=%v), want 8am %s; got hour=%d",
@@ -3941,10 +3891,9 @@ func TestFireHandler_Recurring_DST(t *testing.T) {
 
 // TestFireHandler_ExhaustedSeries verifies the finite-series branch:
 //   - Create a recurring reminder with FREQ=DAILY;COUNT=1 anchored in the past.
-//   - First dispatch: nextOccurrence returns zero (series exhausted) →
-//     reminder.fired emitted, last_fired_at stamped, status=completed.
-//   - Second dispatch (reclaim simulation): status != "active" → returns nil,
-//     no second reminder.fired emitted.
+//   - First dispatch: nextOccurrence returns zero (series exhausted) → reminder.fired emitted, last_fired_at
+//     stamped, status=completed.
+//   - Second dispatch (reclaim simulation): status != "active" → returns nil, no second reminder.fired emitted.
 func TestFireHandler_ExhaustedSeries(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -3958,9 +3907,9 @@ func TestFireHandler_ExhaustedSeries(t *testing.T) {
 	seedUser(t, st, userID, "UTC")
 	scope := newScopeFor(userID)
 
-	// FREQ=DAILY;COUNT=1 — exactly one occurrence at the anchor (in the past).
-	// When the handler fires "now" (2026-era), nextOccurrence computes After(now,false)
-	// which returns zero because COUNT=1 was consumed at the anchor.
+	// FREQ=DAILY;COUNT=1 — exactly one occurrence at the anchor (in the past). When the handler fires "now"
+	// (2026-era), nextOccurrence computes After(now,false) which returns zero because COUNT=1 was consumed at the
+	// anchor.
 	anchor := time.Date(2020, 1, 1, 8, 0, 0, 0, time.UTC)
 	r, err := svc.Create(ctx, scope, reminders.CreateInput{
 		Title:        "Finite series",
@@ -4035,9 +3984,8 @@ func TestFireHandler_ExhaustedSeries(t *testing.T) {
 	}
 }
 
-// TestFireHandler_CompletedGuard verifies that a completed reminder whose
-// fire-job is somehow dispatched (e.g., scheduler reclaim after auto-complete)
-// returns nil without re-firing.
+// TestFireHandler_CompletedGuard verifies that a completed reminder whose fire-job is somehow dispatched (e.g.,
+// scheduler reclaim after auto-complete) returns nil without re-firing.
 func TestFireHandler_CompletedGuard(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4092,8 +4040,8 @@ func TestFireHandler_CompletedGuard(t *testing.T) {
 	bus.events = nil
 	bus.mu.Unlock()
 
-	// Second dispatch: simulates at-least-once scheduler reclaim of the job.
-	// Because status != "active", handler must return nil and NOT emit reminder.fired.
+	// Second dispatch: simulates at-least-once scheduler reclaim of the job. Because status != "active", handler
+	// must return nil and NOT emit reminder.fired.
 	if err := reg.dispatch(ctx, "reminder.fire", job); err != nil {
 		t.Fatalf("fire handler (reclaim of completed): %v", err)
 	}
@@ -4106,11 +4054,10 @@ func TestFireHandler_CompletedGuard(t *testing.T) {
 	}
 }
 
-// TestUpdate_Rrule_ValidatesInEffectiveTz verifies that Service.Update validates
-// the rrule against the effective timezone (the reminder's stored tz), not always
-// UTC. A rule that is syntactically valid in UTC but would need tz-aware parsing
-// must still pass — the goal here is that the timezone used for validation matches
-// what will be stored and enqueued, keeping Create/Update consistent.
+// TestUpdate_Rrule_ValidatesInEffectiveTz verifies that Service.Update validates the rrule against the effective
+// timezone (the reminder's stored tz), not always UTC. A rule that is syntactically valid in UTC but would need
+// tz-aware parsing must still pass — the goal here is that the timezone used for validation matches what will be
+// stored and enqueued, keeping Create/Update consistent.
 func TestUpdate_Rrule_ValidatesInEffectiveTz(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4134,8 +4081,7 @@ func TestUpdate_Rrule_ValidatesInEffectiveTz(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Setting a valid rrule via Update must succeed (not reject due to wrong tz
-	// being used in the validator).
+	// Setting a valid rrule via Update must succeed (not reject due to wrong tz being used in the validator).
 	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
 		Rrule: reminders.SetString("FREQ=DAILY"),
 	})
@@ -4170,10 +4116,9 @@ func TestUpdate_Rrule_ValidatesInEffectiveTz(t *testing.T) {
 
 // ── Fat event emission after fire (issue: "Emit reminder.updated/reminder.completed on fire") ──
 
-// TestFireHandler_FatEvent_RecurringAdvances verifies AC1:
-// Firing a recurring reminder emits reminder.fired (thin, first) followed by
-// reminder.updated (fat, full Reminder payload) carrying the advanced due_at.
-// The fat event must NOT precede reminder.fired.
+// TestFireHandler_FatEvent_RecurringAdvances verifies AC1: Firing a recurring reminder emits reminder.fired
+// (thin, first) followed by reminder.updated (fat, full Reminder payload) carrying the advanced due_at. The fat
+// event must NOT precede reminder.fired.
 func TestFireHandler_FatEvent_RecurringAdvances(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4274,9 +4219,9 @@ func TestFireHandler_FatEvent_RecurringAdvances(t *testing.T) {
 	}
 }
 
-// TestFireHandler_FatEvent_ExhaustedSeriesCompleted verifies AC2 (exhausted recurring):
-// Firing a recurring reminder whose series is exhausted emits reminder.fired (thin)
-// followed by reminder.completed (fat, full Reminder payload).
+// TestFireHandler_FatEvent_ExhaustedSeriesCompleted verifies AC2 (exhausted recurring): Firing a recurring
+// reminder whose series is exhausted emits reminder.fired (thin) followed by reminder.completed (fat, full
+// Reminder payload).
 func TestFireHandler_FatEvent_ExhaustedSeriesCompleted(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4367,9 +4312,9 @@ func TestFireHandler_FatEvent_ExhaustedSeriesCompleted(t *testing.T) {
 	}
 }
 
-// TestFireHandler_FatEvent_AutoCompleteOneShotCompleted verifies AC2 (one-shot auto-complete):
-// Firing a one-shot auto_complete=true reminder emits reminder.fired (thin) followed by
-// reminder.completed (fat, full Reminder payload).
+// TestFireHandler_FatEvent_AutoCompleteOneShotCompleted verifies AC2 (one-shot auto-complete): Firing a one-shot
+// auto_complete=true reminder emits reminder.fired (thin) followed by reminder.completed (fat, full Reminder
+// payload).
 func TestFireHandler_FatEvent_AutoCompleteOneShotCompleted(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4453,9 +4398,9 @@ func TestFireHandler_FatEvent_AutoCompleteOneShotCompleted(t *testing.T) {
 	}
 }
 
-// TestFireHandler_FatEvent_KeepActiveUpdated verifies AC3:
-// Firing a one-shot auto_complete=false reminder emits reminder.fired (thin) followed by
-// reminder.updated (fat, full Reminder payload) reflecting the new last_fired_at.
+// TestFireHandler_FatEvent_KeepActiveUpdated verifies AC3: Firing a one-shot auto_complete=false reminder emits
+// reminder.fired (thin) followed by reminder.updated (fat, full Reminder payload) reflecting the new
+// last_fired_at.
 func TestFireHandler_FatEvent_KeepActiveUpdated(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4539,9 +4484,8 @@ func TestFireHandler_FatEvent_KeepActiveUpdated(t *testing.T) {
 	}
 }
 
-// TestFireHandler_FatEvent_PayloadMatchesReminderType verifies AC4:
-// The fat payload emitted by the fire handler is the same Reminder type as
-// emitted by Service.Update and Service.Complete — all core JSON fields present.
+// TestFireHandler_FatEvent_PayloadMatchesReminderType verifies AC4: The fat payload emitted by the fire handler
+// is the same Reminder type as emitted by Service.Update and Service.Complete — all core JSON fields present.
 func TestFireHandler_FatEvent_PayloadMatchesReminderType(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4673,17 +4617,15 @@ func TestFireHandler_FatEvent_PayloadMatchesReminderType(t *testing.T) {
 
 // ── R1 behavior fixes ─────────────────────────────────────────────────────────
 
-// TestUpdate_ClearRruleAndDueAt_RoutesToCancelAndReenqueue verifies M2/item-1:
-// A PATCH that both clears the rrule (sets it to "") AND changes dueAt on an
-// active recurring reminder must route through the cancel+re-enqueue path
-// (syncFireJobForRecurrenceChange), NOT through the bare Reschedule path.
+// TestUpdate_ClearRruleAndDueAt_RoutesToCancelAndReenqueue verifies M2/item-1: A PATCH that both clears the
+// rrule (sets it to "") AND changes dueAt on an active recurring reminder must route through the
+// cancel+re-enqueue path (syncFireJobForRecurrenceChange), NOT through the bare Reschedule path.
 //
-// The bug: the tagless switch in Update evaluated the dueAt-shift case first
-// (guard `!newDueAt.IsZero() && ... && !rrule.Valid`). After the rrule clear is
-// merged, `!rrule.Valid` is true, so the 837 case matched and called Reschedule —
-// leaving the scheduler job's rrule columns intact while the reminder row lost
-// its rrule. The fix adds `&& !rruleChanged` to the dueAt-shift guard (or
-// reorders) so a simultaneous rrule clear routes to syncFireJobForRecurrenceChange.
+// The bug: the tagless switch in Update evaluated the dueAt-shift case first (guard
+// `!newDueAt.IsZero() && ... && !rrule.Valid`). After the rrule clear is merged, `!rrule.Valid` is true, so the
+// 837 case matched and called Reschedule — leaving the scheduler job's rrule columns intact while the reminder
+// row lost its rrule. The fix adds `&& !rruleChanged` to the dueAt-shift guard (or reorders) so a simultaneous
+// rrule clear routes to syncFireJobForRecurrenceChange.
 func TestUpdate_ClearRruleAndDueAt_RoutesToCancelAndReenqueue(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4758,11 +4700,10 @@ func TestUpdate_ClearRruleAndDueAt_RoutesToCancelAndReenqueue(t *testing.T) {
 	}
 }
 
-// TestUpdate_KeepActive_FiredJob_Gone_FallsBackToEnqueue verifies M2/item-2:
-// A fired keep-active one-shot reminder (auto_complete=false) has its scheduler
-// job deleted by the scheduler after firing.  A later PATCH dueAt must detect
-// that Reschedule returns ErrJobNotFound and fall back to Enqueue+stamp, so the
-// reminder will fire again at the new time.
+// TestUpdate_KeepActive_FiredJob_Gone_FallsBackToEnqueue verifies M2/item-2: A fired keep-active one-shot
+// reminder (auto_complete=false) has its scheduler job deleted by the scheduler after firing.  A later PATCH
+// dueAt must detect that Reschedule returns ErrJobNotFound and fall back to Enqueue+stamp, so the reminder will
+// fire again at the new time.
 func TestUpdate_KeepActive_FiredJob_Gone_FallsBackToEnqueue(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4786,9 +4727,8 @@ func TestUpdate_KeepActive_FiredJob_Gone_FallsBackToEnqueue(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Fire it (simulate the scheduler dispatching the job).
-	// After this, StampFiredKeepActive keeps status=active but the scheduler
-	// deletes the job row.
+	// Fire it (simulate the scheduler dispatching the job). After this, StampFiredKeepActive keeps status=active
+	// but the scheduler deletes the job row.
 	payload, _ := json.Marshal(map[string]string{"reminderId": r.ID})
 	job := scheduler.Job{
 		ID:      r.FireJobID,
@@ -4816,8 +4756,8 @@ func TestUpdate_KeepActive_FiredJob_Gone_FallsBackToEnqueue(t *testing.T) {
 	prod.returnID = "job-ka-new-001"
 	prod.mu.Unlock()
 
-	// PATCH a new dueAt. Update must detect the Reschedule failure and fall back to
-	// Enqueue+stamp so the reminder will fire again at the new time.
+	// PATCH a new dueAt. Update must detect the Reschedule failure and fall back to Enqueue+stamp so the reminder
+	// will fire again at the new time.
 	newDue := time.Now().UTC().Add(2 * time.Hour)
 	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
 		DueAt: &newDue,
@@ -4826,8 +4766,8 @@ func TestUpdate_KeepActive_FiredJob_Gone_FallsBackToEnqueue(t *testing.T) {
 		t.Fatalf("Update after fired keep-active: %v", err)
 	}
 
-	// A fresh job must be Enqueued (the fallback): at least 2 total — one from
-	// Create, one from the ErrJobNotFound fallback in Update.
+	// A fresh job must be Enqueued (the fallback): at least 2 total — one from Create, one from the ErrJobNotFound
+	// fallback in Update.
 	enqueued := prod.allEnqueued()
 	if len(enqueued) < 2 {
 		t.Errorf("expected at least 2 Enqueue calls (Create + fallback); got %d", len(enqueued))
@@ -4839,19 +4779,17 @@ func TestUpdate_KeepActive_FiredJob_Gone_FallsBackToEnqueue(t *testing.T) {
 	}
 }
 
-// TestFireHandler_DeletedBeforeStatusGate_NoFiredEvent verifies the observable
-// contract for a reminder deleted before handleFire's status-gate GetReminder call:
-// the handler returns a scheduler.Permanent error and must NOT publish reminder.fired.
+// TestFireHandler_DeletedBeforeStatusGate_NoFiredEvent verifies the observable contract for a reminder deleted
+// before handleFire's status-gate GetReminder call: the handler returns a scheduler.Permanent error and must NOT
+// publish reminder.fired.
 //
-// Note on scope: this test exercises the ErrNoRows status-gate path (GetReminder
-// returns sql.ErrNoRows → Permanent), NOT the n==0-after-stamp TOCTOU path
-// introduced in item 3. That TOCTOU path (row deleted between the status-gate
-// read and the subsequent Stamp* call) is defence-in-depth that requires an
-// in-package hook to inject cleanly; pinning it from the external test package
-// would distort the production code. The Stamp* 0-rows guard is compiler-verified
-// by the non-nil rowcount capture and the n==0 early-return branches added in
-// handleFire; the observable safety property (no double-advance on a gone row) is
-// satisfied because Stamp* always scopes its WHERE clause to (id, user_id).
+// Note on scope: this test exercises the ErrNoRows status-gate path (GetReminder returns sql.ErrNoRows →
+// Permanent), NOT the n==0-after-stamp TOCTOU path introduced in item 3. That TOCTOU path (row deleted between
+// the status-gate read and the subsequent Stamp* call) is defence-in-depth that requires an in-package hook to
+// inject cleanly; pinning it from the external test package would distort the production code. The Stamp* 0-rows
+// guard is compiler-verified by the non-nil rowcount capture and the n==0 early-return branches added in
+// handleFire; the observable safety property (no double-advance on a gone row) is satisfied because Stamp*
+// always scopes its WHERE clause to (id, user_id).
 func TestFireHandler_DeletedBeforeStatusGate_NoFiredEvent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4909,14 +4847,12 @@ func TestFireHandler_DeletedBeforeStatusGate_NoFiredEvent(t *testing.T) {
 
 // ── R2 new test: dueAt shift on active RECURRING reminder ─────────────────────
 
-// TestUpdate_DueAt_RecurringReminder_CancelsAndReenqueues verifies that changing
-// dueAt on an active recurring reminder (rrule is set) takes the
-// syncFireJobForRecurrenceChange path — Cancel the old job, Enqueue a fresh
+// TestUpdate_DueAt_RecurringReminder_CancelsAndReenqueues verifies that changing dueAt on an active recurring
+// reminder (rrule is set) takes the syncFireJobForRecurrenceChange path — Cancel the old job, Enqueue a fresh
 // recurring one with the same RRULE/TZ — rather than the Reschedule path.
 //
-// A dueAt shift on a recurring reminder changes the RRULE anchor, so the old
-// recurring job must be replaced with a new one that has Recurrence set.
-// Reschedule must NOT be called.
+// A dueAt shift on a recurring reminder changes the RRULE anchor, so the old recurring job must be replaced with
+// a new one that has Recurrence set. Reschedule must NOT be called.
 func TestUpdate_DueAt_RecurringReminder_CancelsAndReenqueues(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -4971,8 +4907,8 @@ func TestUpdate_DueAt_RecurringReminder_CancelsAndReenqueues(t *testing.T) {
 	var newReq *scheduler.EnqueueRequest
 	for i := range enqueued {
 		if enqueued[i].Key == "reminder:"+r.ID && enqueued[i].Recurrence != nil {
-			// Pick the enqueue after Create's initial one (Create also used the same key
-			// and a recurring Recurrence; we want the one from the Update).
+			// Pick the enqueue after Create's initial one (Create also used the same key and a recurring
+			// Recurrence; we want the one from the Update).
 			if enqueued[i].Recurrence.RRULE == rrule {
 				req := enqueued[i]
 				newReq = &req
@@ -4990,8 +4926,8 @@ func TestUpdate_DueAt_RecurringReminder_CancelsAndReenqueues(t *testing.T) {
 		t.Errorf("new Enqueue Recurrence.RRULE=%q, want %q", newReq.Recurrence.RRULE, rrule)
 	}
 
-	// 3. Reschedule must NOT have been called — a dueAt shift on a recurring
-	// reminder is handled by Cancel+Enqueue, not Reschedule.
+	// 3. Reschedule must NOT have been called — a dueAt shift on a recurring reminder is handled by Cancel+Enqueue,
+	// not Reschedule.
 	if rescheduled := prod.allRescheduled(); len(rescheduled) > 0 {
 		t.Errorf("Reschedule must NOT be called for dueAt shift on a recurring reminder; got: %v", rescheduled)
 	}
@@ -5010,12 +4946,11 @@ func TestUpdate_DueAt_RecurringReminder_CancelsAndReenqueues(t *testing.T) {
 
 // ── R2 new test: invalid fire payload → scheduler.Permanent ──────────────────
 
-// TestFireHandler_InvalidPayload_ReturnsPermanent verifies that handleFire
-// returns a scheduler.Permanent error and publishes NO reminder.fired event
-// when the job payload cannot be decoded.
+// TestFireHandler_InvalidPayload_ReturnsPermanent verifies that handleFire returns a scheduler.Permanent error
+// and publishes NO reminder.fired event when the job payload cannot be decoded.
 //
-// An undecodable payload means the reminder id can never be resolved; the job
-// must be dead-lettered immediately without retrying.
+// An undecodable payload means the reminder id can never be resolved; the job must be dead-lettered immediately
+// without retrying.
 func TestFireHandler_InvalidPayload_ReturnsPermanent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -5044,8 +4979,7 @@ func TestFireHandler_InvalidPayload_ReturnsPermanent(t *testing.T) {
 		t.Fatal("expected error from fire handler for invalid payload, got nil")
 	}
 
-	// The error must be a permanent error so the scheduler dead-letters it
-	// without any retry.
+	// The error must be a permanent error so the scheduler dead-letters it without any retry.
 	if !scheduler.IsPermanent(handlerErr) {
 		t.Errorf("expected scheduler.Permanent error for invalid payload, got: %v", handlerErr)
 	}

@@ -2,12 +2,12 @@
  * Playwright E2E configuration for the Qovira journeys.
  *
  * Design decisions:
- *   - workers: 1 / fullyParallel: false — one seeded admin against one shared
- *     DB; specs must run serially to avoid cross-test reminder interference.
- *   - webServer builds the e2e binary and starts it fresh (wiped data dir) so
- *     admin seeding fires on every run. `make e2e-server` is the entry point.
- *   - Auth: setup project writes storageState; journey specs declare
- *     `dependencies: ['setup']` and load it via storageState.
+ *   - workers: 1 / fullyParallel: false — one seeded admin against one shared DB; specs must run
+ *     serially to avoid cross-test reminder interference.
+ *   - webServer builds the e2e binary and starts it fresh (wiped data dir) so admin seeding fires on
+ *     every run. `make e2e-server` is the entry point.
+ *   - Auth: setup project writes storageState; journey specs declare `dependencies: ['setup']` and
+ *     load it via storageState.
  *   - Reporter: list locally, blob in CI (for merge-reports).
  *   - Retries: 0 locally, 1 in CI (a single re-run to catch infra flake).
  */
@@ -44,8 +44,8 @@ export default defineConfig({
   // Reporter: list locally; blob in CI for merge-reports compatibility.
   reporter: process.env.CI ? "blob" : "list",
 
-  // Global timeout per test: 60 s. The slow-story test takes ~8 × 500 ms + reload
-  // overhead; keep headroom.
+  // Global timeout per test: 60 s. The slow-story test takes ~8 × 500 ms + reload overhead; keep
+  // headroom.
   timeout: 60_000,
 
   use: {
@@ -75,8 +75,8 @@ export default defineConfig({
     },
   ],
 
-  // webServer: build the e2e binary and start a fresh server for every run.
-  // `make e2e-server` wipes the data dir, builds the binary, and exec's it.
+  // webServer: build the e2e binary and start a fresh server for every run. `make e2e-server` wipes
+  // the data dir, builds the binary, and exec's it.
   // url: healthz endpoint — Playwright polls until 200 before running specs.
   // reuseExistingServer: allowed locally to speed up iteration; never in CI.
   webServer: {

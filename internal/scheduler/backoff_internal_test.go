@@ -5,18 +5,17 @@ import (
 	"time"
 )
 
-// TestBackoffDuration_BoundsAndShape is a deterministic white-box test of the pure
-// backoffDuration helper. It runs inside package scheduler (not the _test variant)
-// so it can reach the unexported function directly — no clock, no DB, no flake risk.
+// TestBackoffDuration_BoundsAndShape is a deterministic white-box test of the pure backoffDuration helper. It runs
+// inside package scheduler (not the _test variant) so it can reach the unexported function directly — no clock, no DB,
+// no flake risk.
 //
 // Strategy: sample backoffDuration many times per attempt level and assert:
 //  1. Every sample is in [0, wantCeiling] — never negative, never over ceiling.
-//  2. The observed maximum across samples is ≥ wantCeiling*8/10 — the window is
-//     the right magnitude, not collapsed to ~0.
+//  2. The observed maximum across samples is ≥ wantCeiling*8/10 — the window is the right magnitude, not collapsed
+//     to ~0.
 //
-// This pins both the exponential growth and the cap clamp deterministically.
-// Overflow-guard attempts (≥ 62) are additionally checked to never produce a
-// negative or wrapped duration, even at attempt=100.
+// This pins both the exponential growth and the cap clamp deterministically. Overflow-guard attempts (≥ 62) are
+// additionally checked to never produce a negative or wrapped duration, even at attempt=100.
 func TestBackoffDuration_BoundsAndShape(t *testing.T) {
 	t.Parallel()
 
@@ -72,15 +71,13 @@ func TestBackoffDuration_BoundsAndShape(t *testing.T) {
 				}
 			}
 
-			// For the cap cases (attempt ≥ 20) the ceiling is 1h. After 2000 samples
-			// drawn uniformly from [0, 1h] the expected maximum is ≈ 1h * 2000/2001 ≈
-			// 99.95% of 1h, so 80% is a conservative floor that reliably fails if the
-			// window collapsed. For smaller ceilings the same argument holds.
+			// For the cap cases (attempt ≥ 20) the ceiling is 1h. After 2000 samples drawn uniformly from [0, 1h]
+			// the expected maximum is ≈ 1h * 2000/2001 ≈ 99.95% of 1h, so 80% is a conservative floor that reliably
+			// fails if the window collapsed. For smaller ceilings the same argument holds.
 			//
-			// We skip the 80% floor for attempt < 3 because the ceiling is only 10–20s
-			// and in a fully-random sample it's theoretically possible (though
-			// astronomically unlikely) to stay below the threshold. For attempts ≥ 3
-			// the ceiling is ≥ 40s; the 80% floor is 32s, robust at 2000 samples.
+			// We skip the 80% floor for attempt < 3 because the ceiling is only 10–20s and in a fully-random sample
+			// it's theoretically possible (though astronomically unlikely) to stay below the threshold. For attempts
+			// ≥ 3 the ceiling is ≥ 40s; the 80% floor is 32s, robust at 2000 samples.
 			if tt.attempt >= 3 {
 				floor := tt.wantCeiling * 8 / 10
 				if maxSeen < floor {

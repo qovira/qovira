@@ -105,9 +105,8 @@ describe("routeEvent() — reminder.* routing", () => {
 // ---------------------------------------------------------------------------
 // Validation negatives — malformed / missing fields must be silently rejected
 //
-// routeEvent must reject (not route) payloads that are missing required fields
-// or carry wrong types. These guard against malformed server events that could
-// corrupt store state if dispatched without validation.
+// routeEvent must reject (not route) payloads that are missing required fields or carry wrong types. These guard
+// against malformed server events that could corrupt store state if dispatched without validation.
 // ---------------------------------------------------------------------------
 
 describe("routeEvent() — validation negatives: malformed payloads are silently rejected", () => {

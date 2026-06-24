@@ -1,6 +1,5 @@
-// Package reminders implements the reminders capability module: create a reminder,
-// persist it, enqueue a fire-job, and fire it live at due_at via the
-// "reminder.fire" scheduler handler. Supports one-shot and recurring (RRULE)
+// Package reminders implements the reminders capability module: create a reminder, persist it, enqueue a fire-job,
+// and fire it live at due_at via the "reminder.fire" scheduler handler. Supports one-shot and recurring (RRULE)
 // reminders. Recurring reminders advance due_at on each fire and never auto-complete.
 package reminders
 
@@ -29,8 +28,8 @@ import (
 
 // ── Domain types ──────────────────────────────────────────────────────────────
 
-// Reminder is the public domain type returned by Service methods and serialised
-// in REST responses. camelCase JSON field names follow the HTTP house guide.
+// Reminder is the public domain type returned by Service methods and serialised in REST responses. camelCase JSON
+// field names follow the HTTP house guide.
 type Reminder struct {
 	ID           string `json:"id"`
 	UserID       string `json:"userId"`
@@ -57,19 +56,19 @@ type CreateInput struct {
 	Notes string
 	// DueAt is the first (and for one-shot, only) fire instant. Required.
 	DueAt time.Time
-	// Tz is an optional IANA timezone name. When empty, Service.Create defaults
-	// it from the user's profile, or "UTC" if the profile zone is also empty.
+	// Tz is an optional IANA timezone name. When empty, Service.Create defaults it from the user's profile, or "UTC"
+	// if the profile zone is also empty.
 	Tz string
-	// AutoComplete controls whether the reminder auto-completes on fire.
-	// When nil, defaults to true. Pass a *bool to override.
+	// AutoComplete controls whether the reminder auto-completes on fire. When nil, defaults to true. Pass a *bool to
+	// override.
 	AutoComplete *bool
-	// Rrule is an optional RFC 5545 RRULE string stored as-is.
-	// Recurrence logic is a later slice; this field is stored only.
+	// Rrule is an optional RFC 5545 RRULE string stored as-is. Recurrence logic is a later slice; this field is
+	// stored only.
 	Rrule string
 }
 
-// FiredEventPayload is the payload of the "reminder.fired" bus event.
-// camelCase JSON field names follow the HTTP house guide.
+// FiredEventPayload is the payload of the "reminder.fired" bus event. camelCase JSON field names follow the HTTP
+// house guide.
 type FiredEventPayload struct {
 	ReminderID string `json:"reminderId"`
 	Title      string `json:"title"`
@@ -86,52 +85,46 @@ type firePayload struct {
 // ListQuery carries the caller-facing parameters for listing reminders.
 // It corresponds to the query parameters on GET /api/v1/reminders.
 type ListQuery struct {
-	// Cursor is the opaque pagination cursor returned by a prior page.  Empty
-	// means "start from the beginning".  A non-empty value that cannot be
-	// decoded is a caller error (400).
+	// Cursor is the opaque pagination cursor returned by a prior page.  Empty means "start from the beginning".  A
+	// non-empty value that cannot be decoded is a caller error (400).
 	Cursor string
-	// Limit is the maximum number of items to return.  0 uses the default (25).
-	// Values above the maximum (100) are silently clamped to 100.
+	// Limit is the maximum number of items to return.  0 uses the default (25).  Values above the maximum (100) are
+	// silently clamped to 100.
 	Limit int
-	// Status is an optional filter.  Accepted values: "active", "completed".
-	// Empty means no filter (all statuses).
+	// Status is an optional filter.  Accepted values: "active", "completed".  Empty means no filter (all statuses).
 	Status string
-	// DueAfter, when non-zero, filters reminders whose due_at is strictly after
-	// the given instant.
+	// DueAfter, when non-zero, filters reminders whose due_at is strictly after the given instant.
 	DueAfter time.Time
-	// DueBefore, when non-zero, filters reminders whose due_at is strictly
-	// before the given instant.
+	// DueBefore, when non-zero, filters reminders whose due_at is strictly before the given instant.
 	DueBefore time.Time
 }
 
-// Page is the service-layer result of a list query.  The HTTP layer maps it to
-// the httpx.Page[Reminder] envelope.
+// Page is the service-layer result of a list query.  The HTTP layer maps it to the httpx.Page[Reminder] envelope.
 type Page struct {
 	// Items is the current page of reminders, ordered by (due_at, id).
 	Items []Reminder
-	// NextCursor is the opaque cursor for the next page, or empty string when
-	// this is the last page.  The HTTP layer maps an empty string to JSON null.
+	// NextCursor is the opaque cursor for the next page, or empty string when this is the last page.  The HTTP layer
+	// maps an empty string to JSON null.
 	NextCursor string
 	// HasMore is true when there is at least one more page.
 	HasMore bool
 }
 
-// listCursor is the internal structure encoded into the opaque pagination cursor.
-// Both DueAt and ID are required for a stable, gap-free total order.
+// listCursor is the internal structure encoded into the opaque pagination cursor. Both DueAt and ID are required for
+// a stable, gap-free total order.
 type listCursor struct {
 	DueAt string `json:"d"` // RFC 3339 UTC
 	ID    string `json:"i"`
 }
 
-// encodeCursor base64-encodes a JSON listCursor into an opaque string suitable
-// for inclusion in an HTTP response.
+// encodeCursor base64-encodes a JSON listCursor into an opaque string suitable for inclusion in an HTTP response.
 func encodeCursor(dueAt, id string) string {
 	raw, _ := json.Marshal(listCursor{DueAt: dueAt, ID: id})
 	return base64.RawStdEncoding.EncodeToString(raw)
 }
 
-// decodeCursor reverses encodeCursor.  Returns an error when the cursor string
-// is not valid base64 or its JSON content is malformed.
+// decodeCursor reverses encodeCursor.  Returns an error when the cursor string is not valid base64 or its JSON
+// content is malformed.
 func decodeCursor(cursor string) (dueAt, reminderID string, err error) {
 	raw, err := base64.RawStdEncoding.DecodeString(cursor)
 	if err != nil {
@@ -154,9 +147,8 @@ const (
 
 // ── Package-level constants ───────────────────────────────────────────────────
 //
-// These correctness-load-bearing strings appear at both the Register call-site
-// and every Enqueue call-site; a single source of truth makes a mismatch a
-// compile-time (renaming) error rather than a silent runtime failure.
+// These correctness-load-bearing strings appear at both the Register call-site and every Enqueue call-site; a single
+// source of truth makes a mismatch a compile-time (renaming) error rather than a silent runtime failure.
 
 const (
 	fireJobKind  = "reminder.fire" // scheduler job kind; must match Register + all Enqueue calls
@@ -174,17 +166,15 @@ const (
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
-// ErrNotFound is returned by Service.Get when the reminder does not exist or
-// does not belong to the requesting user.
+// ErrNotFound is returned by Service.Get when the reminder does not exist or does not belong to the requesting user.
 var ErrNotFound = errors.New("reminders: not found")
 
-// ErrInvalidCursor is returned by Service.List when the caller supplies a
-// cursor value that cannot be decoded.  The HTTP adapter maps this to a 400
-// Bad Request response.
+// ErrInvalidCursor is returned by Service.List when the caller supplies a cursor value that cannot be decoded.  The
+// HTTP adapter maps this to a 400 Bad Request response.
 var ErrInvalidCursor = errors.New("reminders: invalid cursor")
 
-// ValidationError carries one or more field-level validation failures.
-// The HTTP adapter maps it to a 422 problem+json response.
+// ValidationError carries one or more field-level validation failures. The HTTP adapter maps it to a 422 problem+json
+// response.
 type ValidationError struct {
 	Fields []httpx.FieldError
 }
@@ -197,9 +187,8 @@ func (e *ValidationError) Error() string {
 	return "reminders: validation error: " + strings.Join(msgs, "; ")
 }
 
-// UpdateInput carries the caller-facing parameters for a partial/merge update.
-// Pointer fields distinguish "absent" (nil → leave unchanged) from "present"
-// (non-nil → apply).
+// UpdateInput carries the caller-facing parameters for a partial/merge update. Pointer fields distinguish "absent"
+// (nil → leave unchanged) from "present" (non-nil → apply).
 //
 // PATCH merge semantics for nullable string columns (notes, rrule):
 //   - nil pointer    → field absent; leave the stored value unchanged.
@@ -208,36 +197,31 @@ func (e *ValidationError) Error() string {
 //   - OptionalString with Present=true, Value="x" → field present with a value;
 //     set the column to that value.
 //
-// This three-way distinction maps cleanly to the HTTP house guide PATCH merge
-// rule: omitted=unchanged, null=clear, value=set. A plain *string cannot
-// represent "present + null" without a sentinel value, so OptionalString is
-// used for the two nullable columns. All non-nullable fields use *T directly.
+// This three-way distinction maps cleanly to the HTTP house guide PATCH merge rule: omitted=unchanged, null=clear,
+// value=set. A plain *string cannot represent "present + null" without a sentinel value, so OptionalString is used
+// for the two nullable columns. All non-nullable fields use *T directly.
 type UpdateInput struct {
-	// Title, when non-nil, replaces the reminder's title. Must be non-empty
-	// after trim (validated in Update).
+	// Title, when non-nil, replaces the reminder's title. Must be non-empty after trim (validated in Update).
 	Title *string
 	// Notes, when Present=true, replaces (or clears) the notes column.
 	Notes OptionalString
-	// DueAt, when non-nil, replaces the fire instant. Triggers a Reschedule on
-	// any active fire-job; ignored if no fire-job exists (completed reminder).
+	// DueAt, when non-nil, replaces the fire instant. Triggers a Reschedule on any active fire-job; ignored if no
+	// fire-job exists (completed reminder).
 	DueAt *time.Time
-	// Rrule, when Present=true, replaces (or clears) the stored rrule string.
-	// NOTE: rrule is stored only in this slice; recurrence logic is a later
-	// slice (slice 4). No validation of the rrule value is performed here — that
+	// Rrule, when Present=true, replaces (or clears) the stored rrule string. NOTE: rrule is stored only in this
+	// slice; recurrence logic is a later slice (slice 4). No validation of the rrule value is performed here — that
 	// belongs to the recurring-reminders slice.
 	Rrule OptionalString
 	// AutoComplete, when non-nil, replaces the auto_complete flag.
 	AutoComplete *bool
-	// Status, when non-nil, sets the reminder status. Accepted values: "active",
-	// "completed". The REST adapter routes "completed" to Complete and "active"
-	// on a completed reminder to the re-open path. Direct callers can also pass
+	// Status, when non-nil, sets the reminder status. Accepted values: "active", "completed". The REST adapter routes
+	// "completed" to Complete and "active" on a completed reminder to the re-open path. Direct callers can also pass
 	// these values.
 	Status *string
 }
 
-// OptionalString represents a nullable string field in a PATCH merge update.
-// When Present is false the field is absent (leave unchanged). When Present is
-// true the field is present: Value="" clears it, Value="x" sets it to "x".
+// OptionalString represents a nullable string field in a PATCH merge update. When Present is false the field is
+// absent (leave unchanged). When Present is true the field is present: Value="" clears it, Value="x" sets it to "x".
 //
 // Construct with SetString (set a value) or ClearString (clear to null).
 type OptionalString struct {
@@ -257,8 +241,7 @@ func ClearString() OptionalString {
 
 // ── Producer / Registrar seams ────────────────────────────────────────────────
 
-// Producer is the narrow interface the Service uses for job lifecycle operations.
-// *scheduler.Scheduler satisfies it.
+// Producer is the narrow interface the Service uses for job lifecycle operations. *scheduler.Scheduler satisfies it.
 //
 // This is the full producer seam the reminders module needs across all slices:
 //   - Enqueue and Cancel are used in this slice (create + best-effort compensation).
@@ -269,8 +252,8 @@ type Producer interface {
 	Cancel(ctx context.Context, jobID string) error
 }
 
-// Registrar is the narrow interface used at construction to register the
-// "reminder.fire" handler. *scheduler.Scheduler satisfies it.
+// Registrar is the narrow interface used at construction to register the "reminder.fire" handler.
+// *scheduler.Scheduler satisfies it.
 type Registrar interface {
 	Register(kind string, h scheduler.Handler)
 }
@@ -285,8 +268,8 @@ type Service struct {
 	logger *slog.Logger
 }
 
-// Create validates in, persists the reminder, enqueues a fire-job, and stamps
-// the fire_job_id on the row. It publishes "reminder.created" on the bus.
+// Create validates in, persists the reminder, enqueues a fire-job, and stamps the fire_job_id on the row. It
+// publishes "reminder.created" on the bus.
 //
 // Validation (single ValidationError):
 //   - title: required, non-empty after trim.
@@ -325,8 +308,8 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 		}
 	}
 
-	// rrule: validate when present. Use explicit tz for parsing (or UTC as fallback
-	// when tz is absent/defaulted — UTC is always valid and lets us catch bad rrule syntax).
+	// rrule: validate when present. Use explicit tz for parsing (or UTC as fallback when tz is absent/defaulted — UTC
+	// is always valid and lets us catch bad rrule syntax).
 	if in.Rrule != "" {
 		effectiveTz := tzForRruleValidation
 		if effectiveTz == "" {
@@ -366,9 +349,8 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 
-	// Canonical due-at: truncate to the second once so the persisted value and
-	// the job RunAt are always identical (<1 s drift is otherwise possible when
-	// using the raw in.DueAt for Enqueue and the formatted string for storage).
+	// Canonical due-at: truncate to the second once so the persisted value and the job RunAt are always identical
+	// (<1 s drift is otherwise possible when using the raw in.DueAt for Enqueue and the formatted string for storage).
 	dueAtCanon := in.DueAt.UTC().Truncate(time.Second)
 	dueAtStr := dueAtCanon.Format(time.RFC3339)
 
@@ -401,10 +383,9 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 	}
 
 	// ── Enqueue fire-job and stamp fire_job_id ──────────────────────────────
-	// enqueueFireJobAndStamp handles the Enqueue → SetReminderFireJobID sequence
-	// and best-effort-Cancels the orphaned job on stamp failure. For Create we
-	// additionally delete the row on any failure so no orphan row persists with
-	// no fire_job_id.
+	// enqueueFireJobAndStamp handles the Enqueue → SetReminderFireJobID sequence and best-effort-Cancels the orphaned
+	// job on stamp failure. For Create we additionally delete the row on any failure so no orphan row persists with no
+	// fire_job_id.
 	jobID, enqErr := s.enqueueFireJobAndStamp(ctx, scope, reminderID, dueAtCanon, recurrenceFor(in.Rrule, tz))
 	if enqErr != nil {
 		if delErr := s.deleteReminder(ctx, scope, reminderID); delErr != nil {
@@ -438,8 +419,8 @@ func (s *Service) Create(ctx context.Context, scope store.Scope, in CreateInput)
 	return r, nil
 }
 
-// Get retrieves a reminder by id for the requesting user. Returns ErrNotFound
-// when the reminder does not exist or belongs to a different user.
+// Get retrieves a reminder by id for the requesting user. Returns ErrNotFound when the reminder does not exist or
+// belongs to a different user.
 func (s *Service) Get(ctx context.Context, scope store.Scope, reminderID string) (Reminder, error) {
 	row, err := db.New(s.st.Reader()).GetReminder(ctx, db.GetReminderParams{
 		ID:     reminderID,
@@ -454,12 +435,11 @@ func (s *Service) Get(ctx context.Context, scope store.Scope, reminderID string)
 	return reminderFromRow(row), nil
 }
 
-// List returns a cursor-paginated slice of reminders for the requesting user,
-// filtered and ordered per q.  It returns exactly q.Limit items (default 25,
-// max 100) plus a next-cursor when more pages exist.
+// List returns a cursor-paginated slice of reminders for the requesting user, filtered and ordered per q.  It returns
+// exactly q.Limit items (default 25, max 100) plus a next-cursor when more pages exist.
 //
-// A non-empty q.Cursor that cannot be decoded causes an error wrapping
-// ErrInvalidCursor; the HTTP adapter maps this to a 400 response.
+// A non-empty q.Cursor that cannot be decoded causes an error wrapping ErrInvalidCursor; the HTTP adapter maps this
+// to a 400 response.
 func (s *Service) List(ctx context.Context, scope store.Scope, q ListQuery) (Page, error) {
 	// Resolve limit.
 	limit := q.Limit
@@ -480,9 +460,8 @@ func (s *Service) List(ctx context.Context, scope store.Scope, q ListQuery) (Pag
 		}
 	}
 
-	// Build query params.  sqlc generated Status/DueAfter/DueBefore as
-	// any (narg) and CursorDue/CursorID as any/sql.NullString.
-	// We pass nil for absent optional params so the predicate is a no-op.
+	// Build query params.  sqlc generated Status/DueAfter/DueBefore as any (narg) and CursorDue/CursorID as
+	// any/sql.NullString. We pass nil for absent optional params so the predicate is a no-op.
 	var statusArg any
 	if q.Status != "" {
 		statusArg = q.Status
@@ -528,8 +507,8 @@ func (s *Service) List(ctx context.Context, scope store.Scope, q ListQuery) (Pag
 
 	var nextCursor string
 	if hasMore {
-		// items is non-empty when hasMore is true: we fetched limit+1 rows and
-		// trimmed to limit, so at least one item is present.
+		// items is non-empty when hasMore is true: we fetched limit+1 rows and trimmed to limit, so at least one item
+		// is present.
 		last := items[len(items)-1]
 		nextCursor = encodeCursor(last.DueAt, last.ID)
 	}
@@ -537,11 +516,9 @@ func (s *Service) List(ctx context.Context, scope store.Scope, q ListQuery) (Pag
 	return Page{Items: items, NextCursor: nextCursor, HasMore: hasMore}, nil
 }
 
-// Count returns the total number of reminders matching the given query for the
-// requesting user. It applies the same status and due-window filters as List
-// but ignores the cursor and limit fields (those are pagination controls, not
-// filter controls). Used by the list_reminders tool to determine whether to
-// emit a truncation signal.
+// Count returns the total number of reminders matching the given query for the requesting user. It applies the same
+// status and due-window filters as List but ignores the cursor and limit fields (those are pagination controls, not
+// filter controls). Used by the list_reminders tool to determine whether to emit a truncation signal.
 func (s *Service) Count(ctx context.Context, scope store.Scope, q ListQuery) (int64, error) {
 	var statusArg any
 	if q.Status != "" {
@@ -570,9 +547,8 @@ func (s *Service) Count(ctx context.Context, scope store.Scope, q ListQuery) (in
 
 // ── Update / Complete / Delete ────────────────────────────────────────────────
 
-// Update applies a partial/merge update to the reminder identified by id in
-// scope. Fields are merged in Go (load → apply → write all mutable columns).
-// It publishes "reminder.updated".
+// Update applies a partial/merge update to the reminder identified by id in scope. Fields are merged in Go
+// (load → apply → write all mutable columns). It publishes "reminder.updated".
 //
 // Merge semantics:
 //   - A nil pointer field in in is absent — the loaded value is preserved.
@@ -630,9 +606,8 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 		}
 	}
 
-	// Return structural-field errors (title, dueAt, status) early to avoid a
-	// wasted DB round-trip. Rrule validation is deferred until after the row
-	// load so we can use the reminder's effective timezone (see below).
+	// Return structural-field errors (title, dueAt, status) early to avoid a wasted DB round-trip. Rrule validation
+	// is deferred until after the row load so we can use the reminder's effective timezone (see below).
 	if len(fields) > 0 {
 		return Reminder{}, &ValidationError{Fields: fields}
 	}
@@ -649,12 +624,11 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 		return Reminder{}, fmt.Errorf("reminders: update %q: load: %w", id, err)
 	}
 
-	// rrule: validate when a new value is being set (not cleared, not absent).
-	// Use the reminder's stored tz (row.Tz) — the same timezone that will be
-	// stored and passed to the scheduler on Enqueue — keeping Update consistent
-	// with Create (which validates in the effective tz). validateRrule parses the
-	// rrule using rrulego.StrToROptionInLocation, mirroring the scheduler's call
-	// exactly, so an rrule accepted here is always accepted at dispatch.
+	// rrule: validate when a new value is being set (not cleared, not absent). Use the reminder's stored tz (row.Tz)
+	// — the same timezone that will be stored and passed to the scheduler on Enqueue — keeping Update consistent with
+	// Create (which validates in the effective tz). validateRrule parses the rrule using
+	// rrulego.StrToROptionInLocation, mirroring the scheduler's call exactly, so an rrule accepted here is always
+	// accepted at dispatch.
 	if in.Rrule.Present && in.Rrule.Value != "" {
 		if fe := validateRrule(in.Rrule.Value, row.Tz); fe != nil {
 			return Reminder{}, &ValidationError{Fields: []httpx.FieldError{*fe}}
@@ -712,10 +686,9 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 	if in.Status != nil {
 		switch *in.Status {
 		case statusCompleted:
-			// Transition to completed: set completed_at if not already set.
-			// The REST adapter routes all PATCH requests (including those that
-			// combine status=completed with other field changes) through Update,
-			// so this branch is the single writer for the active→completed transition.
+			// Transition to completed: set completed_at if not already set. The REST adapter routes all PATCH
+			// requests (including those that combine status=completed with other field changes) through Update, so
+			// this branch is the single writer for the active→completed transition.
 			status = statusCompleted
 			if !completedAt.Valid {
 				completedAt = sql.NullString{String: time.Now().UTC().Format(time.RFC3339), Valid: true}
@@ -776,8 +749,8 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 
 	// ── Fire-job sync ─────────────────────────────────────────────────────────
 	//
-	// The cases are mutually exclusive: reopening wins, then dueAt-shift, then
-	// rrule-change. A switch makes the mutual exclusion explicit for gocritic.
+	// The cases are mutually exclusive: reopening wins, then dueAt-shift, then rrule-change. A switch makes the
+	// mutual exclusion explicit for gocritic.
 	switch {
 	case reopening:
 		// Re-open: enqueue a fresh one-shot fire-job (same shape as Create).
@@ -789,31 +762,26 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 		// The reload below picks up the stamped fire_job_id.
 
 	case !newDueAt.IsZero() && prevFireJobID != "" && status == statusActive && !rrule.Valid && !rruleChanged:
-		// Pure dueAt time-shift on an active ONE-SHOT reminder with no rrule change:
-		// Reschedule the existing job.
+		// Pure dueAt time-shift on an active ONE-SHOT reminder with no rrule change: Reschedule the existing job.
 		//
-		// The !rruleChanged guard is critical: a PATCH that simultaneously clears the
-		// rrule (rruleChanged=true, rrule.Valid now false) AND shifts dueAt must NOT
-		// match here — it must fall through to syncFireJobForRecurrenceChange below,
-		// which Cancels the old recurring job and Enqueues a fresh one-shot job.
-		// Without this guard the dueAt-shift case would match first (because !rrule.Valid
-		// is now true after the clear), calling Reschedule instead of Cancel+re-enqueue
-		// and leaving the scheduler job's rrule columns intact while the reminder is
-		// now one-shot.
+		// The !rruleChanged guard is critical: a PATCH that simultaneously clears the rrule (rruleChanged=true,
+		// rrule.Valid now false) AND shifts dueAt must NOT match here — it must fall through to
+		// syncFireJobForRecurrenceChange below, which Cancels the old recurring job and Enqueues a fresh one-shot
+		// job. Without this guard the dueAt-shift case would match first (because !rrule.Valid is now true after the
+		// clear), calling Reschedule instead of Cancel+re-enqueue and leaving the scheduler job's rrule columns
+		// intact while the reminder is now one-shot.
 		//
-		// For RECURRING reminders where only dueAt changes (rrule unchanged), a dueAt
-		// shift also changes the RRULE anchor — that path is covered by the
-		// rruleChanged/rrule.Valid case below.
+		// For RECURRING reminders where only dueAt changes (rrule unchanged), a dueAt shift also changes the RRULE
+		// anchor — that path is covered by the rruleChanged/rrule.Valid case below.
 		//
-		// ErrJobNotFound fallback (keep-active one-shot): after a keep-active fire the
-		// scheduler deletes the job but StampFiredKeepActive keeps the reminder active
-		// with its old fire_job_id. Reschedule returns ErrJobNotFound for the gone job;
-		// we fall back to Enqueue+stamp so the reminder will fire at the new dueAt.
+		// ErrJobNotFound fallback (keep-active one-shot): after a keep-active fire the scheduler deletes the job but
+		// StampFiredKeepActive keeps the reminder active with its old fire_job_id. Reschedule returns ErrJobNotFound
+		// for the gone job; we fall back to Enqueue+stamp so the reminder will fire at the new dueAt.
 		reschedErr := s.prod.Reschedule(ctx, prevFireJobID, newDueAt)
 		if reschedErr != nil {
 			if errors.Is(reschedErr, scheduler.ErrJobNotFound) {
-				// Job is gone (fired keep-active one-shot or otherwise deleted).
-				// Fall back to Enqueue+stamp so the reminder can fire again.
+				// Job is gone (fired keep-active one-shot or otherwise deleted). Fall back to Enqueue+stamp so the
+				// reminder can fire again.
 				if _, fbErr := s.enqueueFireJobAndStamp(ctx, scope, id, newDueAt, nil); fbErr != nil {
 					s.logger.Error("reminders: update: ErrJobNotFound fallback enqueue",
 						"reminder_id", id, "err", fbErr)
@@ -827,12 +795,11 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 	case status == statusActive &&
 		((!newDueAt.IsZero() && rrule.Valid && prevFireJobID != "") ||
 			(rruleChanged && prevFireJobID != "")):
-		// Recurrence-affecting change on an ACTIVE reminder: either rrule changed
-		// (including being cleared — rruleChanged covers clearing to ""), or dueAt
-		// shifted on a recurring reminder (which changes the RRULE anchor). Cancel
-		// the old job and enqueue a fresh one with the correct Recurrence field.
-		// Non-active reminders must not have a live fire-job re-enqueued here; the
-		// reopen path (above) handles the active transition separately.
+		// Recurrence-affecting change on an ACTIVE reminder: either rrule changed (including being cleared —
+		// rruleChanged covers clearing to ""), or dueAt shifted on a recurring reminder (which changes the RRULE
+		// anchor). Cancel the old job and enqueue a fresh one with the correct Recurrence field. Non-active reminders
+		// must not have a live fire-job re-enqueued here; the reopen path (above) handles the active transition
+		// separately.
 		s.syncFireJobForRecurrenceChange(ctx, scope, id, prevFireJobID, dueAtStr, rrule, row.Tz)
 	}
 
@@ -859,15 +826,13 @@ func (s *Service) Update(ctx context.Context, scope store.Scope, id string, in U
 	return final, nil
 }
 
-// syncFireJobForRecurrenceChange is called when an Update changes the recurrence
-// of an active reminder (rrule set/changed/cleared, or dueAt shifted on a
-// recurring reminder). It cancels the old fire-job and enqueues a fresh one with
-// the correct Recurrence field (recurring when newRrule is set, one-shot when nil).
-// The new fire_job_id is stamped on the row; errors are logged and best-efforted.
+// syncFireJobForRecurrenceChange is called when an Update changes the recurrence of an active reminder (rrule
+// set/changed/cleared, or dueAt shifted on a recurring reminder). It cancels the old fire-job and enqueues a fresh
+// one with the correct Recurrence field (recurring when newRrule is set, one-shot when nil). The new fire_job_id is
+// stamped on the row; errors are logged and best-efforted.
 //
-// Callers pass the canonical values already held in memory (dueAtStr from the
-// merged state, newRrule, and tz) to avoid a read-after-write round-trip through
-// the store. The Service remains the single writer of fire_job_id.
+// Callers pass the canonical values already held in memory (dueAtStr from the merged state, newRrule, and tz) to
+// avoid a read-after-write round-trip through the store. The Service remains the single writer of fire_job_id.
 func (s *Service) syncFireJobForRecurrenceChange(
 	ctx context.Context,
 	scope store.Scope,
@@ -883,8 +848,8 @@ func (s *Service) syncFireJobForRecurrenceChange(
 			"reminder_id", reminderID, "job_id", prevFireJobID, "err", err)
 	}
 
-	// Parse the canonical due_at from the caller's merged state (avoids re-reading
-	// the row from the store — the value was just written by UpdateReminder above).
+	// Parse the canonical due_at from the caller's merged state (avoids re-reading the row from the store — the value
+	// was just written by UpdateReminder above).
 	dueAtCanon, err := time.Parse(time.RFC3339, dueAtStr)
 	if err != nil {
 		s.logger.Error("reminders: syncFireJobForRecurrenceChange: parse due_at",
@@ -897,30 +862,26 @@ func (s *Service) syncFireJobForRecurrenceChange(
 		recurrence = recurrenceFor(newRrule.String, tz)
 	}
 
-	// Enqueue the new job (recurring or one-shot per the new rrule) and stamp
-	// fire_job_id. The old-job Cancel above is unique to this call site and is
-	// not part of the shared enqueueFireJobAndStamp helper.
+	// Enqueue the new job (recurring or one-shot per the new rrule) and stamp fire_job_id. The old-job Cancel above
+	// is unique to this call site and is not part of the shared enqueueFireJobAndStamp helper.
 	if _, err := s.enqueueFireJobAndStamp(ctx, scope, reminderID, dueAtCanon, recurrence); err != nil {
 		s.logger.Error("reminders: syncFireJobForRecurrenceChange: enqueue+stamp",
 			"reminder_id", reminderID, "err", err)
 	}
 }
 
-// enqueueFireJobAndStamp enqueues a reminder.fire job for reminderID at runAt
-// with the given recurrence (nil for a one-shot job), then stamps fire_job_id
-// on the row via SetReminderFireJobID. On stamp failure it best-effort-Cancels
+// enqueueFireJobAndStamp enqueues a reminder.fire job for reminderID at runAt with the given recurrence (nil for a
+// one-shot job), then stamps fire_job_id on the row via SetReminderFireJobID. On stamp failure it best-effort-Cancels
 // the orphaned job so it doesn't accumulate in the scheduler.
 //
-// Returns the new job ID on success so callers can include it in an in-memory
-// response without a second DB read.
+// Returns the new job ID on success so callers can include it in an in-memory response without a second DB read.
 //
-// This helper centralises the open-coded enqueue+stamp+compensate sequence that
-// appears in Create, the Update re-open branch, syncFireJobForRecurrenceChange,
-// and the ErrJobNotFound fallback in the dueAt-shift branch. Callers are
+// This helper centralises the open-coded enqueue+stamp+compensate sequence that appears in Create, the Update re-open
+// branch, syncFireJobForRecurrenceChange, and the ErrJobNotFound fallback in the dueAt-shift branch. Callers are
 // responsible for any preceding Cancel of an old job.
 //
-// Returned errors are the raw marshal/Enqueue/stamp failures; the caller decides
-// whether to propagate them (Create) or log+swallow them (Update paths).
+// Returned errors are the raw marshal/Enqueue/stamp failures; the caller decides whether to propagate them (Create)
+// or log+swallow them (Update paths).
 func (s *Service) enqueueFireJobAndStamp(
 	ctx context.Context,
 	scope store.Scope,
@@ -953,8 +914,7 @@ func (s *Service) enqueueFireJobAndStamp(
 		UserID:    scope.UserID(),
 	})
 	if stampErr != nil {
-		// Best-effort cancel the orphaned job so it doesn't fire for a row that
-		// has no fire_job_id pointing at it.
+		// Best-effort cancel the orphaned job so it doesn't fire for a row that has no fire_job_id pointing at it.
 		if cancelErr := s.prod.Cancel(ctx, newJobID); cancelErr != nil {
 			s.logger.Error("reminders: enqueueFireJobAndStamp: cancel orphaned job",
 				"reminder_id", reminderID, "job_id", newJobID, "err", cancelErr)
@@ -964,9 +924,8 @@ func (s *Service) enqueueFireJobAndStamp(
 	return newJobID, nil
 }
 
-// Complete marks the reminder as completed, cancels the active fire-job (if
-// any), and publishes "reminder.completed". It is idempotent: calling Complete
-// on an already-completed reminder is a no-op (the job is already gone).
+// Complete marks the reminder as completed, cancels the active fire-job (if any), and publishes "reminder.completed".
+// It is idempotent: calling Complete on an already-completed reminder is a no-op (the job is already gone).
 func (s *Service) Complete(ctx context.Context, scope store.Scope, id string) (Reminder, error) {
 	// Load current row to get the fire_job_id.
 	row, err := db.New(s.st.Reader()).GetReminder(ctx, db.GetReminderParams{
@@ -1028,12 +987,10 @@ func (s *Service) Complete(ctx context.Context, scope store.Scope, id string) (R
 	return final, nil
 }
 
-// Delete removes the reminder row (scoped to the user), cancels the active
-// fire-job (if any), and publishes "reminder.deleted" carrying the deleted
-// reminder so SSE clients can render without a follow-up fetch.
+// Delete removes the reminder row (scoped to the user), cancels the active fire-job (if any), and publishes
+// "reminder.deleted" carrying the deleted reminder so SSE clients can render without a follow-up fetch.
 func (s *Service) Delete(ctx context.Context, scope store.Scope, id string) error {
-	// Load the row first so the event carries the full reminder and we know the
-	// fire_job_id to cancel.
+	// Load the row first so the event carries the full reminder and we know the fire_job_id to cancel.
 	row, err := db.New(s.st.Reader()).GetReminder(ctx, db.GetReminderParams{
 		ID:     id,
 		UserID: scope.UserID(),
@@ -1056,8 +1013,8 @@ func (s *Service) Delete(ctx context.Context, scope store.Scope, id string) erro
 		return fmt.Errorf("reminders: delete %q: %w", id, err)
 	}
 
-	// Cancel the fire-job (best-effort, after row is gone so scheduler can't
-	// re-fire it even if Cancel fails transiently).
+	// Cancel the fire-job (best-effort, after row is gone so scheduler can't re-fire it even if Cancel fails
+	// transiently).
 	if row.FireJobID.Valid && row.FireJobID.String != "" {
 		if cancelErr := s.prod.Cancel(ctx, row.FireJobID.String); cancelErr != nil {
 			s.logger.Error("reminders: delete: cancel fire-job",
@@ -1075,9 +1032,8 @@ func (s *Service) Delete(ctx context.Context, scope store.Scope, id string) erro
 
 // ── fire handler ──────────────────────────────────────────────────────────────
 
-// handleFire is the "reminder.fire" scheduler handler.  It loads the reminder
-// fresh, publishes "reminder.fired", stamps last_fired_at, and optionally
-// completes the reminder.
+// handleFire is the "reminder.fire" scheduler handler.  It loads the reminder fresh, publishes "reminder.fired",
+// stamps last_fired_at, and optionally completes the reminder.
 func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 	// Decode payload.
 	var p firePayload
@@ -1099,11 +1055,10 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 		return fmt.Errorf("reminders: fire: load reminder %q: %w", p.ReminderID, err)
 	}
 
-	// Gate on status: only an active reminder proceeds. A non-active reminder
-	// (completed or cancelled) here means the job was re-dispatched after the
-	// reminder reached a terminal state (at-least-once reclaim, or a finite
-	// series that just exhausted on the previous run). Return nil — do NOT
-	// dead-letter, so the scheduler can clean up the job normally.
+	// Gate on status: only an active reminder proceeds. A non-active reminder (completed or cancelled) here means the
+	// job was re-dispatched after the reminder reached a terminal state (at-least-once reclaim, or a finite series
+	// that just exhausted on the previous run). Return nil — do NOT dead-letter, so the scheduler can clean up the
+	// job normally.
 	if row.Status != statusActive {
 		s.logger.Info("reminders: fire: reminder no longer active — skipping",
 			"reminder_id", p.ReminderID, "status", row.Status)
@@ -1113,9 +1068,8 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 
-	// Publish reminder.fired thin event before any stamp so that clients see the
-	// notification even if the subsequent stamp fails transiently. The thin event
-	// carries only the reminder id, title, dueAt, and firedAt — enough for a
+	// Publish reminder.fired thin event before any stamp so that clients see the notification even if the subsequent
+	// stamp fails transiently. The thin event carries only the reminder id, title, dueAt, and firedAt — enough for a
 	// notification surface without a follow-up fetch.
 	s.bus.Publish(job.Scope.UserID(), events.Event{
 		Type: eventFired,
@@ -1128,15 +1082,13 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 	})
 
 	// ── Recurring branch ─────────────────────────────────────────────────────
-	// When the reminder has an rrule, advance due_at to the next occurrence
-	// (strictly after now), keep status=active, and ignore auto_complete.
-	// The anchor for the RRULE engine is the current due_at in the reminder's
-	// TZ — this mirrors the scheduler's nextRunAt anchor exactly (see
-	// claimedRow.nextRunAt: anchor = current.In(loc)).
+	// When the reminder has an rrule, advance due_at to the next occurrence (strictly after now), keep status=active,
+	// and ignore auto_complete. The anchor for the RRULE engine is the current due_at in the reminder's TZ — this
+	// mirrors the scheduler's nextRunAt anchor exactly (see claimedRow.nextRunAt: anchor = current.In(loc)).
 	//
-	// Idempotency: "next occurrence strictly after now" is stable within the
-	// scheduler's lease window. A reclaim re-run before now crosses the next
-	// occurrence recomputes the same next instant, so due_at does not double-advance.
+	// Idempotency: "next occurrence strictly after now" is stable within the scheduler's lease window. A reclaim
+	// re-run before now crosses the next occurrence recomputes the same next instant, so due_at does not
+	// double-advance.
 	if row.Rrule.Valid && row.Rrule.String != "" {
 		// Parse the current due_at as the anchor for the RRULE engine.
 		anchor, parseErr := time.Parse(time.RFC3339, row.DueAt)
@@ -1144,23 +1096,21 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 			return scheduler.Permanent(fmt.Errorf("reminders: fire: parse due_at %q: %w", row.DueAt, parseErr))
 		}
 
-		// Two-clock note: this handler anchors the advance on due_at (the reminder's
-		// stored instant) and advances to "next occurrence strictly after now", which
-		// mirrors the scheduler's own nextRunAt computation (claimedRow.nextRunAt anchors
-		// on the job's current run_at in the reminder's TZ). For rules coarser than the
-		// scheduler's lease window (the minimum supported granularity — reminders are not
-		// sub-minute), both clocks land on the same occurrence, so due_at and the
-		// scheduler's next run_at stay in sync. Sub-lease-window (sub-minute) recurrence
-		// is explicitly out of scope; at supported granularities the two-clock advance
+		// Two-clock note: this handler anchors the advance on due_at (the reminder's stored instant) and advances to
+		// "next occurrence strictly after now", which mirrors the scheduler's own nextRunAt computation
+		// (claimedRow.nextRunAt anchors on the job's current run_at in the reminder's TZ). For rules coarser than the
+		// scheduler's lease window (the minimum supported granularity — reminders are not sub-minute), both clocks
+		// land on the same occurrence, so due_at and the scheduler's next run_at stay in sync. Sub-lease-window
+		// (sub-minute) recurrence is explicitly out of scope; at supported granularities the two-clock advance
 		// cannot drift.
 		next, nextErr := nextOccurrence(row.Rrule.String, row.Tz, anchor, now)
 		if nextErr != nil {
 			return scheduler.Permanent(fmt.Errorf("reminders: fire: next occurrence: %w", nextErr))
 		}
 		if next.IsZero() {
-			// Finite RRULE exhausted (COUNT/UNTIL reached) — transition to completed so
-			// the reminder does not linger as active with no future due_at. This is
-			// distinct from a user-initiated completion: the series simply ran out.
+			// Finite RRULE exhausted (COUNT/UNTIL reached) — transition to completed so the reminder does not linger
+			// as active with no future due_at. This is distinct from a user-initiated completion: the series simply
+			// ran out.
 			s.logger.Info("reminders: fire: recurrence series exhausted — completing reminder",
 				"reminder_id", row.ID, "rrule", row.Rrule.String, "last_fired_at", nowStr)
 			n, stampErr := db.New(s.st.Writer()).StampFiredAutoComplete(ctx, db.StampFiredAutoCompleteParams{
@@ -1174,9 +1124,8 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 				return fmt.Errorf("reminders: fire: stamp exhausted recurring: %w", stampErr)
 			}
 			if n == 0 {
-				// Row was deleted between the status gate and this stamp (TOCTOU).
-				// The reminder.fired thin event was already published above; log and
-				// return nil so the scheduler does not retry a non-existent row.
+				// Row was deleted between the status gate and this stamp (TOCTOU). The reminder.fired thin event was
+				// already published above; log and return nil so the scheduler does not retry a non-existent row.
 				s.logger.Warn("reminders: fire: stamp exhausted recurring: 0 rows (reminder gone)",
 					"reminder_id", row.ID)
 				return nil
@@ -1198,8 +1147,8 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 			return fmt.Errorf("reminders: fire: stamp recurring: %w", stampErr)
 		}
 		if n == 0 {
-			// Row was deleted between the status gate and this stamp (TOCTOU).
-			// Return nil — do not advance the scheduler job for a gone reminder.
+			// Row was deleted between the status gate and this stamp (TOCTOU). Return nil — do not advance the
+			// scheduler job for a gone reminder.
 			s.logger.Warn("reminders: fire: stamp recurring: 0 rows (reminder gone)",
 				"reminder_id", row.ID)
 			return nil
@@ -1211,8 +1160,8 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 	}
 
 	// ── One-shot branch ──────────────────────────────────────────────────────
-	// Stamp last_fired_at and optionally auto-complete, then emit the matching
-	// fat domain event so clients reflect the new state without a refetch.
+	// Stamp last_fired_at and optionally auto-complete, then emit the matching fat domain event so clients reflect
+	// the new state without a refetch.
 	var n int64
 	if row.AutoComplete == 1 {
 		n, err = db.New(s.st.Writer()).StampFiredAutoComplete(ctx, db.StampFiredAutoCompleteParams{
@@ -1234,15 +1183,15 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 		return fmt.Errorf("reminders: fire: stamp fired: %w", err)
 	}
 	if n == 0 {
-		// Row was deleted between the status gate and this stamp (TOCTOU).
-		// Return nil — the reminder.fired thin event was already published above.
+		// Row was deleted between the status gate and this stamp (TOCTOU). Return nil — the reminder.fired thin event
+		// was already published above.
 		s.logger.Warn("reminders: fire: stamp one-shot: 0 rows (reminder gone)",
 			"reminder_id", row.ID)
 		return nil
 	}
 
-	// Emit the fat post-stamp event, mirroring the event type emitted by Update/Complete.
-	// auto_complete=true → "reminder.completed"; auto_complete=false → "reminder.updated".
+	// Emit the fat post-stamp event, mirroring the event type emitted by Update/Complete. auto_complete=true →
+	// "reminder.completed"; auto_complete=false → "reminder.updated".
 	firedEvtType := eventUpdated
 	if row.AutoComplete == 1 {
 		firedEvtType = eventCompleted
@@ -1252,11 +1201,10 @@ func (s *Service) handleFire(ctx context.Context, job scheduler.Job) error {
 	return nil
 }
 
-// publishFiredState reloads the reminder row from the store and publishes it as
-// a fat event of the given type on the bus. Errors are logged and best-efforted:
-// the stamp that changed the row already succeeded, so a reload failure must not
-// roll back the persisted state — it only means the SSE push is skipped for this
-// fire cycle (the client can refetch on reconnect).
+// publishFiredState reloads the reminder row from the store and publishes it as a fat event of the given type on the
+// bus. Errors are logged and best-efforted: the stamp that changed the row already succeeded, so a reload failure
+// must not roll back the persisted state — it only means the SSE push is skipped for this fire cycle (the client can
+// refetch on reconnect).
 func (s *Service) publishFiredState(ctx context.Context, scope store.Scope, reminderID, eventType string) {
 	final, err := s.Get(ctx, scope, reminderID)
 	if err != nil {
@@ -1272,9 +1220,8 @@ func (s *Service) publishFiredState(ctx context.Context, scope store.Scope, remi
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// recurrenceFor builds a *scheduler.Recurrence for a reminder's rrule and tz when
-// the rrule is set, or nil for a one-shot reminder. This is the single place that
-// maps reminder fields onto the scheduler's Recurrence type.
+// recurrenceFor builds a *scheduler.Recurrence for a reminder's rrule and tz when the rrule is set, or nil for a
+// one-shot reminder. This is the single place that maps reminder fields onto the scheduler's Recurrence type.
 func recurrenceFor(rruleStr, tz string) *scheduler.Recurrence {
 	if rruleStr == "" {
 		return nil
@@ -1282,12 +1229,12 @@ func recurrenceFor(rruleStr, tz string) *scheduler.Recurrence {
 	return &scheduler.Recurrence{RRULE: rruleStr, TZ: tz}
 }
 
-// validateRrule parses rruleStr under the given IANA timezone and returns a
-// field error when parsing fails. The tz must already be valid (caller ensures
-// this before calling). Returns nil when rruleStr is empty (no validation needed).
+// validateRrule parses rruleStr under the given IANA timezone and returns a field error when parsing fails. The tz
+// must already be valid (caller ensures this before calling). Returns nil when rruleStr is empty (no validation
+// needed).
 //
-// Callers must pass the same timezone that will be stored and enqueued so that
-// the invariant "accepted here ⟹ accepted by the scheduler at dispatch" holds:
+// Callers must pass the same timezone that will be stored and enqueued so that the invariant "accepted here ⟹
+// accepted by the scheduler at dispatch" holds:
 //   - Create: passes the effective tz resolved from the input / profile / "UTC".
 //   - Update: passes row.Tz — the reminder's stored timezone — after loading the row.
 //
@@ -1311,16 +1258,15 @@ func validateRrule(rruleStr, tz string) *httpx.FieldError {
 	return nil
 }
 
-// nextOccurrence computes the next occurrence of rruleStr in the given IANA tz,
-// strictly after now, anchored at anchor (the current due_at converted to the
-// reminder's tz). This mirrors the scheduler's nextRunAt (claimedRow) semantics
-// exactly:
+// nextOccurrence computes the next occurrence of rruleStr in the given IANA tz, strictly after now, anchored at
+// anchor (the current due_at converted to the reminder's tz). This mirrors the scheduler's nextRunAt (claimedRow)
+// semantics exactly:
 //   - anchor = current due_at in the reminder's TZ (preserves wall-clock phase).
 //   - Dtstart = anchor (on-phase seed for the RRULE engine).
 //   - rule.After(now, false) = strictly-after-now next occurrence.
 //
-// A zero time.Time is returned (with a nil error) when the RRULE series is
-// exhausted (finite COUNT/UNTIL with no future occurrence).
+// A zero time.Time is returned (with a nil error) when the RRULE series is exhausted (finite COUNT/UNTIL with no
+// future occurrence).
 func nextOccurrence(rruleStr, tz string, anchor, now time.Time) (time.Time, error) {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
@@ -1345,8 +1291,8 @@ func nextOccurrence(rruleStr, tz string, anchor, now time.Time) (time.Time, erro
 	return next, nil
 }
 
-// deleteReminder is the scope-bound best-effort delete used by Create's
-// compensation paths. It silently tolerates a 0-row result (already gone).
+// deleteReminder is the scope-bound best-effort delete used by Create's compensation paths. It silently tolerates a
+// 0-row result (already gone).
 func (s *Service) deleteReminder(ctx context.Context, scope store.Scope, reminderID string) error {
 	_, err := db.New(s.st.Writer()).DeleteReminder(ctx, db.DeleteReminderParams{
 		ID:     reminderID,
@@ -1394,21 +1340,17 @@ func reminderFromRow(row db.Reminder) Reminder {
 
 // ── Module ────────────────────────────────────────────────────────────────────
 
-// Module wires the reminders Service to the HTTP router and the capability
-// registry. It satisfies app.Module.
+// Module wires the reminders Service to the HTTP router and the capability registry. It satisfies app.Module.
 type Module struct {
 	svc    *Service
 	logger *slog.Logger
 }
 
-// New constructs a Module, registers the fireJobKind handler on reg, and
-// returns the Module. reg must be the concrete scheduler; it is used only for
-// handler registration.
+// New constructs a Module, registers the fireJobKind handler on reg, and returns the Module. reg must be the concrete
+// scheduler; it is used only for handler registration.
 //
-// logger is optional: when nil, slog.Default() is used (mirroring the
-// authhttp/httpx nil-fallback pattern). Pass the app logger at the call site
-// so structured log records carry the same handler and attributes as the rest
-// of the app.
+// logger is optional: when nil, slog.Default() is used (mirroring the authhttp/httpx nil-fallback pattern). Pass the
+// app logger at the call site so structured log records carry the same handler and attributes as the rest of the app.
 //
 // Call New before scheduler.Start so the handler is visible on the first tick.
 func New(st *store.Store, prod Producer, bus events.Publisher, reg Registrar, logger *slog.Logger) *Module {
@@ -1552,10 +1494,9 @@ func (m *Module) getHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// listKnownParams is the set of query parameter names accepted by listHandler.
-// Any name outside this set triggers a 400 Bad Request — per the HTTP house guide,
-// unknown filter params must be rejected rather than silently ignored, because a
-// typo'd param (e.g. ?staus=completed) would otherwise return the wrong data.
+// listKnownParams is the set of query parameter names accepted by listHandler. Any name outside this set triggers a
+// 400 Bad Request — per the HTTP house guide, unknown filter params must be rejected rather than silently ignored,
+// because a typo'd param (e.g. ?staus=completed) would otherwise return the wrong data.
 var listKnownParams = map[string]struct{}{
 	"cursor":    {},
 	"limit":     {},
@@ -1700,8 +1641,8 @@ func (m *Module) listHandler(w http.ResponseWriter, r *http.Request) {
 
 // patchHandler handles PATCH /api/v1/reminders/{id}.
 //
-// All cases are routed through Service.Update so that field changes and status
-// transitions are always applied in a single coherent write:
+// All cases are routed through Service.Update so that field changes and status transitions are always applied in a
+// single coherent write:
 //   - status="completed": active→completed (cancels fire-job, sets completed_at,
 //     emits "reminder.completed") — other fields in the body are also persisted.
 //   - status="active" on a completed reminder: re-open (enqueues a fresh
@@ -1726,8 +1667,7 @@ func (m *Module) patchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode body using the raw-JSON optional pattern so we can distinguish
-	// absent fields from null.
+	// Decode body using the raw-JSON optional pattern so we can distinguish absent fields from null.
 	var body patchRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.WriteProblem(w, r, httpx.MalformedBodyProblem())
@@ -1800,11 +1740,10 @@ func (m *Module) patchHandler(w http.ResponseWriter, r *http.Request) {
 	//   status="active"     → completed→active re-open (enqueues fresh job)
 	//   no status           → plain field merge + optional dueAt Reschedule
 	//
-	// Funnelling through Update (rather than the old early-return to Complete)
-	// ensures that when a caller sends {"status":"completed","title":"X"}, BOTH
-	// the title change and the completion are persisted in one coherent write.
-	// Service.Complete remains public for direct callers (AI tools, etc.) but
-	// the PATCH handler no longer bypasses Update.
+	// Funnelling through Update (rather than the old early-return to Complete) ensures that when a caller sends
+	// {"status":"completed","title":"X"}, BOTH the title change and the completion are persisted in one coherent
+	// write. Service.Complete remains public for direct callers (AI tools, etc.) but the PATCH handler no longer
+	// bypasses Update.
 	result, err := m.svc.Update(r.Context(), scope, reminderID, in)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -1831,9 +1770,8 @@ func (m *Module) patchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// deleteHandler handles DELETE /api/v1/reminders/{id}.
-// Returns 204 No Content on success; 404 when the reminder does not exist or
-// belongs to a different user.
+// deleteHandler handles DELETE /api/v1/reminders/{id}. Returns 204 No Content on success; 404 when the reminder does
+// not exist or belongs to a different user.
 func (m *Module) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	principal, ok := httpx.PrincipalFromContext(r.Context())
 	if !ok {
@@ -1865,8 +1803,7 @@ func (m *Module) deleteHandler(w http.ResponseWriter, r *http.Request) {
 
 // ── REST DTO ──────────────────────────────────────────────────────────────────
 
-// createRequestBody is the JSON shape for POST /api/v1/reminders.
-// camelCase per the HTTP house guide.
+// createRequestBody is the JSON shape for POST /api/v1/reminders. camelCase per the HTTP house guide.
 type createRequestBody struct {
 	Title        string `json:"title"`
 	Notes        string `json:"notes"`
@@ -1876,20 +1813,17 @@ type createRequestBody struct {
 	Rrule        string `json:"rrule"`
 }
 
-// patchRequestBody is the JSON shape for PATCH /api/v1/reminders/{id}.
-// camelCase per the HTTP house guide.
+// patchRequestBody is the JSON shape for PATCH /api/v1/reminders/{id}. camelCase per the HTTP house guide.
 //
-// Notes and Rrule use json.RawMessage so we can distinguish three states at
-// the HTTP layer:
+// Notes and Rrule use json.RawMessage so we can distinguish three states at the HTTP layer:
 //   - field absent from JSON object → pointer is nil (leave unchanged)
 //   - field present as JSON null    → pointer is non-nil, value is `null`
 //     (clear the nullable column)
 //   - field present with a value    → pointer is non-nil, unmarshal to string
 //     (set the column)
 //
-// All other fields use plain *T: absent → nil (leave unchanged), present →
-// non-nil (apply). There is no "present + null" semantic for non-nullable
-// columns (title, dueAt, autoComplete, status).
+// All other fields use plain *T: absent → nil (leave unchanged), present → non-nil (apply). There is no
+// "present + null" semantic for non-nullable columns (title, dueAt, autoComplete, status).
 type patchRequestBody struct {
 	Title        *string          `json:"title"`
 	Notes        *json.RawMessage `json:"notes"`

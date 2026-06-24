@@ -1,9 +1,8 @@
 <script lang="ts">
   // Reminders page — grouped chronological view with live SSE updates.
   //
-  // Renders four time buckets (Overdue · Today · This week · Later) plus a
-  // "Done" section loaded on demand. Live updates fall out for free because all
-  // derives are over the module-level $state in the reminders store, which the
+  // Renders four time buckets (Overdue · Today · This week · Later) plus a "Done" section loaded on demand. Live
+  // updates fall out for free because all derives are over the module-level $state in the reminders store, which the
   // SSE client already patches on every reminder.* event.
   //
   // Bucket boundary choice (see also src/lib/reminders/bucket.ts):
@@ -13,8 +12,8 @@
   //   Later:      dueAt >= next Monday 00:00 local
   //   Done:       status === "completed", loaded on demand via GET /reminders?status=completed
   //
-  // Security: reminder.title flows through {reminder.title} — Svelte escapes it
-  // automatically. Never use {@html} for user-supplied content.
+  // Security: reminder.title flows through {reminder.title} — Svelte escapes it automatically. Never use {@html} for
+  // user-supplied content.
 
   import { ulid } from "ulid";
   import { toast } from "@qovira/ui";
@@ -72,11 +71,9 @@
   } from "$lib/paraglide/messages.js";
 
   // ---------------------------------------------------------------------------
-  // "now" — refreshed on a coarse 30-second timer so bucket boundaries
-  // (overdue / today / this-week, midnight crossings) stay current while the
-  // route stays mounted. Minute granularity is sufficient; 30s is a safe
-  // midpoint between responsiveness and CPU cost.
-  // $effect is appropriate: syncing with a browser timer (external system).
+  // "now" — refreshed on a coarse 30-second timer so bucket boundaries (overdue / today / this-week, midnight
+  // crossings) stay current while the route stays mounted. Minute granularity is sufficient; 30s is a safe midpoint
+  // between responsiveness and CPU cost. $effect is appropriate: syncing with a browser timer (external system).
   // ---------------------------------------------------------------------------
   let now = $state(new Date());
 
@@ -328,24 +325,23 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Helper: clear a stale inline error when the user edits any edit-sheet field.
-  // Called from each field's input/change handler so the error banner disappears
-  // the moment they start correcting — not just on the next submit.
+  // Helper: clear a stale inline error when the user edits any edit-sheet field. Called from each field's
+  // input/change handler so the error banner disappears the moment they start correcting — not just on the next
+  // submit.
   // ---------------------------------------------------------------------------
   function clearEditError(): void {
     editError = null;
   }
 
   // ---------------------------------------------------------------------------
-  // Helper: is the rrule preset a known match-able preset (not "keep")?
-  // Used to guard the select value for the "keep" option visibility.
+  // Helper: is the rrule preset a known match-able preset (not "keep")? Used to guard the select value for the "keep"
+  // option visibility.
   // ---------------------------------------------------------------------------
   const PRESET_OPTIONS: RrulePreset[] = ["none", "daily", "weekly", "monthly"];
 </script>
 
 <!--
-  Single-column reminders view.
-  Quick-add form is pinned at the top, above the buckets.
+  Single-column reminders view. Quick-add form is pinned at the top, above the buckets.
 -->
 
 <!-- =========================================================================
@@ -382,9 +378,8 @@
 
 <!-- =========================================================================
   Bucketed reminder sections.
-  A11y: each row is restructured as SIBLING buttons (check-circle + row body)
-  inside the <li>, NOT nested buttons. This satisfies the interactive-child
-  constraint and is valid HTML / a11y.
+  A11y: each row is restructured as SIBLING buttons (check-circle + row body) inside the <li>, NOT nested buttons.
+  This satisfies the interactive-child constraint and is valid HTML / a11y.
   ========================================================================= -->
 
 <div class="reminders-page">
@@ -548,9 +543,8 @@
               </option>
             {/each}
             <!--
-              "Keep current schedule" option only shown when the existing rrule
-              does not match a known preset (e.g. FREQ=WEEKLY;COUNT=3).
-              This preserves unknown rrules rather than silently dropping them.
+              "Keep current schedule" option only shown when the existing rrule does not match a known preset (e.g.
+              FREQ=WEEKLY;COUNT=3). This preserves unknown rrules rather than silently dropping them.
             -->
             {#if editRrulePreset === "keep"}
               <option value="keep">{reminders_edit_recurrence_keep()}</option>

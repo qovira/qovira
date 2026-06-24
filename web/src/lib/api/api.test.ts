@@ -1,14 +1,14 @@
 /**
  * Tests for the Api wrapper: CSRF echo, problem+json parsing, and 401 hook.
  *
- * The environment is happy-dom (set via vitest project config) so document.cookie
- * and globalThis.fetch can be set/mocked directly.
+ * The environment is happy-dom (set via vitest project config) so document.cookie and globalThis.fetch can be
+ * set/mocked directly.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Import once at module level — the module uses `globalThis.fetch` at call time
-// (not at createClient time), so vi.stubGlobal works after the import.
+// Import once at module level — the module uses `globalThis.fetch` at call time (not at createClient time), so
+// vi.stubGlobal works after the import.
 import { Api, ProblemError, onUnauthorized } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -264,9 +264,8 @@ describe("problem+json parsing", () => {
   });
 
   it("does NOT produce a ProblemError when Content-Type is problem+json but body is a valid JSON non-problem shape", async () => {
-    // A response with Content-Type: application/problem+json but a body that does
-    // NOT satisfy isProblemShape (missing required fields). The middleware must
-    // fall through to openapi-fetch's default handling rather than crashing or
+    // A response with Content-Type: application/problem+json but a body that does NOT satisfy isProblemShape (missing
+    // required fields). The middleware must fall through to openapi-fetch's default handling rather than crashing or
     // producing a malformed ProblemError.
     vi.stubGlobal(
       "fetch",
@@ -280,18 +279,17 @@ describe("problem+json parsing", () => {
 
     const result = await Api.GET("/me", {});
     expect(result.data).toBeUndefined();
-    // The malformed problem+json body does not become a ProblemError — it falls
-    // through and openapi-fetch returns it as the generic `error` field.
+    // The malformed problem+json body does not become a ProblemError — it falls through and openapi-fetch returns it
+    // as the generic `error` field.
     expect(result.error).not.toBeInstanceOf(ProblemError);
   });
 
   it("does NOT produce a ProblemError when Content-Type is problem+json but body is empty / non-JSON", async () => {
-    // A null body with problem+json Content-Type. The qovira middleware detects
-    // the problem+json Content-Type and calls response.clone().json() to inspect
-    // the body. In this runtime (happy-dom) that throws a SyntaxError on a null
-    // body. Since wrap() only catches ProblemError, the SyntaxError propagates.
-    // The key invariant: the thrown error must NOT be a ProblemError (the middleware
-    // must not wrap a parse failure as if it were a valid problem body).
+    // A null body with problem+json Content-Type. The qovira middleware detects the problem+json Content-Type and
+    // calls response.clone().json() to inspect the body. In this runtime (happy-dom) that throws a SyntaxError on a
+    // null body. Since wrap() only catches ProblemError, the SyntaxError propagates. The key invariant: the thrown
+    // error must NOT be a ProblemError (the middleware must not wrap a parse failure as if it were a valid problem
+    // body).
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(

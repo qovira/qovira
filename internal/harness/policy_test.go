@@ -1,8 +1,8 @@
 package harness
 
-// policy_test.go — white-box unit tests for the pure policy function and catalog filter.
-// These tests live in package harness (not harness_test) to exercise the unexported
-// policy function and filterCatalogForTrust directly.
+// policy_test.go — white-box unit tests for the pure policy function and catalog filter. These tests live in
+// package harness (not harness_test) to exercise the unexported policy function and filterCatalogForTrust
+// directly.
 
 import (
 	"testing"
@@ -48,8 +48,8 @@ func TestPolicy_AllCells(t *testing.T) {
 	}
 }
 
-// TestDecision_StringValues sanity-checks the iota ordering so refactoring doesn't silently
-// reorder the constants (Auto=0, Confirm=1, Block=2).
+// TestDecision_StringValues sanity-checks the iota ordering so refactoring doesn't silently reorder the constants
+// (Auto=0, Confirm=1, Block=2).
 func TestDecision_StringValues(t *testing.T) {
 	t.Parallel()
 
@@ -64,8 +64,8 @@ func TestDecision_StringValues(t *testing.T) {
 	}
 }
 
-// TestFilterCatalogForTrust_TrustedOrigin verifies that for a Trusted origin the catalog
-// is unchanged (no tools are Block-tier for a Trusted caller).
+// TestFilterCatalogForTrust_TrustedOrigin verifies that for a Trusted origin the catalog is unchanged (no tools
+// are Block-tier for a Trusted caller).
 func TestFilterCatalogForTrust_TrustedOrigin(t *testing.T) {
 	t.Parallel()
 
@@ -82,8 +82,8 @@ func TestFilterCatalogForTrust_TrustedOrigin(t *testing.T) {
 	}
 }
 
-// TestFilterCatalogForTrust_UntrustedOrigin verifies that for an Untrusted origin
-// Destructive tools are omitted and all other tiers remain.
+// TestFilterCatalogForTrust_UntrustedOrigin verifies that for an Untrusted origin Destructive tools are omitted
+// and all other tiers remain.
 func TestFilterCatalogForTrust_UntrustedOrigin(t *testing.T) {
 	t.Parallel()
 

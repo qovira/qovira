@@ -49,17 +49,17 @@ type Module interface {
 	Tools() []capability.Tool
 }
 
-// isPublicRoute reports whether the request targets a route that must be reachable without authentication.
-// The auth middleware uses this predicate; all other cross-cutting middleware (recover, request-id, log,
-// security-headers) run for every request including public ones.
+// isPublicRoute reports whether the request targets a route that must be reachable without authentication. The auth
+// middleware uses this predicate; all other cross-cutting middleware (recover, request-id, log, security-headers) run
+// for every request including public ones.
 //
 // Explicitly public routes (reviewed list — add new public routes here with a comment):
 //   - /healthz — liveness probe; must be reachable by the container runtime.
-//   - POST /api/v1/auth/login — credential exchange; must be reachable before a session exists.
-//     (Onboarding / bootstrap routes that require unauthenticated access will join this list
-//     once their spec is finalised; do NOT invent their paths here ahead of that work.)
-//   - SPA paths — anything that is not /api/v1/… or /events is served by the embedded SPA
-//     and is therefore public (asset delivery; auth lives inside the SPA).
+//   - POST /api/v1/auth/login — credential exchange; must be reachable before a session exists. (Onboarding /
+//     bootstrap routes that require unauthenticated access will join this list once their spec is finalised; do NOT
+//     invent their paths here ahead of that work.)
+//   - SPA paths — anything that is not /api/v1/… or /events is served by the embedded SPA and is therefore public
+//     (asset delivery; auth lives inside the SPA).
 //
 // Protected: /api/v1/… (all paths, except the explicit per-method exemptions above), /events.
 func isPublicRoute(r *http.Request) bool {
@@ -97,22 +97,19 @@ type App struct {
 	cancelConns context.CancelFunc
 	logger      *slog.Logger
 	sched       *scheduler.Scheduler
-	// listenAddr receives the bound address exactly once from BaseContext when
-	// the HTTP server calls it with the real net.Listener. Buffered (capacity 1)
-	// so the send never blocks even if nobody reads it.
+	// listenAddr receives the bound address exactly once from BaseContext when the HTTP server calls it with the real
+	// net.Listener. Buffered (capacity 1) so the send never blocks even if nobody reads it.
 	listenAddr chan string
 }
 
-// AuthModuleCtor returns a module constructor that builds the auth HTTP module
-// from the store that app.New opens.  Pass it as one of the moduleCtors
-// arguments to [New] in production.
+// AuthModuleCtor returns a module constructor that builds the auth HTTP module from the store that app.New opens.  Pass
+// it as one of the moduleCtors arguments to [New] in production.
 //
-// params, policy, and cfg are the argon2id, password policy, and session config
-// respectively.  For production, pass [auth.DefaultParams],
-// [auth.DefaultPolicy], and [auth.DefaultSessionConfig].
+// params, policy, and cfg are the argon2id, password policy, and session config respectively.  For production, pass
+// [auth.DefaultParams], [auth.DefaultPolicy], and [auth.DefaultSessionConfig].
 //
-// logger is forwarded to the module so internal errors are diagnosable via
-// server-side logs without leaking details to the client.
+// logger is forwarded to the module so internal errors are diagnosable via server-side logs without leaking details to
+// the client.
 func AuthModuleCtor(
 	params auth.Params,
 	policy auth.Policy,
@@ -135,24 +132,20 @@ func AuthModuleCtor(
 // package's version var) so that /healthz always reflects the real release version rather than a hard-coded "dev"
 // sentinel.
 //
-// newValidator is a constructor that receives the opened [*store.Store] and
-// returns the [httpx.TokenValidator] used by the auth middleware. This
-// two-phase design lets callers (e.g. serve.go) build an Authenticator that
-// holds a reference to the store without exposing the store before it is fully
-// initialised. Pass a func that wraps auth.NewAuthenticator for production; for
-// tests any fake that satisfies the interface works:
+// newValidator is a constructor that receives the opened [*store.Store] and returns the [httpx.TokenValidator] used by
+// the auth middleware. This two-phase design lets callers (e.g. serve.go) build an Authenticator that holds a reference
+// to the store without exposing the store before it is fully initialised. Pass a func that wraps auth.NewAuthenticator
+// for production; for tests any fake that satisfies the interface works:
 //
 //	func(s *store.Store) httpx.TokenValidator { return myFakeValidator{} }
 //
-// harnessCfg is the configuration for the AI harness. For production, pass the
-// value populated in serve.go; for tests pass harness.Config{} (the zero value
-// is valid for this slice).
+// harnessCfg is the configuration for the AI harness. For production, pass the value populated in serve.go; for tests
+// pass harness.Config{} (the zero value is valid for this slice).
 //
-// moduleCtors is a slice of module constructors — each receives the opened store
-// and returns a [Module].  This two-phase design mirrors newValidator: modules
-// can hold store references without being constructed before the store opens.
-// Pass [AuthModuleCtor] and any other feature-slice ctors for production; tests
-// may pass none (or wrap a [fakeModule]) to exercise wiring in isolation.
+// moduleCtors is a slice of module constructors — each receives the opened store and returns a [Module].  This
+// two-phase design mirrors newValidator: modules can hold store references without being constructed before the store
+// opens. Pass [AuthModuleCtor] and any other feature-slice ctors for production; tests may pass none (or wrap a
+// [fakeModule]) to exercise wiring in isolation.
 //
 // Order:
 //  1. Open the encrypted store (store.Open).
@@ -160,15 +153,15 @@ func AuthModuleCtor(
 //  3. Build each module by calling moduleCtors[i](s).
 //  4. If cfg.AutoMigrate, run all pending migrations against the write pool.
 //  5. Construct the in-memory event bus.
-//  6. Construct the scheduler (validates config; does NOT start yet — all handlers
-//     and periodic jobs must be registered before Start is called).
+//  6. Construct the scheduler (validates config; does NOT start yet — all handlers and periodic jobs must be
+//     registered before Start is called).
 //  7. Construct the capability registry.
 //  8. Construct the HTTP router.
 //  9. For each module: mount routes onto the router, register tools in the registry.
 //  10. Construct the AI harness and mount its routes.
 //  11. Register the harness.sweep_confirmations handler on the scheduler.
-//  12. Upsert the harness.sweep_confirmations periodic job (idempotent on restart;
-//     a failure on an unmigrated DB is logged and tolerated, not fatal).
+//  12. Upsert the harness.sweep_confirmations periodic job (idempotent on restart; a failure on an unmigrated DB is
+//     logged and tolerated, not fatal).
 //  13. Start the scheduler (all handlers and periodic jobs are now registered).
 //  14. Build the HTTP server with the StandardChain middleware.
 func New(
@@ -214,14 +207,12 @@ func New(
 		store.RunPostMigrateOptimize(ctx, s.Writer())
 	}
 
-	// Step 4b: first-run admin seeding. Runs after migrations so the users
-	// table is guaranteed to exist. A dedicated auth.Service is built here
-	// using the production defaults; it is not shared with the auth module to
-	// avoid coupling this boot-time seam to the module wiring above.
+	// Step 4b: first-run admin seeding. Runs after migrations so the users table is guaranteed to exist. A dedicated
+	// auth.Service is built here using the production defaults; it is not shared with the auth module to avoid coupling
+	// this boot-time seam to the module wiring above.
 	//
-	// *store.Store satisfies bootstrap.UserExister (HasAnyUser), and the
-	// dedicated *auth.Service satisfies bootstrap.AccountCreator (CreateAdmin).
-	// Both seams are defined at the consumer (bootstrap) per the house rule.
+	// *store.Store satisfies bootstrap.UserExister (HasAnyUser), and the dedicated *auth.Service satisfies
+	// bootstrap.AccountCreator (CreateAdmin). Both seams are defined at the consumer (bootstrap) per the house rule.
 	if err = seedAdminIfFirstRun(ctx, cfg, s, logger); err != nil {
 		return nil, fmt.Errorf("app: first-run seed: %w", err)
 	}
@@ -229,9 +220,8 @@ func New(
 	// Step 5: in-memory event bus.
 	bus := events.NewBus()
 
-	// Step 6: build the scheduler (validated here so a bad config fails boot immediately)
-	// but do NOT start it yet — it must start after the harness is constructed and all
-	// periodic jobs are registered (step 13 below).
+	// Step 6: build the scheduler (validated here so a bad config fails boot immediately) but do NOT start it yet — it
+	// must start after the harness is constructed and all periodic jobs are registered (step 13 below).
 	schedCfg := scheduler.DefaultConfig()
 	if err = schedCfg.Validate(); err != nil {
 		return nil, fmt.Errorf("app: scheduler config: %w", err)
@@ -252,43 +242,40 @@ func New(
 		}
 	}
 
-	// Step 10: construct the AI harness and mount its routes. The harness is wired
-	// with reg, gw, s, bus, and harnessCfg. It does not contribute capability tools
-	// (Tools() returns nil), so it is not passed through reg.Add.
-	// newChatter is provided by chatter_default.go (production) or chatter_e2e.go
-	// (e2e build tag); the production file always returns a *gateway.Gateway.
+	// Step 10: construct the AI harness and mount its routes. The harness is wired with reg, gw, s, bus, and
+	// harnessCfg. It does not contribute capability tools (Tools() returns nil), so it is not passed through reg.Add.
+	// newChatter is provided by chatter_default.go (production) or chatter_e2e.go (e2e build tag); the production file
+	// always returns a *gateway.Gateway.
 	gw := newChatter(s.Settings())
 	h := harness.New(reg, gw, s, bus, harnessCfg, logger)
 	h.Routes(router)
 
-	// Step 10b: construct the reminders module and mount its routes. reminders.New
-	// registers the "reminder.fire" handler on sched before Start is called (step 13),
-	// satisfying the invariant that all handlers are registered before the first tick.
+	// Step 10b: construct the reminders module and mount its routes. reminders.New registers the "reminder.fire"
+	// handler on sched before Start is called (step 13), satisfying the invariant that all handlers are registered
+	// before the first tick.
 	remMod := reminders.New(s, sched, bus, sched, logger)
 	remMod.Routes(router)
 	if err = reg.Add(remMod); err != nil {
 		return nil, fmt.Errorf("app: register %s tools: %w", remMod.Name(), err)
 	}
 
-	// Step 11: register scheduler handlers that depend on the harness being constructed.
-	// The handler must be registered before RegisterPeriodic upserts the row, and both
-	// must run before sched.Start so the first tick can dispatch the job.
+	// Step 11: register scheduler handlers that depend on the harness being constructed. The handler must be registered
+	// before RegisterPeriodic upserts the row, and both must run before sched.Start so the first tick can dispatch the
+	// job.
 	sched.Register("harness.sweep_confirmations", func(ctx context.Context, _ scheduler.Job) error {
 		_, sweepErr := h.SweepExpiredConfirmations(ctx)
 		return sweepErr
 	})
 
-	// Step 12: upsert the harness sweep as a system periodic job (idempotent across
-	// restarts). run_at = now+1m on INSERT so it never fires during fast boot-time tests
-	// and does not spam on restart. On CONFLICT the schedule is updated in place.
+	// Step 12: upsert the harness sweep as a system periodic job (idempotent across restarts). run_at = now+1m on
+	// INSERT so it never fires during fast boot-time tests and does not spam on restart. On CONFLICT the schedule is
+	// updated in place.
 	//
-	// Registration is unconditional: in every correctly-provisioned deployment the schema
-	// is present — whether applied by AutoMigrate or out-of-band via `qovira migrate` — so
-	// the sweep is always registered (gating on AutoMigrate would wrongly skip it on a
-	// migrate-then-serve deployment). A failure (e.g. the jobs table is absent on an
-	// intentionally-unmigrated DB) is logged and tolerated rather than failing boot,
-	// mirroring the scheduler's boot-sweep, which also soft-fails on a missing table —
-	// app.New does not require the schema to be present.
+	// Registration is unconditional: in every correctly-provisioned deployment the schema is present — whether applied
+	// by AutoMigrate or out-of-band via `qovira migrate` — so the sweep is always registered (gating on AutoMigrate
+	// would wrongly skip it on a migrate-then-serve deployment). A failure (e.g. the jobs table is absent on an
+	// intentionally-unmigrated DB) is logged and tolerated rather than failing boot, mirroring the scheduler's
+	// boot-sweep, which also soft-fails on a missing table — app.New does not require the schema to be present.
 	if regErr := sched.RegisterPeriodic(scheduler.PeriodicJob{
 		Key:  "harness.sweep_confirmations",
 		Kind: "harness.sweep_confirmations",
@@ -338,8 +325,8 @@ func New(
 // address already in use).
 //
 // On ctx cancellation Run performs an ordered, bounded shutdown:
-//  1. Cancel the connection context to unblock live SSE handlers, then call
-//     srv.Shutdown to drain in-flight HTTP requests.
+//  1. Cancel the connection context to unblock live SSE handlers, then call srv.Shutdown to drain in-flight HTTP
+//     requests.
 //  2. Stop the scheduler: cancels in-flight handlers and drains the worker pool.
 //  3. Close both database pools.
 //
@@ -417,13 +404,11 @@ func (a *App) Server() *http.Server { return a.srv }
 // Logger returns the logger in use. Useful in tests to access the configured slog.Logger.
 func (a *App) Logger() *slog.Logger { return a.logger }
 
-// ListenAddr returns the network address the HTTP server is actually bound to.
-// Exposed for tests that need the OS-assigned ephemeral port when the server was
-// configured with ":0" / "127.0.0.1:0" — the OS assigns the port and BaseContext
-// reports it back through this channel. It blocks until the server calls
-// BaseContext (i.e. until ListenAndServe has opened its socket) or until ctx is
-// cancelled, whichever comes first; returns an empty string when ctx is
-// cancelled before the server is ready.
+// ListenAddr returns the network address the HTTP server is actually bound to. Exposed for tests that need the
+// OS-assigned ephemeral port when the server was configured with ":0" / "127.0.0.1:0" — the OS assigns the port and
+// BaseContext reports it back through this channel. It blocks until the server calls BaseContext (i.e. until
+// ListenAndServe has opened its socket) or until ctx is cancelled, whichever comes first; returns an empty string when
+// ctx is cancelled before the server is ready.
 func (a *App) ListenAddr(ctx context.Context) string {
 	select {
 	case addr := <-a.listenAddr:

@@ -3,12 +3,11 @@
 //
 // This file implements the RFC 9457 problem+json error helper:
 //   - Problem, FieldError types with camelCase JSON marshaling.
-//   - WriteProblem: writes a problem+json response, derives the type URL from
-//     the code slug when Type is empty, and fills requestId from context.
+//   - WriteProblem: writes a problem+json response, derives the type URL from the code slug when Type is empty, and
+//     fills requestId from context.
 //   - ValidationProblem, MalformedBodyProblem, InternalProblem constructors.
-//   - ContextWithRequestID / RequestIDFromContext: request-id context wiring.
-//     The request-id middleware that populates the context lands separately;
-//     only the accessor/setter pair lives here so the middleware can plug in.
+//   - ContextWithRequestID / RequestIDFromContext: request-id context wiring. The request-id middleware that populates
+//     the context lands separately; only the accessor/setter pair lives here so the middleware can plug in.
 package httpx
 
 import (
@@ -48,8 +47,8 @@ func ContextWithRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, requestIDKey, id)
 }
 
-// RequestIDFromContext retrieves the request ID stored by ContextWithRequestID.
-// Returns an empty string when no ID has been set.
+// RequestIDFromContext retrieves the request ID stored by ContextWithRequestID. Returns an empty string when no ID has
+// been set.
 func RequestIDFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(requestIDKey).(string)
 	return v
@@ -72,21 +71,20 @@ type FieldError struct {
 // filling the struct directly for ad-hoc error shapes. WriteProblem finalises the Type and RequestID fields before
 // writing.
 type Problem struct {
-	// Type is a stable URL identifying the problem kind. When empty,
-	// WriteProblem derives it from Code via ErrorTypeBase.
+	// Type is a stable URL identifying the problem kind. When empty, WriteProblem derives it from Code via
+	// ErrorTypeBase.
 	Type string `json:"type"`
 	// Title is a short, stable, human-readable summary of the problem type.
 	Title string `json:"title"`
 	// Status is the HTTP status code; it must equal the response status line.
 	Status int `json:"status"`
-	// Detail is a human-readable explanation specific to this occurrence. Must never contain secrets, stack traces, SQL,
-	// or internal hostnames.
+	// Detail is a human-readable explanation specific to this occurrence. Must never contain secrets, stack traces,
+	// SQL, or internal hostnames.
 	Detail string `json:"detail"`
-	// Code is a short snake_case machine slug that clients branch on. It is
-	// stable and documented.
+	// Code is a short snake_case machine slug that clients branch on. It is stable and documented.
 	Code string `json:"code"`
-	// RequestID is the correlation ID tying this response to server logs. WriteProblem fills this from context when it is
-	// empty.
+	// RequestID is the correlation ID tying this response to server logs. WriteProblem fills this from context
+	// when it is empty.
 	RequestID string `json:"requestId"`
 	// Errors is an optional array of per-field validation errors. Present only on 422 validation responses; omitted
 	// otherwise.
@@ -96,9 +94,8 @@ type Problem struct {
 // WriteProblem finalises p and writes it as an RFC 9457 problem+json response.
 //
 // Before writing, WriteProblem:
-//  1. Fills p.RequestID from the request context (via RequestIDFromContext) if
-//     p.RequestID is empty. If the context carries no ID either, a placeholder
-//     is used so the field is never absent.
+//  1. Fills p.RequestID from the request context (via RequestIDFromContext) if p.RequestID is empty. If the context
+//     carries no ID either, a placeholder is used so the field is never absent.
 //  2. Derives p.Type from p.Code as ErrorTypeBase+code when p.Type is empty.
 //
 // The response sets Content-Type: application/problem+json and the status code p.Status. JSON encoding and write errors
@@ -127,8 +124,8 @@ func WriteProblem(w http.ResponseWriter, r *http.Request, p Problem) {
 
 	body, err := json.Marshal(p)
 	if err != nil {
-		// Encoding should not fail for this well-typed struct. Log and fall back to a minimal static response so the client
-		// gets something.
+		// Encoding should not fail for this well-typed struct. Log and fall back to a minimal static response so the
+		// client gets something.
 		slog.Error("httpx: failed to marshal problem", "err", err)
 		http.Error(w, `{"type":"about:blank","title":"Internal Server Error","status":500}`, http.StatusInternalServerError)
 		return
@@ -142,9 +139,9 @@ func WriteProblem(w http.ResponseWriter, r *http.Request, p Problem) {
 	}
 }
 
-// internalServerProblem returns the canonical 500 problem+json body used whenever the server encounters an
-// unexpected internal error. The generic detail and static code mean neither a stack trace nor internal context
-// leaks to the client. Use InternalProblem (which calls this) when you also want to log the internal error.
+// internalServerProblem returns the canonical 500 problem+json body used whenever the server encounters an unexpected
+// internal error. The generic detail and static code mean neither a stack trace nor internal context leaks to the
+// client. Use InternalProblem (which calls this) when you also want to log the internal error.
 func internalServerProblem() Problem {
 	return Problem{
 		Title:  "Internal server error",

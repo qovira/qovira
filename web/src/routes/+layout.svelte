@@ -61,8 +61,7 @@
   // ---------------------------------------------------------------------------
   // Rail state: collapsed (default) / peek (hover/focus, transient) / pinned
   // ---------------------------------------------------------------------------
-  // pinned is stored in the ui-preferences singleton.
-  // expanded tracks the transient peek state (hover/keyboard-focus).
+  // pinned is stored in the ui-preferences singleton. expanded tracks the transient peek state (hover/keyboard-focus).
   let expanded = $state(false);
 
   // Derived: the rail is visually open when pinned OR peeking.
@@ -128,8 +127,7 @@
   // ---------------------------------------------------------------------------
   // Active route detection
   // ---------------------------------------------------------------------------
-  // Fix B: boundary-safe segment match so e.g. /reminders does not match
-  // a future /reminders-archive.
+  // Fix B: boundary-safe segment match so e.g. /reminders does not match a future /reminders-archive.
   function isActive(href: string): boolean {
     if (href === "/") {
       return page.url.pathname === "/";
@@ -140,18 +138,17 @@
   // ---------------------------------------------------------------------------
   // Boot probe + route guard + 401 handler — wired once on mount
   // ---------------------------------------------------------------------------
-  // `booted` gates rendering of guarded routes until the /me probe settles, so
-  // an authenticated reload never flashes the bare page (no shell) and an
-  // unauthenticated load never flashes guarded content before the redirect.
-  // Exempt routes (/login, /onboarding/*) render immediately, regardless.
+  // `booted` gates rendering of guarded routes until the /me probe settles, so an authenticated reload never flashes
+  // the bare page (no shell) and an unauthenticated load never flashes guarded content before the redirect. Exempt
+  // routes (/login, /onboarding/*) render immediately, regardless.
   let booted = $state(false);
 
   onMount(() => {
     // Preferences are browser-only side effects.
     initPrefs();
 
-    // Wire the SSE lifecycle hooks before the boot probe so the connection opens
-    // immediately when the session is confirmed (either via /me boot probe or login).
+    // Wire the SSE lifecycle hooks before the boot probe so the connection opens immediately when the session is
+    // confirmed (either via /me boot probe or login).
     onSessionReady(openSseConnection);
     onTearDown(() => {
       closeSseConnection();
@@ -164,40 +161,37 @@
       resetNotificationPromptState();
     });
 
-    // Register the centralised 401 handler. This is the single authority for
-    // "expired or revoked session": clear state, tear down SSE, bounce to /login.
+    // Register the centralised 401 handler. This is the single authority for "expired or revoked session": clear
+    // state, tear down SSE, bounce to /login.
     onUnauthorized(() => {
       notifyTearDown();
       resetSession();
       void goto("/login");
     });
 
-    // Boot probe: GET /me — 200 → authenticated, 401 → redirect to /login.
-    // The probe runs on every fresh page load; the session cookie rides
-    // automatically (HttpOnly, credentials: "include"). The token is never
-    // read or stored by the client.
+    // Boot probe: GET /me — 200 → authenticated, 401 → redirect to /login. The probe runs on every fresh page load;
+    // the session cookie rides automatically (HttpOnly, credentials: "include"). The token is never read or stored
+    // by the client.
     void (async () => {
       try {
         const { data } = await Api.GET("/me", {});
 
         if (data) {
-          // 200: seed the session store with the user. The server does not return
-          // expiresAt on /me, so we seed it null — the soft pre-expiry seam stays
-          // disarmed until a login (which carries the real expiry) re-seeds it.
+          // 200: seed the session store with the user. The server does not return expiresAt on /me, so we seed it
+          // null — the soft pre-expiry seam stays disarmed until a login (which carries the real expiry) re-seeds it.
           seedSession({ user: data.user, expiresAt: null });
           // Open the SSE connection — the boot-probe path is a valid session start.
           notifySessionReady();
         }
         // 401 is handled by the onUnauthorized hook above (clears session, redirects).
 
-        // Guard: after the probe settles, redirect if still unauthenticated on a
-        // guarded route.
+        // Guard: after the probe settles, redirect if still unauthenticated on a guarded route.
         if (shouldRedirectToLogin(page.url.pathname, isAuthenticated())) {
           await goto("/login");
         }
       } finally {
-        // The probe has settled (success, 401, or network error): rendering of
-        // guarded routes can now resolve to either the shell or the redirect.
+        // The probe has settled (success, 401, or network error): rendering of guarded routes can now resolve to
+        // either the shell or the redirect.
         booted = true;
       }
     })();
@@ -207,13 +201,13 @@
 <ToastProvider>
   <!--
     Render order:
-      1. Exempt routes (/login, /onboarding/*) render their children directly,
-         without the shell and without waiting on the boot probe.
-      2. On a guarded route, render a quiet splash until the /me probe settles
-         (`booted`) — no flash of bare page content or guarded content.
+      1. Exempt routes (/login, /onboarding/*) render their children directly, without the shell and without waiting
+         on the boot probe.
+      2. On a guarded route, render a quiet splash until the /me probe settles (`booted`) — no flash of bare page
+         content or guarded content.
       3. Probe settled + authenticated → the app shell (nav rail + content).
-      4. Probe settled + unauthenticated → the boot probe is redirecting to
-         /login; render the same quiet splash until navigation completes.
+      4. Probe settled + unauthenticated → the boot probe is redirecting to /login; render the same quiet splash until
+         navigation completes.
   -->
   {#if isExemptRoute(page.url.pathname)}
     {@render children()}
@@ -224,8 +218,7 @@
   {:else if isAuthenticated()}
     <div class="flex h-screen overflow-hidden">
       <!--
-        Rail — slim navigation sidebar.
-        Width transitions honor prefers-reduced-motion via the CSS custom property.
+        Rail — slim navigation sidebar. Width transitions honor prefers-reduced-motion via the CSS custom property.
       -->
       <nav
         aria-label={nav_aria_label()}
@@ -239,10 +232,9 @@
       >
         <!-- Main nav entries -->
         <!--
-          Fix A: each entry renders a single persistent <a> via RailEntry.
-          The anchor is NEVER recreated on expand/collapse — focus is preserved.
-          RailEntry keeps the Tooltip mounted and gates its open state to suppress
-          the popup when the rail is already expanded (label visible in DOM).
+          Fix A: each entry renders a single persistent <a> via RailEntry. The anchor is NEVER recreated on
+          expand/collapse — focus is preserved. RailEntry keeps the Tooltip mounted and gates its open state to
+          suppress the popup when the rail is already expanded (label visible in DOM).
         -->
         <ul class="flex flex-1 flex-col gap-1 p-2" role="list">
           <li>
@@ -275,9 +267,8 @@
           <Separator />
 
           <!--
-            Fix D: drop aria-label so visible text and accessible name agree.
-            The label span is always in the DOM; visibility is toggled by CSS
-            (hidden when collapsed, visible when expanded) — same pattern as RailEntry.
+            Fix D: drop aria-label so visible text and accessible name agree. The label span is always in the DOM;
+            visibility is toggled by CSS (hidden when collapsed, visible when expanded) — same pattern as RailEntry.
           -->
           <a
             href="/settings"
@@ -313,9 +304,8 @@
     </div>
   {/if}
 
-  <!-- Deferred OS-notification permission prompt (AC3).
-       Shown the first time a reminder fires with Notification.permission === "default".
-       Rendered inside ToastProvider so it layers correctly with toasts. -->
+  <!-- Deferred OS-notification permission prompt (AC3). Shown the first time a reminder fires with
+       Notification.permission === "default". Rendered inside ToastProvider so it layers correctly with toasts. -->
   {#if showNotificationPrompt}
     <OsNotificationPrompt />
   {/if}

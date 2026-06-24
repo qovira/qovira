@@ -3,8 +3,8 @@
  *
  * Wraps openapi-fetch with:
  *   - credentials: "include" on every request (session cookie rides automatically)
- *   - CSRF-Token header on unsafe methods (POST/PATCH/DELETE) echoed from the
- *     qovira_csrf cookie (double-submit pattern)
+ *   - CSRF-Token header on unsafe methods (POST/PATCH/DELETE) echoed from the qovira_csrf cookie (double-submit
+ *     pattern)
  *   - application/problem+json responses parsed into a typed ProblemError
  *   - centralised 401 handling via a registrable onUnauthorized hook
  *
@@ -45,8 +45,8 @@ interface RawProblem {
 /**
  * Typed subclass of Error carrying an RFC 9457 problem+json body.
  *
- * Callers branch on `code` (the stable snake_case slug), not `status`.
- * `errors` is present only on 422 validation responses.
+ * Callers branch on `code` (the stable snake_case slug), not `status`. `errors` is present only on 422 validation
+ * responses.
  */
 export class ProblemError extends Error {
   override readonly name = "ProblemError";
@@ -82,10 +82,9 @@ let unauthorizedHandler: (() => void) | (() => Promise<void>) = () => {
 /**
  * Register the centralised 401 handler. Call this once from the session slice.
  *
- * Only one handler can be active at a time; calling again replaces the previous
- * one. The handler is the sole authority for "force-login": clear session state,
- * tear down SSE, redirect to /login. Session and SSE slices subscribe here;
- * they do NOT call each other.
+ * Only one handler can be active at a time; calling again replaces the previous one. The handler is the sole
+ * authority for "force-login": clear session state, tear down SSE, redirect to /login. Session and SSE slices
+ * subscribe here; they do NOT call each other.
  */
 export function onUnauthorized(cb: (() => void) | (() => Promise<void>)): void {
   unauthorizedHandler = cb;
@@ -94,10 +93,9 @@ export function onUnauthorized(cb: (() => void) | (() => Promise<void>)): void {
 /**
  * Invoke the currently registered unauthorised handler.
  *
- * Call this from any code path that detects a 401 but bypasses the
- * openapi-fetch middleware (e.g. the bare fetch("/events") SSE stream).
- * This is the single seam that ensures every 401 — REST or SSE — triggers
- * the same teardown: notifyTearDown → resetSession → redirect to /login.
+ * Call this from any code path that detects a 401 but bypasses the openapi-fetch middleware (e.g. the bare
+ * fetch("/events") SSE stream). This is the single seam that ensures every 401 — REST or SSE — triggers the same
+ * teardown: notifyTearDown → resetSession → redirect to /login.
  */
 export function callUnauthorizedHandler(): void | Promise<void> {
   return unauthorizedHandler();
@@ -162,13 +160,12 @@ const qoviraMiddleware: Middleware = {
     const isProblem = ct.includes("application/problem+json");
 
     if (isProblem) {
-      // Clone before reading so the body stream isn't consumed for callers that
-      // also need to inspect the response.
+      // Clone before reading so the body stream isn't consumed for callers that also need to inspect the response.
       const raw: unknown = await response.clone().json();
 
       if (isProblemShape(raw)) {
-        // 4. Invoke the 401 handler before throwing so the session is torn down
-        //    before the caller gets the ProblemError.
+        // 4. Invoke the 401 handler before throwing so the session is torn down before the caller gets the
+        //    ProblemError.
         if (response.status === 401) {
           await Promise.resolve(unauthorizedHandler());
         }
@@ -177,8 +174,8 @@ const qoviraMiddleware: Middleware = {
       }
     }
 
-    // Non-problem non-2xx falls through to openapi-fetch's default error handling
-    // (returns { error: parsedBody, response }).
+    // Non-problem non-2xx falls through to openapi-fetch's default error handling (returns { error: parsedBody,
+    // response }).
   },
 };
 
@@ -206,11 +203,11 @@ function isProblemShape(v: unknown): v is RawProblem {
 // ---------------------------------------------------------------------------
 
 /**
- * Internal openapi-fetch client. Not exported — callers always go through the
- * wrapped `Api` (which converts thrown ProblemErrors into { error, response }).
+ * Internal openapi-fetch client. Not exported — callers always go through the wrapped `Api` (which converts thrown
+ * ProblemErrors into { error, response }).
  *
- * The `fetch` wrapper reads `globalThis.fetch` at call time so that tests can
- * stub `fetch` via `vi.stubGlobal` after the module is loaded.
+ * The `fetch` wrapper reads `globalThis.fetch` at call time so that tests can stub `fetch` via `vi.stubGlobal` after
+ * the module is loaded.
  */
 const _client: Client<paths> = createClient<paths>({
   baseUrl: "/api/v1",
@@ -224,10 +221,9 @@ _client.use(qoviraMiddleware);
 // ---------------------------------------------------------------------------
 
 /**
- * Wrap a single openapi-fetch method call so that a ProblemError thrown from
- * middleware surfaces as `{ error: ProblemError, response: undefined }` rather
- * than as an unhandled rejection, keeping the same call-site shape as a
- * successful `{ data, response }`.
+ * Wrap a single openapi-fetch method call so that a ProblemError thrown from middleware surfaces as
+ * `{ error: ProblemError, response: undefined }` rather than as an unhandled rejection, keeping the same call-site
+ * shape as a successful `{ data, response }`.
  */
 async function wrap<T>(
   fn: () => Promise<T>,
@@ -242,11 +238,10 @@ async function wrap<T>(
   }
 }
 
-// Helper to cast an openapi-fetch method through `wrap` while preserving the
-// full generic ClientMethod signature. The cast is safe: at runtime the delegate
-// IS the underlying method; the only difference is that thrown ProblemErrors are
-// converted to `{ error, response }` instead of propagating. The complex
-// overloaded generic `ClientMethod` type cannot be expressed without `as unknown`.
+// Helper to cast an openapi-fetch method through `wrap` while preserving the full generic ClientMethod signature. The
+// cast is safe: at runtime the delegate IS the underlying method; the only difference is that thrown ProblemErrors
+// are converted to `{ error, response }` instead of propagating. The complex overloaded generic `ClientMethod` type
+// cannot be expressed without `as unknown`.
 function wrapMethod<M extends (...args: [unknown, ...unknown[]]) => Promise<unknown>>(method: M): M {
   return ((...args: [unknown, ...unknown[]]) => wrap(() => method(...args))) as M;
 }
@@ -262,11 +257,10 @@ function wrapMethod<M extends (...args: [unknown, ...unknown[]]) => Promise<unkn
  *
  * Do NOT use the internal `_client` directly — always import `Api`.
  */
-// Only the HTTP verbs the API actually uses are exposed (GET/POST/PATCH/DELETE).
-// The type is narrowed to that subset — not the full Client<paths> — so a typo or a
-// call to an unimplemented verb (PUT/HEAD/OPTIONS/TRACE) is a compile error rather
-// than a runtime `undefined`. The raw _client (which carries every verb plus use/
-// eject) is deliberately not spread in.
+// Only the HTTP verbs the API actually uses are exposed (GET/POST/PATCH/DELETE). The type is narrowed to that subset
+// — not the full Client<paths> — so a typo or a call to an unimplemented verb (PUT/HEAD/OPTIONS/TRACE) is a compile
+// error rather than a runtime `undefined`. The raw _client (which carries every verb plus use/eject) is deliberately
+// not spread in.
 export const Api: Pick<Client<paths>, "GET" | "POST" | "PATCH" | "DELETE"> = {
   GET: wrapMethod(_client.GET as (...args: [unknown, ...unknown[]]) => Promise<unknown>) as Client<paths>["GET"],
   POST: wrapMethod(_client.POST as (...args: [unknown, ...unknown[]]) => Promise<unknown>) as Client<paths>["POST"],

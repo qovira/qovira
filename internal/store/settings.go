@@ -19,8 +19,8 @@ import (
 	"github.com/qovira/qovira/internal/store/db"
 )
 
-// likeEscaper escapes the LIKE metacharacters ('\', '%', '_') so a value can be matched literally by a
-// "LIKE … ESCAPE '\'" predicate. The backslash itself must be escaped first.
+// likeEscaper escapes the LIKE metacharacters ('\', '%', '_') so a value can be matched literally by a "LIKE … ESCAPE
+// '\'" predicate. The backslash itself must be escaped first.
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 // SettingEntry is a single setting row returned by ByPrefix.
@@ -160,8 +160,8 @@ func (ns *SettingsNamespace) Delete(ctx context.Context, logicalKey string) erro
 func (ns *SettingsNamespace) ByPrefix(ctx context.Context, subPrefix string) ([]SettingEntry, error) {
 	var storagePrefix string
 	if subPrefix == "" {
-		// Empty subPrefix: match the bare namespace prefix so the empty-logical-key entry ("<prefix>")
-		// is included alongside all "<prefix>.child" entries.
+		// Empty subPrefix: match the bare namespace prefix so the empty-logical-key entry ("<prefix>") is included
+		// alongside all "<prefix>.child" entries.
 		storagePrefix = ns.prefix
 	} else {
 		storagePrefix = ns.prefix + "." + subPrefix

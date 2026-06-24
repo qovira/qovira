@@ -1,19 +1,18 @@
 // Tests for the pure reminder-bucketing logic.
 //
-// Plain unit test (vitest project "browser", happy-dom env) — the file uses no
-// runes, no fetch, no Svelte rendering; it purely tests bucketReminders().
+// Plain unit test (vitest project "browser", happy-dom env) — the file uses no runes, no fetch, no Svelte rendering; it
+// purely tests bucketReminders().
 //
 // Bucket boundary choice (documented here and in bucket.ts):
 //   - Overdue:    dueAt < now
 //   - Today:      now <= dueAt < next local midnight (start of tomorrow)
 //   - This week:  next local midnight <= dueAt < start of next local calendar week (Mon 00:00)
-//                 "Start of week" = ISO week (Mon=1). Within the current week the remaining
-//                 days (today exclusive) fall in "This week"; everything >= next Monday is "Later".
+//                 "Start of week" = ISO week (Mon=1). Within the current week the remaining days (today exclusive) fall
+//                 in "This week"; everything >= next Monday is "Later".
 //   - Later:      dueAt >= start of next Monday local
 //
-// Test strategy: use a fixed `now` but compute boundary timestamps using the
-// same local-time methods the implementation uses, so tests are portable across
-// any host timezone. We do NOT hard-code UTC strings for boundary tests.
+// Test strategy: use a fixed `now` but compute boundary timestamps using the same local-time methods the implementation
+// uses, so tests are portable across any host timezone. We do NOT hard-code UTC strings for boundary tests.
 
 import { describe, expect, it } from "vitest";
 import { bucketReminders, shouldShowPlaceholder, type BucketedReminders } from "./bucket.js";
@@ -40,16 +39,13 @@ function makeReminder(overrides: Partial<ReminderItem> = {}): ReminderItem {
 }
 
 // ---------------------------------------------------------------------------
-// Fixed reference point: a Wednesday at 10:00 AM local.
-// We construct it using local-time methods so the value is always on Wed 10:00
-// in whatever timezone the test host uses.
+// Fixed reference point: a Wednesday at 10:00 AM local. We construct it using local-time methods so the value is always
+// on Wed 10:00 in whatever timezone the test host uses.
 // ---------------------------------------------------------------------------
 
 function makeNow(): Date {
-  // Find the nearest Wednesday at 10:00 local.
-  // We create a date that is definitely a Wednesday in local time.
-  // Strategy: start with a known Wednesday in UTC (2030-06-12 is Wed),
-  // then use local date methods to pin it to 10:00 local.
+  // Find the nearest Wednesday at 10:00 local. We create a date that is definitely a Wednesday in local time. Strategy:
+  // start with a known Wednesday in UTC (2030-06-12 is Wed), then use local date methods to pin it to 10:00 local.
   const d = new Date(2030, 5, 12, 10, 0, 0, 0); // 2030-06-12 10:00:00 local
   return d;
 }
@@ -201,9 +197,8 @@ describe("bucketReminders — today bucket", () => {
 // ---------------------------------------------------------------------------
 // This week bucket
 // ---------------------------------------------------------------------------
-// now = Wed 2030-06-12 10:00 local.
-// "This week" = next midnight (Thu 00:00) through next Monday 00:00 (exclusive).
-// Thu, Fri, Sat, Sun land here. Mon = Later.
+// now = Wed 2030-06-12 10:00 local. "This week" = next midnight (Thu 00:00) through next Monday 00:00 (exclusive). Thu,
+// Fri, Sat, Sun land here. Mon = Later.
 
 describe("bucketReminders — this week bucket", () => {
   it("places a reminder at exactly local midnight in this week (start of tomorrow)", () => {
@@ -363,11 +358,9 @@ describe("bucketReminders — mixed scenario", () => {
 // ---------------------------------------------------------------------------
 // shouldShowPlaceholder (Fix 2)
 // ---------------------------------------------------------------------------
-// The placeholder ("Nothing on your list yet.") must appear only when there
-// are truly NO reminders at all — no active ones AND no done ones. When there
-// are zero active reminders but at least one completed one, we suppress the
-// placeholder so "Nothing on your list yet." does not sit above a non-empty
-// Done section.
+// The placeholder ("Nothing on your list yet.") must appear only when there are truly NO reminders at all — no active
+// ones AND no done ones. When there are zero active reminders but at least one completed one, we suppress the
+// placeholder so "Nothing on your list yet." does not sit above a non-empty Done section.
 
 describe("shouldShowPlaceholder", () => {
   it("returns true when there are no active reminders and no done reminders", () => {

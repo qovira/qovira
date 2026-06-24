@@ -1,17 +1,15 @@
 <script module lang="ts">
   // ToolCallChip stories — in-progress chip and resolved entity card states.
   //
-  // Stories are app compositions, not library primitives: they exercise the real
-  // ToolCallChip component with realistic ToolCallEntry fixtures covering each
-  // lifecycle state (started, completed → entity card, completed → quiet read,
+  // Stories are app compositions, not library primitives: they exercise the real ToolCallChip component with realistic
+  // ToolCallEntry fixtures covering each lifecycle state (started, completed → entity card, completed → quiet read,
   // completed → unknown shape, failed).
   //
   // Reuses the real ToolCallEntry type from the tool-calls store — no parallel mocks.
   //
-  // A11y note: color-contrast is disabled for InProgress, EntityCard, and
-  // DeletedEntityCard because the `.tool-chip__args` span intentionally uses
-  // `opacity: 0.7` for visual de-emphasis. This reduces effective contrast of the
-  // muted text below 4.5:1. This is genuine design intent, not a token bug.
+  // A11y note: color-contrast is disabled for InProgress, EntityCard, and DeletedEntityCard because the
+  // `.tool-chip__args` span intentionally uses `opacity: 0.7` for visual de-emphasis. This reduces effective contrast
+  // of the muted text below 4.5:1. This is genuine design intent, not a token bug.
 
   import { defineMeta } from "@storybook/addon-svelte-csf";
   import { expect } from "storybook/test";
@@ -19,8 +17,8 @@
   import { STREAMING_SENTINEL_ID } from "$lib/stores/conversation.svelte.js";
   import type { ToolCallEntry } from "$lib/stores/tool-calls.svelte.js";
 
-  // Per-story a11y override: the .tool-chip__args span uses opacity: 0.7 for
-  // intentional de-emphasis, which reduces effective contrast below 4.5:1.
+  // Per-story a11y override: the .tool-chip__args span uses opacity: 0.7 for intentional de-emphasis, which reduces
+  // effective contrast below 4.5:1.
   const opacityDeemphasis = {
     a11y: { config: { rules: [{ id: "color-contrast", enabled: false }] } },
   };
@@ -30,17 +28,16 @@
     component: ToolCallChip,
     tags: ["autodocs"],
     parameters: {
-      // These stories render standalone chips without a conversation thread wrapper.
-      // No network or store seeding needed — props are injected directly as args.
+      // These stories render standalone chips without a conversation thread wrapper. No network or store seeding needed
+      // — props are injected directly as args.
       layout: "padded",
     },
   });
 </script>
 
 <!--
-  In-progress chip: tool.started state — shows the animated spinner and argsSummary.
-  Covers AC: "tool chip (in-progress)".
-  play: asserts the chip renders the argsSummary text and the chip element is visible.
+  In-progress chip: tool.started state — shows the animated spinner and argsSummary. Covers AC:
+  "tool chip (in-progress)". play: asserts the chip renders the argsSummary text and the chip element is visible.
 -->
 <Story
   name="InProgress"
@@ -57,8 +54,8 @@
     } satisfies ToolCallEntry,
   }}
   play={async ({ canvas }) => {
-    // The chip renders with the argsSummary text visible.
-    // argsSummary is placed in .tool-chip__args via {@html renderSafeMarkdown(...)}.
+    // The chip renders with the argsSummary text visible. argsSummary is placed in .tool-chip__args via {@html
+    // renderSafeMarkdown(...)}.
     await expect(await canvas.findByText(/buy oat milk/i)).toBeVisible();
     // The in-progress chip uses role="status" (aria-live=polite).
     const chip = canvas.getByRole("status");
@@ -67,9 +64,8 @@
 />
 
 <!--
-  Resolved entity card: tool.completed for a write tool that returns a reminder
-  shape. Covers AC: "resolved entity card".
-  play: asserts the entity card link renders with the reminder title and links to /reminders.
+  Resolved entity card: tool.completed for a write tool that returns a reminder shape. Covers AC:
+  "resolved entity card". play: asserts the entity card link renders with the reminder title and links to /reminders.
 -->
 <Story
   name="EntityCard"
@@ -125,8 +121,8 @@
 />
 
 <!--
-  Quiet read: list_reminders completes without emitting any visible chip
-  (renders nothing — quiet reads are intentionally invisible).
+  Quiet read: list_reminders completes without emitting any visible chip (renders nothing — quiet reads are
+  intentionally invisible).
 -->
 <Story
   name="QuietRead"
@@ -145,8 +141,8 @@
 />
 
 <!--
-  Unknown result shape: tool.completed but result doesn't match the reminder
-  schema — falls back to the calm generic "Done" chip.
+  Unknown result shape: tool.completed but result doesn't match the reminder schema — falls back to the calm generic
+  "Done" chip.
 -->
 <Story
   name="UnknownResultShape"
@@ -165,8 +161,8 @@
 />
 
 <!--
-  Error state: tool.failed — shows the soft recoverable error chip.
-  play: asserts the alert role renders with the error text.
+  Error state: tool.failed — shows the soft recoverable error chip. play: asserts the alert role renders with the
+  error text.
 -->
 <Story
   name="ErrorState"
@@ -186,8 +182,8 @@
     // Failed chip uses role="alert".
     const alert = await canvas.findByRole("alert");
     await expect(alert).toBeVisible();
-    // The specific error detail text must appear inside the chip.
-    // Use a more specific phrase that only matches the error detail, not the label.
+    // The specific error detail text must appear inside the chip. Use a more specific phrase that only matches the
+    // error detail, not the label.
     await expect(await canvas.findByText(/please try again/i)).toBeVisible();
   }}
 />

@@ -2,11 +2,9 @@ package harness_test
 
 // concurrent_resolve_test.go — TDD tests for the double-execution race in Resolve.
 //
-// Two confirmations (callA, callB) are pending in ONE conversation. Two Resolve
-// calls fire concurrently from separate goroutines. Without per-conversation
-// serialisation and an atomic status CAS each goroutine sees both calls as
-// approved-and-not-yet-done and executes both tools, producing double execution
-// and duplicate DB rows.
+// Two confirmations (callA, callB) are pending in ONE conversation. Two Resolve calls fire concurrently from separate
+// goroutines. Without per-conversation serialisation and an atomic status CAS each goroutine sees both calls as
+// approved-and-not-yet-done and executes both tools, producing double execution and duplicate DB rows.
 //
 // Assertions (must hold after the fix):
 //   (a) Each tool's Execute ran EXACTLY ONCE (mutex-guarded counter).
@@ -81,15 +79,13 @@ func countCompletedEvents(evs []fakeEvent) int {
 
 // TestConcurrentResolve_NoDoubleExecution is the TDD test for the must-fix race.
 //
-// Setup: one conversation with two Confirm-tier tool calls (callA, callB) both in
-// a single assistant message, both with a pending_confirmations row in "approved"
-// status (simulating two near-simultaneous Resolve calls having already stored
-// the status update in the DB). Then two concurrent goroutines call Resolve for
-// callA and callB respectively, racing to enter run for the same conversation.
+// Setup: one conversation with two Confirm-tier tool calls (callA, callB) both in a single assistant message, both
+// with a pending_confirmations row in "approved" status (simulating two near-simultaneous Resolve calls having already
+// stored the status update in the DB). Then two concurrent goroutines call Resolve for callA and callB respectively,
+// racing to enter run for the same conversation.
 //
-// The test fires two concurrent Resolve calls and then waits for exactly one
-// message.completed. Without serialisation both goroutines execute both tools and
-// persist duplicate rows.
+// The test fires two concurrent Resolve calls and then waits for exactly one message.completed. Without serialisation
+// both goroutines execute both tools and persist duplicate rows.
 func TestConcurrentResolve_NoDoubleExecution(t *testing.T) {
 	t.Parallel()
 
@@ -126,9 +122,8 @@ func TestConcurrentResolve_NoDoubleExecution(t *testing.T) {
 	h := buildHarnessWithConfirmTool(t, s, gw, bus, extTool, time.Hour)
 	srv := buildConfirmServer(h)
 
-	// Manually construct the conversation in a suspended state:
-	// user message + assistant message with tool_calls A and B + two
-	// pending_confirmations rows.
+	// Manually construct the conversation in a suspended state: user message + assistant message with tool_calls A and
+	// B + two pending_confirmations rows.
 	convID := id.New()
 	scope := store.UserScope(p)
 	sq := s.ForUser(scope)
@@ -177,8 +172,8 @@ func TestConcurrentResolve_NoDoubleExecution(t *testing.T) {
 		}
 	}
 
-	// Fire two concurrent Resolve calls — one for each callID.
-	// The race: both goroutines will re-enter run for the same conversation.
+	// Fire two concurrent Resolve calls — one for each callID. The race: both goroutines will re-enter run for the same
+	// conversation.
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -233,16 +228,13 @@ func TestConcurrentResolve_NoDoubleExecution(t *testing.T) {
 	}
 }
 
-// TestTurnCompletionGuard_SpuriousReentryIsNoOp verifies the turn-completion guard
-// directly: when a conversation's last message is already a final assistant reply
-// (role="assistant", no tool_calls), calling Resolve against any approved call in
-// that conversation must be a no-op — it must emit nothing and must not call the
-// gateway again.
+// TestTurnCompletionGuard_SpuriousReentryIsNoOp verifies the turn-completion guard directly: when a conversation's
+// last message is already a final assistant reply (role="assistant", no tool_calls), calling Resolve against any
+// approved call in that conversation must be a no-op — it must emit nothing and must not call the gateway again.
 //
-// This covers the exact path that the x60 hammer test exposes: G1 finishes the turn
-// (persists the final assistant reply), G2 then acquires the lock, enters run, sees
-// no outstanding tool calls, but now hits the turn-completion guard and returns
-// without doing another gateway round.
+// This covers the exact path that the x60 hammer test exposes: G1 finishes the turn (persists the final assistant
+// reply), G2 then acquires the lock, enters run, sees no outstanding tool calls, but now hits the turn-completion guard
+// and returns without doing another gateway round.
 func TestTurnCompletionGuard_SpuriousReentryIsNoOp(t *testing.T) {
 	t.Parallel()
 
@@ -328,8 +320,8 @@ func TestTurnCompletionGuard_SpuriousReentryIsNoOp(t *testing.T) {
 		t.Fatalf("InsertMessage final assistant: %v", err)
 	}
 
-	// Insert a pending_confirmations row in "approved" status to simulate a Resolve
-	// that won the CAS but whose goroutine runs after G1 already finished the turn.
+	// Insert a pending_confirmations row in "approved" status to simulate a Resolve that won the CAS but whose
+	// goroutine runs after G1 already finished the turn.
 	expiresAt := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
 	if _, err := s.Writer().ExecContext(context.Background(),
 		`INSERT INTO pending_confirmations (id, conversation_id, message_id, user_id, tool_name, args, risk, status, expires_at)
@@ -340,12 +332,11 @@ func TestTurnCompletionGuard_SpuriousReentryIsNoOp(t *testing.T) {
 		t.Fatalf("insert pending_confirmations: %v", err)
 	}
 
-	// Update to "approved" — CAS already done by G1's Resolve call.
-	// Now call Resolve with the same callID from "G2": this should be a no-op.
+	// Update to "approved" — CAS already done by G1's Resolve call. Now call Resolve with the same callID from "G2":
+	// this should be a no-op.
 	rr := resolveViaHTTP(t, srv, p, convID, callID, "approve")
-	// Resolve returns 409 (ErrConfirmationAlreadyResolved) because the CAS UPDATE
-	// finds rowsAffected=0 — the row is already "approved", not "pending".
-	// This is the correct HTTP result for a double-Resolve attempt.
+	// Resolve returns 409 (ErrConfirmationAlreadyResolved) because the CAS UPDATE finds rowsAffected=0 — the row is
+	// already "approved", not "pending". This is the correct HTTP result for a double-Resolve attempt.
 	if rr.Code != http.StatusConflict {
 		t.Errorf("spurious Resolve status = %d, want 409 (already resolved)", rr.Code)
 	}
@@ -365,11 +356,10 @@ func TestTurnCompletionGuard_SpuriousReentryIsNoOp(t *testing.T) {
 	}
 }
 
-// TestTurnCompletionGuard_AlreadyCompleteRunIsNoOp verifies the guard at the run
-// level: when StartTurn is called for a conversation whose last message is already
-// a final assistant reply, run must return immediately with no gateway call and
-// no event emitted. This simulates a duplicate StartTurn call (e.g. retried HTTP
-// request hitting a turn that already completed).
+// TestTurnCompletionGuard_AlreadyCompleteRunIsNoOp verifies the guard at the run level: when StartTurn is called for a
+// conversation whose last message is already a final assistant reply, run must return immediately with no gateway call
+// and no event emitted. This simulates a duplicate StartTurn call (e.g. retried HTTP request hitting a turn that
+// already completed).
 func TestTurnCompletionGuard_AlreadyCompleteRunIsNoOp(t *testing.T) {
 	t.Parallel()
 

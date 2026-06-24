@@ -25,16 +25,16 @@ func noopHandler(status int, body string) http.Handler {
 	})
 }
 
-// newTestLogger returns a *slog.Logger backed by a *bytes.Buffer and the
-// buffer itself so tests can inspect what was logged.
+// newTestLogger returns a *slog.Logger backed by a *bytes.Buffer and the buffer itself so tests can inspect what was
+// logged.
 func newTestLogger() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
 	h := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	return slog.New(h), buf
 }
 
-// fakeValidator is a test-double for httpx.TokenValidator.
-// If Token matches the configured expected value, it returns Principal; else error.
+// fakeValidator is a test-double for httpx.TokenValidator. If Token matches the configured expected value, it returns
+// Principal; else error.
 type fakeValidator struct {
 	expectedToken string
 	principal     store.Principal
@@ -53,13 +53,13 @@ func (e *unauthenticatedError) Error() string { return "invalid token: " + e.tok
 
 // ---- MiddlewareChain --------------------------------------------------------
 
-// TestDefaultChain_OrderIsOutermostFirst verifies that the real StandardChain
-// composes its middlewares in the documented order:
+// TestDefaultChain_OrderIsOutermostFirst verifies that the real StandardChain composes its middlewares in the
+// documented order:
 //
 //	recover → request-id → request-log → security-headers → auth
 //
-// The test exercises the actual httpx.StandardChain return value (not stubs).
-// Observable effects of each layer prove the ordering:
+// The test exercises the actual httpx.StandardChain return value (not stubs). Observable effects of each layer prove
+// the ordering:
 //
 //   - recover is outermost: a panicking route yields 500 with the panic logged.
 //   - request-id runs inside recover: Request-Id is present on the 500 response.
@@ -67,8 +67,8 @@ func (e *unauthenticatedError) Error() string { return "invalid token: " + e.tok
 //   - security-headers runs before auth: the header is set even on 401 responses.
 //   - auth is innermost (before route): an invalid token yields 401, not 200.
 //
-// If StandardChain ever reorders its elements, at least one assertion here will
-// fail without needing to inspect the slice positions by index.
+// If StandardChain ever reorders its elements, at least one assertion here will fail without needing to inspect the
+// slice positions by index.
 func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 	t.Parallel()
 
@@ -76,9 +76,8 @@ func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 	validator := &fakeValidator{expectedToken: "good-tok", principal: wantPrincipal}
 	isPublic := func(r *http.Request) bool { return r.URL.Path == "/healthz" }
 
-	// Each subtest creates its own logger so parallel subtests never share a
-	// *bytes.Buffer and cannot race on it. StandardChain is called once per
-	// subtest so the logger injected into the real middleware is subtest-local.
+	// Each subtest creates its own logger so parallel subtests never share a *bytes.Buffer and cannot race on it.
+	// StandardChain is called once per subtest so the logger injected into the real middleware is subtest-local.
 
 	t.Run("recover_is_outermost", func(t *testing.T) {
 		t.Parallel()
@@ -91,21 +90,19 @@ func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 
 		// Behavioral proof that mws[0] is RecoverMiddleware, not any other middleware.
 		//
-		// Strategy: compose a panicking middleware as position 1 (directly inside
-		// mws[0]) and verify the response is a clean 500 problem+json.
+		// Strategy: compose a panicking middleware as position 1 (directly inside mws[0]) and verify the response
+		// is a clean 500 problem+json.
 		//
 		//   Chain(route, mws[0], panicMW)
 		//   → mws[0]( panicMW( route ) )
 		//
-		// Only RecoverMiddleware can turn a panic into a 500 response. Any other
-		// middleware at position 0 (e.g. request-id in the M1 swap) lets the panic
-		// propagate uncaught and ServeHTTP re-panics — the response recorder ends up
-		// with code 200 (default, never set) and no problem+json body.
+		// Only RecoverMiddleware can turn a panic into a 500 response. Any other middleware at position 0 (e.g.
+		// request-id in the M1 swap) lets the panic propagate uncaught and ServeHTTP re-panics — the response
+		// recorder ends up with code 200 (default, never set) and no problem+json body.
 		//
-		// This mutant-killing property holds because we drive the panic from panicMW,
-		// which is placed INSIDE mws[0] and OUTSIDE the rest of the chain. If the
-		// M1 mutation (request-id outermost, recover second) is applied, mws[0] is
-		// request-id, which does not recover panics, so the test panics and fails.
+		// This mutant-killing property holds because we drive the panic from panicMW, which is placed INSIDE mws[0]
+		// and OUTSIDE the rest of the chain. If the M1 mutation (request-id outermost, recover second) is applied,
+		// mws[0] is request-id, which does not recover panics, so the test panics and fails.
 		panicMW := func(_ http.Handler) http.Handler {
 			return http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 				panic("recover-outermost sentinel panic")
@@ -133,10 +130,9 @@ func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 
 		// Behavioral proof that mws[1] is RequestIDMiddleware.
 		//
-		// RequestIDMiddleware sets the Request-Id header on the ResponseWriter BEFORE
-		// calling next. We verify this by reading the header from WITHIN the inner
-		// handler — if it is already set when the handler runs, mws[1] must be
-		// RequestIDMiddleware (no other production middleware sets that header).
+		// RequestIDMiddleware sets the Request-Id header on the ResponseWriter BEFORE calling next. We verify this
+		// by reading the header from WITHIN the inner handler — if it is already set when the handler runs, mws[1]
+		// must be RequestIDMiddleware (no other production middleware sets that header).
 		//
 		// Composing: Chain(inner, mws[0], mws[1])
 		// → mws[0]( mws[1]( inner ) )
@@ -162,8 +158,8 @@ func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 		logger, _ := newTestLogger()
 		mws := httpx.StandardChain(logger, validator, isPublic)
 
-		// security-headers runs before auth, so its headers must appear even on 401.
-		// If auth ran before security-headers, the 401 short-circuit would skip the header.
+		// security-headers runs before auth, so its headers must appear even on 401. If auth ran before
+		// security-headers, the 401 short-circuit would skip the header.
 		route := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
@@ -186,18 +182,17 @@ func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 
 		// Behavioral proof that auth is the innermost middleware (last before route).
 		//
-		// Strategy: send a request that auth rejects (no token → 401) and assert that
-		// the layers that must be OUTSIDE auth all produced their observable effects:
+		// Strategy: send a request that auth rejects (no token → 401) and assert that the layers that must be
+		// OUTSIDE auth all produced their observable effects:
 		//   - request-id set the Request-Id response header
 		//   - security-headers set X-Content-Type-Options: nosniff
 		//   - request-log emitted a "request" log line containing the request-id
 		//
-		// If any of these layers were INSIDE auth (i.e. between auth and the route),
-		// auth's 401 short-circuit would skip them — the corresponding assertion fails.
+		// If any of these layers were INSIDE auth (i.e. between auth and the route), auth's 401 short-circuit would
+		// skip them — the corresponding assertion fails.
 		//
-		// The M2 mutation (request-log moved innermost, between auth and route) is
-		// caught by the log-line check: on a 401 the inner request-log never runs,
-		// so no "request" line is emitted.
+		// The M2 mutation (request-log moved innermost, between auth and route) is caught by the log-line check: on
+		// a 401 the inner request-log never runs, so no "request" line is emitted.
 		logger, logBuf := newTestLogger()
 		mws := httpx.StandardChain(logger, validator, isPublic)
 
@@ -225,8 +220,8 @@ func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 			t.Errorf("X-Content-Type-Options = %q on 401 — security-headers must be outside (above) auth", v)
 		}
 
-		// request-log must have run (outside auth): a "request" log line must exist.
-		// If request-log were innermost (M2 mutation), the 401 short-circuit skips it.
+		// request-log must have run (outside auth): a "request" log line must exist. If request-log were innermost
+		// (M2 mutation), the 401 short-circuit skips it.
 		logOutput := logBuf.String()
 		hasRequestLine := false
 		for line := range strings.SplitSeq(logOutput, "\n") {
@@ -246,9 +241,8 @@ func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 		logger, logBuf := newTestLogger()
 		mws := httpx.StandardChain(logger, validator, isPublic)
 
-		// request-log runs inside request-id, so it can read the request-id from
-		// context. If order were reversed (log → request-id), the log line would have
-		// an empty or "unknown" requestId.
+		// request-log runs inside request-id, so it can read the request-id from context. If order were reversed
+		// (log → request-id), the log line would have an empty or "unknown" requestId.
 		route := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
@@ -270,8 +264,8 @@ func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 
 // ---- RecoverMiddleware ------------------------------------------------------
 
-// TestRecoverMiddleware_PanicYields500 verifies that a panicking inner handler
-// produces a 500 problem+json response with no stack trace in the body.
+// TestRecoverMiddleware_PanicYields500 verifies that a panicking inner handler produces a 500 problem+json response
+// with no stack trace in the body.
 func TestRecoverMiddleware_PanicYields500(t *testing.T) {
 	t.Parallel()
 
@@ -281,11 +275,9 @@ func TestRecoverMiddleware_PanicYields500(t *testing.T) {
 		panic("something went badly wrong")
 	})
 
-	// Compose: request-id (outermost) so Request-Id header is set before recover
-	// panics, then recover catches it. Per the spec, request-id sets the header
-	// BEFORE calling next, so recover can write the 500 response with the header
-	// already present.
-	// For this test we use recover as the outermost wrapper directly.
+	// Compose: request-id (outermost) so Request-Id header is set before recover panics, then recover catches it. Per
+	// the spec, request-id sets the header BEFORE calling next, so recover can write the 500 response with the header
+	// already present. For this test we use recover as the outermost wrapper directly.
 	h := httpx.Chain(panicHandler, httpx.RecoverMiddleware(logger))
 
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
@@ -315,10 +307,9 @@ func TestRecoverMiddleware_PanicYields500(t *testing.T) {
 	}
 }
 
-// TestRecoverMiddleware_PanicWithRequestID verifies that even when a panic
-// unwinds through the request-id middleware, the Request-Id response header
-// is still present on the 500 response (because request-id sets headers before
-// calling next).
+// TestRecoverMiddleware_PanicWithRequestID verifies that even when a panic unwinds through the request-id middleware,
+// the Request-Id response header is still present on the 500 response (because request-id sets headers before calling
+// next).
 func TestRecoverMiddleware_PanicWithRequestID(t *testing.T) {
 	t.Parallel()
 
@@ -352,8 +343,7 @@ func TestRecoverMiddleware_PanicWithRequestID(t *testing.T) {
 	}
 }
 
-// TestRecoverMiddleware_NoPanicPassesThrough verifies that a non-panicking
-// handler passes through recover unchanged.
+// TestRecoverMiddleware_NoPanicPassesThrough verifies that a non-panicking handler passes through recover unchanged.
 func TestRecoverMiddleware_NoPanicPassesThrough(t *testing.T) {
 	t.Parallel()
 
@@ -369,10 +359,9 @@ func TestRecoverMiddleware_NoPanicPassesThrough(t *testing.T) {
 	}
 }
 
-// TestRecoverMiddleware_PanicAfterPartialWrite verifies that when a handler
-// panics AFTER it has already started writing the response, recover does not
-// splice a 500 problem body into the middle of the partial response. The status
-// stays what the handler set, and the body contains no problem JSON.
+// TestRecoverMiddleware_PanicAfterPartialWrite verifies that when a handler panics AFTER it has already started writing
+// the response, recover does not splice a 500 problem body into the middle of the partial response. The status stays
+// what the handler set, and the body contains no problem JSON.
 func TestRecoverMiddleware_PanicAfterPartialWrite(t *testing.T) {
 	t.Parallel()
 
@@ -409,9 +398,8 @@ func TestRecoverMiddleware_PanicAfterPartialWrite(t *testing.T) {
 
 // ---- RequestIDMiddleware ----------------------------------------------------
 
-// TestRequestIDMiddleware_GeneratesID verifies that a request with no
-// incoming Request-Id header gets a fresh ID in the response header and
-// in the request context.
+// TestRequestIDMiddleware_GeneratesID verifies that a request with no incoming Request-Id header gets a fresh ID in the
+// response header and in the request context.
 func TestRequestIDMiddleware_GeneratesID(t *testing.T) {
 	t.Parallel()
 
@@ -441,8 +429,7 @@ func TestRequestIDMiddleware_GeneratesID(t *testing.T) {
 	}
 }
 
-// TestRequestIDMiddleware_PropagatesIncomingID verifies that an incoming
-// Request-Id header is reused (not replaced).
+// TestRequestIDMiddleware_PropagatesIncomingID verifies that an incoming Request-Id header is reused (not replaced).
 func TestRequestIDMiddleware_PropagatesIncomingID(t *testing.T) {
 	t.Parallel()
 
@@ -468,8 +455,8 @@ func TestRequestIDMiddleware_PropagatesIncomingID(t *testing.T) {
 	}
 }
 
-// TestRequestIDMiddleware_SetsTraceparent verifies that a traceparent response
-// header is always set in the W3C format (00-<32hex>-<16hex>-01).
+// TestRequestIDMiddleware_SetsTraceparent verifies that a traceparent response header is always set in the W3C format
+// (00-<32hex>-<16hex>-01).
 func TestRequestIDMiddleware_SetsTraceparent(t *testing.T) {
 	t.Parallel()
 
@@ -502,16 +489,14 @@ func TestRequestIDMiddleware_SetsTraceparent(t *testing.T) {
 	}
 }
 
-// TestRequestIDMiddleware_HeaderSetBeforeNext verifies that the Request-Id and
-// traceparent headers are set on the ResponseWriter BEFORE next is called,
-// so a downstream panic does not strip them.
+// TestRequestIDMiddleware_HeaderSetBeforeNext verifies that the Request-Id and traceparent headers are set on the
+// ResponseWriter BEFORE next is called, so a downstream panic does not strip them.
 func TestRequestIDMiddleware_HeaderSetBeforeNext(t *testing.T) {
 	t.Parallel()
 
 	var seenID string
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// Read the header that the request-id middleware should have set before
-		// calling us.
+		// Read the header that the request-id middleware should have set before calling us.
 		seenID = w.Header().Get("Request-Id")
 	})
 
@@ -527,9 +512,8 @@ func TestRequestIDMiddleware_HeaderSetBeforeNext(t *testing.T) {
 
 // ---- RequestLogMiddleware ---------------------------------------------------
 
-// TestRequestLogMiddleware_EmitsOneLine verifies that each request produces
-// exactly one slog log line containing method, path, status, duration, and
-// request id.
+// TestRequestLogMiddleware_EmitsOneLine verifies that each request produces exactly one slog log line containing
+// method, path, status, duration, and request id.
 func TestRequestLogMiddleware_EmitsOneLine(t *testing.T) {
 	t.Parallel()
 
@@ -585,8 +569,8 @@ func TestRequestLogMiddleware_EmitsOneLine(t *testing.T) {
 	}
 }
 
-// TestRequestLogMiddleware_NoBodiesOrSecrets verifies that the log line does
-// not contain Authorization headers or request body content.
+// TestRequestLogMiddleware_NoBodiesOrSecrets verifies that the log line does not contain Authorization headers or
+// request body content.
 func TestRequestLogMiddleware_NoBodiesOrSecrets(t *testing.T) {
 	t.Parallel()
 
@@ -614,12 +598,11 @@ func TestRequestLogMiddleware_NoBodiesOrSecrets(t *testing.T) {
 	}
 }
 
-// TestRequestLogMiddleware_5xxLogsError verifies that a handler that returns a
-// 5xx status WITHOUT panicking causes the request-log middleware to emit the log
-// line at ERROR level, and that a 2xx or 4xx response is logged at INFO level.
+// TestRequestLogMiddleware_5xxLogsError verifies that a handler that returns a 5xx status WITHOUT panicking causes the
+// request-log middleware to emit the log line at ERROR level, and that a 2xx or 4xx response is logged at INFO level.
 //
-// This is the general status≥500 → ERROR mapping test. The panic path (which
-// also resolves to 500/ERROR) is covered by TestRequestLogMiddleware_EmitsOneLineOnPanic.
+// This is the general status≥500 → ERROR mapping test. The panic path (which also resolves to 500/ERROR) is covered by
+// TestRequestLogMiddleware_EmitsOneLineOnPanic.
 func TestRequestLogMiddleware_5xxLogsError(t *testing.T) {
 	t.Parallel()
 
@@ -643,9 +626,8 @@ func TestRequestLogMiddleware_5xxLogsError(t *testing.T) {
 
 			logger, logBuf := newTestLogger()
 
-			// The handler writes the status code normally — no panic, just a plain
-			// return. This exercises the straight-line path through RequestLogMiddleware,
-			// not the panic re-panic path.
+			// The handler writes the status code normally — no panic, just a plain return. This exercises the
+			// straight-line path through RequestLogMiddleware, not the panic re-panic path.
 			h := httpx.Chain(noopHandler(tt.status, ""), httpx.RequestLogMiddleware(logger))
 
 			r := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
@@ -682,8 +664,8 @@ func TestRequestLogMiddleware_5xxLogsError(t *testing.T) {
 
 // ---- SecurityHeadersMiddleware ----------------------------------------------
 
-// TestSecurityHeadersMiddleware_BaselineHeaders verifies that the baseline
-// security headers are present on every response.
+// TestSecurityHeadersMiddleware_BaselineHeaders verifies that the baseline security headers are present on every
+// response.
 func TestSecurityHeadersMiddleware_BaselineHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -725,8 +707,8 @@ func TestSecurityHeadersMiddleware_BaselineHeaders(t *testing.T) {
 
 // ---- AuthMiddleware ---------------------------------------------------------
 
-// TestAuthMiddleware_ValidTokenSetsPrincipal verifies that a valid Bearer token
-// results in a Principal being placed in the request context.
+// TestAuthMiddleware_ValidTokenSetsPrincipal verifies that a valid Bearer token results in a Principal being placed in
+// the request context.
 func TestAuthMiddleware_ValidTokenSetsPrincipal(t *testing.T) {
 	t.Parallel()
 
@@ -758,8 +740,8 @@ func TestAuthMiddleware_ValidTokenSetsPrincipal(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_MissingTokenYields401 verifies that a request with no
-// Authorization header on a protected route gets a 401 problem+json response.
+// TestAuthMiddleware_MissingTokenYields401 verifies that a request with no Authorization header on a protected route
+// gets a 401 problem+json response.
 func TestAuthMiddleware_MissingTokenYields401(t *testing.T) {
 	t.Parallel()
 
@@ -780,8 +762,8 @@ func TestAuthMiddleware_MissingTokenYields401(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_InvalidTokenYields401 verifies that an invalid token
-// returns 401 (not 403 — the token may simply be expired/invalid).
+// TestAuthMiddleware_InvalidTokenYields401 verifies that an invalid token returns 401 (not 403 — the token may simply
+// be expired/invalid).
 func TestAuthMiddleware_InvalidTokenYields401(t *testing.T) {
 	t.Parallel()
 
@@ -800,9 +782,8 @@ func TestAuthMiddleware_InvalidTokenYields401(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_SchemeCaseInsensitive verifies that the Bearer auth scheme
-// is matched case-insensitively per RFC 7235, so "Authorization: bearer <token>"
-// is accepted just like "Bearer <token>".
+// TestAuthMiddleware_SchemeCaseInsensitive verifies that the Bearer auth scheme is matched case-insensitively per RFC
+// 7235, so "Authorization: bearer <token>" is accepted just like "Bearer <token>".
 func TestAuthMiddleware_SchemeCaseInsensitive(t *testing.T) {
 	t.Parallel()
 
@@ -835,8 +816,8 @@ func TestAuthMiddleware_SchemeCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_PublicRouteExempt verifies that routes for which isPublic
-// returns true are passed through without any token requirement.
+// TestAuthMiddleware_PublicRouteExempt verifies that routes for which isPublic returns true are passed through without
+// any token requirement.
 func TestAuthMiddleware_PublicRouteExempt(t *testing.T) {
 	t.Parallel()
 
@@ -868,8 +849,8 @@ func TestAuthMiddleware_PublicRouteExempt(t *testing.T) {
 	}
 }
 
-// TestAuthMiddleware_SPAAssetsExempt verifies that SPA asset paths are
-// considered public (tested via the isPublic predicate).
+// TestAuthMiddleware_SPAAssetsExempt verifies that SPA asset paths are considered public (tested via the isPublic
+// predicate).
 func TestAuthMiddleware_SPAAssetsExempt(t *testing.T) {
 	t.Parallel()
 
@@ -906,8 +887,8 @@ func TestAuthMiddleware_SPAAssetsExempt(t *testing.T) {
 	}
 }
 
-// TestPrincipalFromContext_EmptyContext verifies that PrincipalFromContext
-// returns ok=false when no principal has been stored.
+// TestPrincipalFromContext_EmptyContext verifies that PrincipalFromContext returns ok=false when no principal has been
+// stored.
 func TestPrincipalFromContext_EmptyContext(t *testing.T) {
 	t.Parallel()
 
@@ -983,9 +964,8 @@ func TestFullChain_AuthenticatedRequest(t *testing.T) {
 	}
 }
 
-// TestFullChain_PanicStillCarriesRequestID exercises the full chain when the
-// route panics, verifying that the 500 response still carries Request-Id
-// (because request-id sets headers before calling next).
+// TestFullChain_PanicStillCarriesRequestID exercises the full chain when the route panics, verifying that the 500
+// response still carries Request-Id (because request-id sets headers before calling next).
 func TestFullChain_PanicStillCarriesRequestID(t *testing.T) {
 	t.Parallel()
 
@@ -1012,8 +992,8 @@ func TestFullChain_PanicStillCarriesRequestID(t *testing.T) {
 	}
 }
 
-// TestFullChain_PublicRouteNoAuth verifies that /healthz passes through the
-// full chain without requiring a Bearer token.
+// TestFullChain_PublicRouteNoAuth verifies that /healthz passes through the full chain without requiring a Bearer
+// token.
 func TestFullChain_PublicRouteNoAuth(t *testing.T) {
 	t.Parallel()
 
@@ -1037,14 +1017,12 @@ func TestFullChain_PublicRouteNoAuth(t *testing.T) {
 	}
 }
 
-// TestRequestLogMiddleware_EmitsOneLineOnPanic verifies that the request-log
-// middleware emits exactly one "request" log line even when the inner handler
-// panics, AND that the log line records status=500 and level=ERROR.
+// TestRequestLogMiddleware_EmitsOneLineOnPanic verifies that the request-log middleware emits exactly one "request" log
+// line even when the inner handler panics, AND that the log line records status=500 and level=ERROR.
 //
 // Chain: recover (outermost) → request-id → request-log → panic handler.
-// The deferred log in RequestLogMiddleware must observe status=500 — the value
-// RecoverMiddleware will write — rather than the 0→200 default from the
-// statusRecorder when WriteHeader has not yet been called.
+// The deferred log in RequestLogMiddleware must observe status=500 — the value RecoverMiddleware will write — rather
+// than the 0→200 default from the statusRecorder when WriteHeader has not yet been called.
 func TestRequestLogMiddleware_EmitsOneLineOnPanic(t *testing.T) {
 	t.Parallel()
 
@@ -1098,9 +1076,8 @@ func TestRequestLogMiddleware_EmitsOneLineOnPanic(t *testing.T) {
 
 	entry := requestLines[0]
 
-	// The access-log MUST record status=500 so SLO dashboards see the real outcome.
-	// A value of 0 or 200 means the log captured the pre-panic state, not the
-	// 500 RecoverMiddleware writes.
+	// The access-log MUST record status=500 so SLO dashboards see the real outcome. A value of 0 or 200 means the log
+	// captured the pre-panic state, not the 500 RecoverMiddleware writes.
 	gotStatus, _ := entry["status"].(float64)
 	if int(gotStatus) != http.StatusInternalServerError {
 		t.Errorf("access-log status = %v, want 500; the log must reflect the 500 RecoverMiddleware writes, not the unwritten 0→200 default", gotStatus)

@@ -1,8 +1,7 @@
 package harness
 
-// classify_test.go — pure table-driven unit tests for the classify function.
-// These are in package harness (not harness_test) to access the unexported classify function and fault enum.
-// AC-3 from the error-classification issue.
+// classify_test.go — pure table-driven unit tests for the classify function. These are in package harness (not
+// harness_test) to access the unexported classify function and fault enum. AC-3 from the error-classification issue.
 
 import (
 	"errors"

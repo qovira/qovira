@@ -1,9 +1,8 @@
 // Tests for the sanitized Markdown pipeline.
 //
-// Vitest project: jsdom — DOMPurify requires a DOM that correctly processes href
-// attributes in block context (jsdom passes DOMPurify's isSupported check and
-// faithfully sanitizes block-context anchors; happy-dom has a known fidelity bug
-// where uponSanitizeAttribute may not fire for such elements).
+// Vitest project: jsdom — DOMPurify requires a DOM that correctly processes href attributes in block context (jsdom
+// passes DOMPurify's isSupported check and faithfully sanitizes block-context anchors; happy-dom has a known fidelity
+// bug where uponSanitizeAttribute may not fire for such elements).
 //
 // Verifies that the pipeline:
 //   1. Renders valid Markdown to HTML.
@@ -52,8 +51,8 @@ describe("renderSafeMarkdown()", () => {
   });
 
   it("strips javascript: href injection via block-context raw anchor (AC #3)", () => {
-    // A raw <a> tag in a block paragraph — this is the case happy-dom mishandles.
-    // jsdom + DOMPurify's ALLOWED_URI_REGEXP allowlist neutralizes it correctly.
+    // A raw <a> tag in a block paragraph — this is the case happy-dom mishandles. jsdom + DOMPurify's
+    // ALLOWED_URI_REGEXP allowlist neutralizes it correctly.
     const malicious = '<p><a href="javascript:alert(1)">click</a></p>';
     const result = renderSafeMarkdown(malicious);
     expect(result).not.toContain("javascript:");
@@ -188,9 +187,8 @@ describe("renderSafeMarkdown()", () => {
   // ---------------------------------------------------------------------------
 
   describe("obfuscated URI scheme bypasses (Finding 3)", () => {
-    // Anchor-tightening regression guard — relative and fragment links that the
-    // new anchored ALLOWED_URI_REGEXP must continue to pass through unchanged.
-    // These tests were added BEFORE the regexp was tightened so any over-tightening
+    // Anchor-tightening regression guard — relative and fragment links that the new anchored ALLOWED_URI_REGEXP must
+    // continue to pass through unchanged. These tests were added BEFORE the regexp was tightened so any over-tightening
     // is caught immediately (they must pass with both the old and new regexp).
 
     it("preserves absolute-relative path href (/path)", () => {
@@ -213,8 +211,8 @@ describe("renderSafeMarkdown()", () => {
       expect(result).toContain('href="#my-section"');
     });
 
-    // Obfuscated scheme rejection — the anchored regexp must reject these at the
-    // regexp level, not only because DOMPurify pre-normalises them.
+    // Obfuscated scheme rejection — the anchored regexp must reject these at the regexp level, not only because
+    // DOMPurify pre-normalises them.
 
     it("rejects tab-obfuscated javascript: in href", () => {
       // java\tscript: — whitespace inside the scheme name

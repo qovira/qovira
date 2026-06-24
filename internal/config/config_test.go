@@ -11,8 +11,7 @@ import (
 	"github.com/qovira/qovira/internal/config"
 )
 
-// writeTOML writes content to a temp file and returns the path.
-// The file is cleaned up via t.Cleanup.
+// writeTOML writes content to a temp file and returns the path. The file is cleaned up via t.Cleanup.
 func writeTOML(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -23,8 +22,7 @@ func writeTOML(t *testing.T, content string) string {
 	return path
 }
 
-// writeSecret writes a secret value to a temp file and returns the path.
-// The file is cleaned up via t.Cleanup.
+// writeSecret writes a secret value to a temp file and returns the path. The file is cleaned up via t.Cleanup.
 func writeSecret(t *testing.T, value string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -35,9 +33,8 @@ func writeSecret(t *testing.T, value string) string {
 	return path
 }
 
-// TestLoad_Defaults verifies that when no env or file is set, Load returns
-// sensible default values (no master key, so validation will fail — but the
-// defaults for other fields should be observable).
+// TestLoad_Defaults verifies that when no env or file is set, Load returns sensible default values (no master
+// key, so validation will fail — but the defaults for other fields should be observable).
 func TestLoad_Defaults(t *testing.T) {
 	// Do NOT call t.Parallel() — we use t.Setenv which forbids it.
 	t.Setenv("QOVIRA_MASTER_KEY", "")
@@ -52,9 +49,8 @@ func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("QOVIRA_ADMIN_PASSWORD_FILE", "")
 
 	cfg, err := config.Load("")
-	// Expect error because master key is missing — but Load still returns a
-	// populated *Config on every path, so the default fields below remain
-	// observable (a nil cfg here would panic the assertions and fail the test).
+	// Expect error because master key is missing — but Load still returns a populated *Config on every path, so
+	// the default fields below remain observable (a nil cfg here would panic the assertions and fail the test).
 	if err == nil {
 		t.Fatal("expected validation error, got nil")
 	}
@@ -74,8 +70,8 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 }
 
-// TestLoad_Precedence_EnvOverFile verifies that env variables override TOML
-// file values (env > file > default precedence).
+// TestLoad_Precedence_EnvOverFile verifies that env variables override TOML file values (env > file > default
+// precedence).
 func TestLoad_Precedence_EnvOverFile(t *testing.T) {
 	// Set TOML to port 9090, env to port 7070 — env should win.
 	tomlPath := writeTOML(t, `
@@ -107,8 +103,7 @@ log_level = "warn"
 	}
 }
 
-// TestLoad_Precedence_FileOverDefault verifies that TOML file values override
-// built-in defaults.
+// TestLoad_Precedence_FileOverDefault verifies that TOML file values override built-in defaults.
 func TestLoad_Precedence_FileOverDefault(t *testing.T) {
 	tomlPath := writeTOML(t, `
 http_addr = ":9191"
@@ -138,8 +133,7 @@ log_format = "json"
 	}
 }
 
-// TestLoad_FileSuffix_MasterKey verifies that QOVIRA_MASTER_KEY_FILE reads
-// the secret from the referenced path.
+// TestLoad_FileSuffix_MasterKey verifies that QOVIRA_MASTER_KEY_FILE reads the secret from the referenced path.
 func TestLoad_FileSuffix_MasterKey(t *testing.T) {
 	secretPath := writeSecret(t, "my-secret-passphrase-at-least-sixteen-chars\n")
 
@@ -164,8 +158,7 @@ func TestLoad_FileSuffix_MasterKey(t *testing.T) {
 	}
 }
 
-// TestLoad_FileSuffix_AdminPassword verifies that QOVIRA_ADMIN_PASSWORD_FILE
-// reads the secret from the referenced path.
+// TestLoad_FileSuffix_AdminPassword verifies that QOVIRA_ADMIN_PASSWORD_FILE reads the secret from the referenced path.
 func TestLoad_FileSuffix_AdminPassword(t *testing.T) {
 	secretPath := writeSecret(t, "super-secret-admin-password\n")
 
@@ -214,8 +207,8 @@ func TestLoad_FileSuffix_Conflict(t *testing.T) {
 	}
 }
 
-// TestLoad_Validation_Aggregated verifies that a Config with multiple bad
-// fields yields ONE error mentioning every offending field.
+// TestLoad_Validation_Aggregated verifies that a Config with multiple bad fields yields ONE error mentioning every
+// offending field.
 func TestLoad_Validation_Aggregated(t *testing.T) {
 	// No master key + bad addr + bad log level + admin email without password.
 	t.Setenv("QOVIRA_MASTER_KEY", "")
@@ -243,8 +236,8 @@ func TestLoad_Validation_Aggregated(t *testing.T) {
 	}
 }
 
-// TestLoad_Validation_MasterKeyMinLength verifies that the master key must
-// meet the minimum length requirement (≥ 16 characters).
+// TestLoad_Validation_MasterKeyMinLength verifies that the master key must meet the minimum length requirement (≥ 16
+// characters).
 func TestLoad_Validation_MasterKeyMinLength(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -282,8 +275,8 @@ func TestLoad_Validation_MasterKeyMinLength(t *testing.T) {
 	}
 }
 
-// TestLoad_Validation_MasterKeyNotInError verifies that a short master key
-// error message does NOT contain the actual key value.
+// TestLoad_Validation_MasterKeyNotInError verifies that a short master key error message does NOT contain the actual
+// key value.
 func TestLoad_Validation_MasterKeyNotInError(t *testing.T) {
 	shortKey := "too-short"
 	t.Setenv("QOVIRA_MASTER_KEY", shortKey)
@@ -306,18 +299,16 @@ func TestLoad_Validation_MasterKeyNotInError(t *testing.T) {
 	}
 }
 
-// TestSecret_Redaction_Stringer verifies that the Secret type's String()
-// method returns "[REDACTED]" and never the actual value, covering
-// fmt.Stringer (%v / %s / %+v) and fmt.GoStringer (%#v) paths.
+// TestSecret_Redaction_Stringer verifies that the Secret type's String() method returns "[REDACTED]" and never the
+// actual value, covering fmt.Stringer (%v / %s / %+v) and fmt.GoStringer (%#v) paths.
 func TestSecret_Redaction_Stringer(t *testing.T) {
 	t.Parallel()
 
 	const secretValue = "super-secret-value-do-not-leak"
 	s := config.Secret(secretValue)
 
-	// %s is tested via String() directly — staticcheck S1025 correctly notes
-	// that fmt.Sprintf("%s", v) is equivalent to v.String(). We verify all
-	// other fmt verbs through Sprintf, and %s through its String() method.
+	// %s is tested via String() directly — staticcheck S1025 correctly notes that fmt.Sprintf("%s", v) is equivalent
+	// to v.String(). We verify all other fmt verbs through Sprintf, and %s through its String() method.
 	formatters := []struct {
 		verb string
 		got  string
@@ -342,8 +333,8 @@ func TestSecret_Redaction_Stringer(t *testing.T) {
 	}
 }
 
-// TestSecret_Redaction_Slog verifies that a Config containing secret values
-// does not leak those values when logged via slog.
+// TestSecret_Redaction_Slog verifies that a Config containing secret values does not leak those values when logged
+// via slog.
 func TestSecret_Redaction_Slog(t *testing.T) {
 	t.Parallel()
 
@@ -372,8 +363,8 @@ func TestSecret_Redaction_Slog(t *testing.T) {
 	}
 }
 
-// TestSecret_Redaction_InConfig verifies that formatting a whole Config struct
-// via %v/%+v does not leak any secret values.
+// TestSecret_Redaction_InConfig verifies that formatting a whole Config struct via %v/%+v does not leak any secret
+// values.
 func TestSecret_Redaction_InConfig(t *testing.T) {
 	t.Setenv("QOVIRA_MASTER_KEY", "this-is-a-long-enough-passphrase-32ch")
 	t.Setenv("QOVIRA_MASTER_KEY_FILE", "")
@@ -402,9 +393,8 @@ func TestSecret_Redaction_InConfig(t *testing.T) {
 	}
 }
 
-// TestLoad_TOMLIgnoresSecrets verifies that a TOML file containing
-// secret-looking keys (master_key, admin_password) does not populate those
-// secrets — secrets are env-only.
+// TestLoad_TOMLIgnoresSecrets verifies that a TOML file containing secret-looking keys (master_key, admin_password)
+// does not populate those secrets — secrets are env-only.
 func TestLoad_TOMLIgnoresSecrets(t *testing.T) {
 	tomlPath := writeTOML(t, `
 master_key = "from-toml-should-be-ignored"
@@ -440,8 +430,7 @@ http_addr = ":9999"
 	}
 }
 
-// TestLoad_AdminEmailWithoutPassword verifies that setting admin email without
-// a password produces a validation error.
+// TestLoad_AdminEmailWithoutPassword verifies that setting admin email without a password produces a validation error.
 func TestLoad_AdminEmailWithoutPassword(t *testing.T) {
 	t.Setenv("QOVIRA_MASTER_KEY", "this-is-a-long-enough-passphrase-32ch")
 	t.Setenv("QOVIRA_MASTER_KEY_FILE", "")
@@ -463,8 +452,7 @@ func TestLoad_AdminEmailWithoutPassword(t *testing.T) {
 	}
 }
 
-// TestLoad_AdminPasswordWithoutEmail verifies that setting admin password
-// without an email produces a validation error.
+// TestLoad_AdminPasswordWithoutEmail verifies that setting admin password without an email produces a validation error.
 func TestLoad_AdminPasswordWithoutEmail(t *testing.T) {
 	t.Setenv("QOVIRA_MASTER_KEY", "this-is-a-long-enough-passphrase-32ch")
 	t.Setenv("QOVIRA_MASTER_KEY_FILE", "")
@@ -486,9 +474,8 @@ func TestLoad_AdminPasswordWithoutEmail(t *testing.T) {
 	}
 }
 
-// TestLoad_Validation_HTTPAddr verifies that the http_addr port is validated
-// beyond structural parsing: out-of-range, non-numeric, and empty ports are
-// rejected while well-formed addresses pass.
+// TestLoad_Validation_HTTPAddr verifies that the http_addr port is validated beyond structural parsing: out-of-range,
+// non-numeric, and empty ports are rejected while well-formed addresses pass.
 func TestLoad_Validation_HTTPAddr(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -533,10 +520,9 @@ func TestLoad_Validation_HTTPAddr(t *testing.T) {
 	}
 }
 
-// TestLoad_Validation_AutoMigrateUnrecognized verifies that an unrecognized
-// QOVIRA_AUTO_MIGRATE value is aggregated as a validation error alongside other
-// field errors — i.e. a bad master key AND a bad auto_migrate both appear in
-// the single joined error.
+// TestLoad_Validation_AutoMigrateUnrecognized verifies that an unrecognized QOVIRA_AUTO_MIGRATE value is aggregated as
+// a validation error alongside other field errors — i.e. a bad master key AND a bad auto_migrate both appear in the
+// single joined error.
 func TestLoad_Validation_AutoMigrateUnrecognized(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -584,9 +570,8 @@ func TestLoad_Validation_AutoMigrateUnrecognized(t *testing.T) {
 	}
 }
 
-// TestLoad_Validation_AutoMigrateAggregated verifies that a bad auto_migrate
-// value appears TOGETHER with a master_key error in a single aggregated error
-// from errors.Join — both fields must be mentioned in one message.
+// TestLoad_Validation_AutoMigrateAggregated verifies that a bad auto_migrate value appears TOGETHER with a master_key
+// error in a single aggregated error from errors.Join — both fields must be mentioned in one message.
 func TestLoad_Validation_AutoMigrateAggregated(t *testing.T) {
 	// No master key (triggers master_key error) + bad auto_migrate value.
 	t.Setenv("QOVIRA_MASTER_KEY", "")

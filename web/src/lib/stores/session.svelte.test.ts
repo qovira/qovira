@@ -1,6 +1,6 @@
 // Tests for the session store rune logic.
-// Rune environment: node + Svelte compiler (vitest project "runes").
-// Uses flushSync to drain $derived updates synchronously.
+// Rune environment: node + Svelte compiler (vitest project "runes"). Uses flushSync to drain $derived updates
+// synchronously.
 import { flushSync } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -32,8 +32,8 @@ function makeUser(overrides: Partial<User> = {}): User {
 }
 
 // ---------------------------------------------------------------------------
-// Reset state between tests (module-level singleton, SSR note does not apply
-// since ssr=false; reset manually to keep tests isolated).
+// Reset state between tests (module-level singleton, SSR note does not apply since ssr=false; reset manually to keep
+// tests isolated).
 // ---------------------------------------------------------------------------
 
 afterEach(() => {
@@ -161,8 +161,8 @@ describe("isAuthenticated() — derived from session state", () => {
 });
 
 // ---------------------------------------------------------------------------
-// onPreExpiry — soft pre-expiry scheduler. A null expiry (the /me boot probe
-// path) must NOT arm a timer; a known expiry fires the callback before it.
+// onPreExpiry — soft pre-expiry scheduler. A null expiry (the /me boot probe path) must NOT arm a timer; a known
+// expiry fires the callback before it.
 // ---------------------------------------------------------------------------
 
 describe("onPreExpiry() — soft pre-expiry scheduler", () => {

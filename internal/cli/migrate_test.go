@@ -10,8 +10,8 @@ import (
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// migrateTestKey is the SQLCipher master key for all migrate-command tests.
-// Must be at least 16 bytes to pass config validation.
+// migrateTestKey is the SQLCipher master key for all migrate-command tests. Must be at least 16 bytes to pass config
+// validation.
 const migrateTestKey = "migrate-test-key-which-is-long-enough"
 
 // migrateEnv returns the env map required for the CLI to open the store at dataDir.
@@ -22,9 +22,8 @@ func migrateEnv(dataDir string) map[string]string {
 	}
 }
 
-// runMigrateCmd sets env vars via t.Setenv, then delegates to runCmd. Callers
-// must not mark the parent test t.Parallel() because t.Setenv is incompatible
-// with parallel execution.
+// runMigrateCmd sets env vars via t.Setenv, then delegates to runCmd. Callers must not mark the parent test
+// t.Parallel() because t.Setenv is incompatible with parallel execution.
 func runMigrateCmd(t *testing.T, env map[string]string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	for k, v := range env {
@@ -33,8 +32,8 @@ func runMigrateCmd(t *testing.T, env map[string]string, args ...string) (stdout,
 	return runCmd(t, args...)
 }
 
-// openMigrateStore opens a bare (un-migrated) SQLCipher store in dataDir.
-// The store is registered for cleanup via t.Cleanup.
+// openMigrateStore opens a bare (un-migrated) SQLCipher store in dataDir. The store is registered for cleanup via
+// t.Cleanup.
 func openMigrateStore(t *testing.T, dataDir string) *store.Store {
 	t.Helper()
 	s, err := store.Open(store.Config{
@@ -68,9 +67,8 @@ func tableExistsMigrate(t *testing.T, db *sql.DB, name string) bool {
 
 // ── AC: migrate up applies migrations ────────────────────────────────────────
 
-// TestMigrateUp_Success verifies that "migrate up" against a fresh store
-// applies all pending migrations. It asserts that the goose_db_version tracking
-// table and the instance table (an application migration) are both present after
+// TestMigrateUp_Success verifies that "migrate up" against a fresh store applies all pending migrations. It asserts
+// that the goose_db_version tracking table and the instance table (an application migration) are both present after
 // the command returns.
 func TestMigrateUp_Success(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
@@ -92,8 +90,8 @@ func TestMigrateUp_Success(t *testing.T) {
 	}
 }
 
-// TestMigrateUp_Idempotent verifies that running "migrate up" twice on the same
-// store does not error (goose is idempotent on an already-current schema).
+// TestMigrateUp_Idempotent verifies that running "migrate up" twice on the same store does not error (goose is
+// idempotent on an already-current schema).
 func TestMigrateUp_Idempotent(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	dataDir := t.TempDir()
@@ -108,9 +106,8 @@ func TestMigrateUp_Idempotent(t *testing.T) {
 
 // ── AC: migrate status reflects applied migrations ────────────────────────────
 
-// TestMigrateStatus_AfterUp verifies that "migrate status" prints applied
-// migration entries to stdout after "migrate up" has been run. The status output
-// must contain the word "applied" (goose State string) at least once.
+// TestMigrateStatus_AfterUp verifies that "migrate status" prints applied migration entries to stdout after
+// "migrate up" has been run. The status output must contain the word "applied" (goose State string) at least once.
 func TestMigrateStatus_AfterUp(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	dataDir := t.TempDir()
@@ -130,9 +127,8 @@ func TestMigrateStatus_AfterUp(t *testing.T) {
 	}
 }
 
-// TestMigrateStatus_BeforeUp verifies that "migrate status" on a fresh database
-// reports pending (not-yet-applied) migrations. The output must contain the word
-// "pending".
+// TestMigrateStatus_BeforeUp verifies that "migrate status" on a fresh database reports pending (not-yet-applied)
+// migrations. The output must contain the word "pending".
 func TestMigrateStatus_BeforeUp(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	dataDir := t.TempDir()
@@ -156,10 +152,9 @@ func TestMigrateStatus_BeforeUp(t *testing.T) {
 
 // ── AC: migrate down rolls back the last migration ────────────────────────────
 
-// TestMigrateDown_AfterUp verifies that "migrate down" succeeds after a full
-// "migrate up" and rolls back exactly one migration. We verify by checking
-// that at least one migration is now pending in "migrate status" output after
-// the rollback.
+// TestMigrateDown_AfterUp verifies that "migrate down" succeeds after a full "migrate up" and rolls back exactly one
+// migration. We verify by checking that at least one migration is now pending in "migrate status" output after the
+// rollback.
 func TestMigrateDown_AfterUp(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	dataDir := t.TempDir()
@@ -185,9 +180,8 @@ func TestMigrateDown_AfterUp(t *testing.T) {
 
 // ── AC: no master key → fail fast ────────────────────────────────────────────
 
-// TestMigrateUp_NoMasterKey verifies that "migrate up" fails fast when
-// QOVIRA_MASTER_KEY is absent (mirrors TestCommandWiring; included here for
-// completeness in the migrate-specific test file).
+// TestMigrateUp_NoMasterKey verifies that "migrate up" fails fast when QOVIRA_MASTER_KEY is absent (mirrors
+// TestCommandWiring; included here for completeness in the migrate-specific test file).
 func TestMigrateUp_NoMasterKey(t *testing.T) {
 	t.Parallel()
 
@@ -202,9 +196,8 @@ func TestMigrateUp_NoMasterKey(t *testing.T) {
 
 // ── AC: RunPostMigrateOptimize does not break the store ───────────────────────
 
-// TestMigrateUp_OptimizeAfterMigrate verifies that after "migrate up" the store
-// is still queryable (RunPostMigrateOptimize runs ANALYZE; this confirms it
-// does not corrupt the database).
+// TestMigrateUp_OptimizeAfterMigrate verifies that after "migrate up" the store is still queryable
+// (RunPostMigrateOptimize runs ANALYZE; this confirms it does not corrupt the database).
 func TestMigrateUp_OptimizeAfterMigrate(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel().
 	dataDir := t.TempDir()

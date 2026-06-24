@@ -1,12 +1,10 @@
 <script lang="ts">
   // SlideOver — a minimal accessible slide-over panel.
   //
-  // NOTE: @qovira/ui (v2.0.0) ships Modal (center dialog) and Popover but no
-  // dedicated slide-over / sheet / drawer primitive. This component fills that
-  // gap with the minimum required for accessibility: focus-trap (native dialog
-  // element), Escape to close, role="dialog" + aria-modal, and theme tokens only.
-  // Report: this is a gap in @qovira/ui — a Sheet/SlideOver primitive should be
-  // added upstream so consumers don't need to build their own.
+  // NOTE: @qovira/ui (v2.0.0) ships Modal (center dialog) and Popover but no dedicated slide-over / sheet / drawer
+  // primitive. This component fills that gap with the minimum required for accessibility: focus-trap (native dialog
+  // element), Escape to close, role="dialog" + aria-modal, and theme tokens only. Report: this is a gap in @qovira/ui —
+  // a Sheet/SlideOver primitive should be added upstream so consumers don't need to build their own.
   //
   // Props:
   //   open        — bindable; controls visibility.
@@ -27,27 +25,26 @@
   let { open = $bindable(false), title, onclose, children }: Props = $props();
 
   // ---------------------------------------------------------------------------
-  // Dialog element ref — used to call .showModal() / .close() on the native
-  // <dialog> element, which gives us a browser-native focus trap for free.
+  // Dialog element ref — used to call .showModal() / .close() on the native <dialog> element, which gives us a
+  // browser-native focus trap for free.
   // ---------------------------------------------------------------------------
   let dialogEl = $state<HTMLDialogElement | null>(null);
 
   // ---------------------------------------------------------------------------
-  // Focus restore — capture the trigger element when the dialog opens, restore
-  // it on every close path so keyboard users land back where they started.
+  // Focus restore — capture the trigger element when the dialog opens, restore it on every close path so keyboard users
+  // land back where they started.
   //
-  // Native <dialog>.close() does not restore focus when the dialog was opened
-  // programmatically via .showModal() triggered by a prop change (as opposed to
-  // being opened by a user gesture directly on the <dialog>). We handle it
+  // Native <dialog>.close() does not restore focus when the dialog was opened programmatically via .showModal()
+  // triggered by a prop change (as opposed to being opened by a user gesture directly on the <dialog>). We handle it
   // manually so ALL close paths restore correctly:
   //   - Esc / backdrop-click / close-button → handled by handleClose()
   //   - Programmatic (parent sets open=false) → detected by the $effect edge
   //
-  // The new-conversation path is safe: ConversationSwitcher calls focusComposer()
-  // AFTER close(), so the composer focus wins over this restore (last writer wins).
+  // The new-conversation path is safe: ConversationSwitcher calls focusComposer() AFTER close(), so the composer focus
+  // wins over this restore (last writer wins).
   //
-  // Double-restore prevention: restoreFocus() clears previouslyFocused after
-  // calling .focus(), so a second call on the same close cycle is a no-op.
+  // Double-restore prevention: restoreFocus() clears previouslyFocused after calling .focus(), so a second call on the
+  // same close cycle is a no-op.
   // ---------------------------------------------------------------------------
   let previouslyFocused = $state<Element | null>(null);
 
@@ -58,10 +55,9 @@
     previouslyFocused = null;
   }
 
-  // Sync the `open` prop to the native dialog open/close calls.
-  // $effect is appropriate here: syncing with a DOM element (outside Svelte).
-  // On the true→false edge (programmatic close), also restore focus so
-  // keyboard users land back on the trigger rather than on <body>.
+  // Sync the `open` prop to the native dialog open/close calls. $effect is appropriate here: syncing with a DOM element
+  // (outside Svelte). On the true→false edge (programmatic close), also restore focus so keyboard users land back on the
+  // trigger rather than on <body>.
   $effect(() => {
     if (dialogEl === null) {
       return;
@@ -75,8 +71,8 @@
     } else {
       if (dialogEl.open) {
         dialogEl.close();
-        // Programmatic close (parent set open=false directly). Restore focus
-        // here because handleClose() was never called on this path.
+        // Programmatic close (parent set open=false directly). Restore focus here because handleClose() was never called
+        // on this path.
         restoreFocus();
       }
     }
@@ -88,19 +84,17 @@
 
   function handleClose(): void {
     open = false;
-    // Restore focus to the element that opened the dialog, before calling
-    // onclose. This covers Escape, backdrop-click, and the close button.
-    // focusComposer() (called by ConversationSwitcher after close) will
-    // override this restore when the new-conversation path is taken.
-    // restoreFocus() clears previouslyFocused so the $effect's else-branch
+    // Restore focus to the element that opened the dialog, before calling onclose. This covers Escape, backdrop-click,
+    // and the close button. focusComposer() (called by ConversationSwitcher after close) will override this restore
+    // when the new-conversation path is taken. restoreFocus() clears previouslyFocused so the $effect's else-branch
     // does not double-restore on the same close cycle.
     restoreFocus();
     onclose?.();
   }
 
   function handleCancel(event: Event): void {
-    // Esc key fires the native "cancel" event on <dialog>. preventDefault so
-    // we can control the state transition through our `open` prop.
+    // Esc key fires the native "cancel" event on <dialog>. preventDefault so we can control the state transition through
+    // our `open` prop.
     event.preventDefault();
     handleClose();
   }
@@ -120,12 +114,12 @@
     - role="dialog" + aria-modal semantics automatically
     - showModal() prevents background interaction
 
-  The panel slides in from the right using a CSS transform. Theme tokens only —
-  no hardcoded colors. The backdrop is styled via ::backdrop (CSS pseudo-element
-  on the <dialog>) so we get the native blocking layer without a separate overlay div.
+  The panel slides in from the right using a CSS transform. Theme tokens only — no hardcoded colors. The backdrop is
+  styled via ::backdrop (CSS pseudo-element on the <dialog>) so we get the native blocking layer without a separate
+  overlay div.
 
-  aria-labelledby references the visible <h2> title so screen readers announce
-  the dialog name from the rendered heading rather than a duplicate hidden attribute.
+  aria-labelledby references the visible <h2> title so screen readers announce the dialog name from the rendered
+  heading rather than a duplicate hidden attribute.
 -->
 <dialog
   bind:this={dialogEl}
@@ -136,15 +130,13 @@
          backdrop:bg-warm-900/40 backdrop:backdrop-blur-sm"
 >
   <!--
-    Inner panel: slides in from the right. Positioned absolute inside the <dialog>
-    so it occupies the right edge while the left side remains as the backdrop hit target.
-    Use pointer-events-none on the parent <dialog> to allow clicking the backdrop,
-    then restore pointer-events on the panel content itself.
+    Inner panel: slides in from the right. Positioned absolute inside the <dialog> so it occupies the right edge while
+    the left side remains as the backdrop hit target. Use pointer-events-none on the parent <dialog> to allow clicking
+    the backdrop, then restore pointer-events on the panel content itself.
   -->
   <!--
-    stopPropagation on the panel content div prevents a click inside the panel
-    from bubbling up to the <dialog> backdrop handler. This div is structural
-    (not interactive itself) — the actual interactive elements are inside it.
+    stopPropagation on the panel content div prevents a click inside the panel from bubbling up to the <dialog>
+    backdrop handler. This div is structural (not interactive itself) — the actual interactive elements are inside it.
   -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->

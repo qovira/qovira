@@ -14,9 +14,8 @@ const BACKOFF_JITTER = 0.2;
 /**
  * Compute the next backoff duration in milliseconds.
  *
- * Doubles the current value, applies ±20% jitter, then clamps to BACKOFF_MAX_MS.
- * Clamping after jitter guarantees the result never exceeds the documented 30s ceiling.
- * Returns a positive integer.
+ * Doubles the current value, applies ±20% jitter, then clamps to BACKOFF_MAX_MS. Clamping after jitter guarantees the
+ * result never exceeds the documented 30s ceiling. Returns a positive integer.
  */
 export function nextBackoff(currentMs: number): number {
   const doubled = currentMs * BACKOFF_MULTIPLIER;

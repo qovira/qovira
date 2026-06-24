@@ -1,9 +1,8 @@
 /**
  * Journey 5 — Reload mid-turn loses nothing.
  *
- * Sends "tell me a story slowly" which triggers ~8 textDelta chunks each
- * spaced 500 ms apart. After the first partial text appears, the page is
- * reloaded. After reload the full assistant text must still appear and the
+ * Sends "tell me a story slowly" which triggers ~8 textDelta chunks each spaced 500 ms apart. After the first
+ * partial text appears, the page is reloaded. After reload the full assistant text must still appear and the
  * user message must be present — no duplication or loss.
  */
 
@@ -14,8 +13,8 @@ import { gotoConnected } from "./helpers.js";
 test.use({ storageState: AUTH_STATE_FILE });
 
 test("reload mid-turn: user message persists and full assistant text appears", async ({ page }) => {
-  // SSE open before sending so the slow turn starts streaming live; the reload
-  // below then exercises reconnect + history reconcile without losing the turn.
+  // SSE open before sending so the slow turn starts streaming live; the reload below then exercises reconnect +
+  // history reconcile without losing the turn.
   await gotoConnected(page, "/");
 
   const composer = page.getByRole("textbox", { name: "Message…" });
@@ -25,8 +24,8 @@ test("reload mid-turn: user message persists and full assistant text appears", a
   await page.getByRole("button", { name: "Send" }).click();
 
   // ── Wait for the first partial chunk ─────────────────────────────────────
-  // The fixture emits "Once " (500 ms) then further chunks. Wait for "Once"
-  // to appear before reloading — this ensures the turn has started.
+  // The fixture emits "Once " (500 ms) then further chunks. Wait for "Once" to appear before reloading — this
+  // ensures the turn has started.
   await expect(page.getByText("Once")).toBeVisible({ timeout: 10_000 });
 
   // ── Reload mid-stream ─────────────────────────────────────────────────────
@@ -37,9 +36,8 @@ test("reload mid-turn: user message persists and full assistant text appears", a
   await expect(page.getByText("tell me a story slowly")).toBeVisible({ timeout: 10_000 });
 
   // ── Full assistant text eventually appears ────────────────────────────────
-  // The turn runs server-side regardless of the client connection. After reload
-  // the SSE reconnect + history reconcile deliver the full completed message.
-  // The complete text is: "Once upon a time, in a land far away."
+  // The turn runs server-side regardless of the client connection. After reload the SSE reconnect + history
+  // reconcile deliver the full completed message. The complete text is: "Once upon a time, in a land far away."
   await expect(page.getByText("Once upon a time, in a land far away.")).toBeVisible({ timeout: 20_000 });
 
   // ── No duplication ────────────────────────────────────────────────────────

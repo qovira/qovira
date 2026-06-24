@@ -4,24 +4,19 @@ package httpx
 
 // spa_noembed.go — SPA filesystem for the default (stub) build (//go:build !embed_spa).
 //
-// This file is compiled when -tags embed_spa is NOT passed: `go build ./...`,
-// `go test ./...`, `make build-go`, and every CI step that does not need the
-// real web UI. It supplies a minimal in-code fs.FS containing a single stub
-// index.html, keeping the panic invariant in spaHandler() satisfied (index.html
-// is always present) without any file on disk and without //go:embed, so a
-// fresh checkout with no webdist/ directory compiles cleanly.
+// This file is compiled when -tags embed_spa is NOT passed: `go build ./...`, `go test ./...`, `make build-go`, and
+// every CI step that does not need the real web UI. It supplies a minimal in-code fs.FS containing a single stub
+// index.html, keeping the panic invariant in spaHandler() satisfied (index.html is always present) without any file on
+// disk and without //go:embed, so a fresh checkout with no webdist/ directory compiles cleanly.
 //
-// testing/fstest.MapFS is used here. The Go documentation does not restrict
-// MapFS to test code: it lives in the testing/fstest package rather than
-// testing because it is a general-purpose in-memory FS. Using it in production
-// non-test code is intentional and correct — its sole cost is a tiny const
-// allocation at package init.
+// testing/fstest.MapFS is used here. The Go documentation does not restrict MapFS to test code: it lives in the
+// testing/fstest package rather than testing because it is a general-purpose in-memory FS. Using it in production
+// non-test code is intentional and correct — its sole cost is a tiny const allocation at package init.
 
 import "testing/fstest"
 
-// stubIndexHTML is the in-code index.html served by the no-embed binary.
-// It tells anyone who opens the server that the web UI was not embedded and
-// directs them to `make build` for a binary with the real SPA.
+// stubIndexHTML is the in-code index.html served by the no-embed binary. It tells anyone who opens the server that the
+// web UI was not embedded and directs them to `make build` for a binary with the real SPA.
 const stubIndexHTML = `<!doctype html>
 <html lang="en">
   <head>
@@ -50,9 +45,8 @@ func init() {
 		"index.html": &fstest.MapFile{
 			Data: []byte(stubIndexHTML),
 		},
-		// A sentinel asset under the immutable prefix so that the handler's
-		// immutable-cache-header path is exercisable in tests without a real
-		// SvelteKit build. The path follows the same _app/immutable/ convention
+		// A sentinel asset under the immutable prefix so that the handler's immutable-cache-header path is
+		// exercisable in tests without a real SvelteKit build. The path follows the same _app/immutable/ convention
 		// as real hashed SvelteKit chunks.
 		"_app/immutable/stub.js": &fstest.MapFile{
 			Data: []byte("// stub\n"),

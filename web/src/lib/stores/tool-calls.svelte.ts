@@ -1,8 +1,7 @@
 // Tool-call state store — module-level singleton, reset on logout.
 //
-// Holds in-progress and resolved tool-call chips for the active conversation.
-// Keyed by callId. Events may arrive in any order, but tool.started always
-// carries the name; tool.completed / tool.failed correlate back to it via callId.
+// Holds in-progress and resolved tool-call chips for the active conversation. Keyed by callId. Events may arrive in
+// any order, but tool.started always carries the name; tool.completed / tool.failed correlate back to it via callId.
 //
 // State machine per callId:
 //   toolCallStarted  → state "started"   (in-progress chip)
@@ -10,14 +9,12 @@
 //   toolCallFailed   → state "failed"    (soft error chip)
 //
 // Turn association:
-//   Each entry carries an assistantMessageId so chips/cards stay attached to
-//   the assistant turn that produced them. While the turn is streaming the id
-//   is the sentinel "__streaming__". When message.completed fires,
-//   finalizeToolCallsForMessage("__streaming__", realMessageId) retags all
-//   in-flight entries so they persist under the real id after streaming ends.
+//   Each entry carries an assistantMessageId so chips/cards stay attached to the assistant turn that produced them.
+//   While the turn is streaming the id is the sentinel "__streaming__". When message.completed fires,
+//   finalizeToolCallsForMessage("__streaming__", realMessageId) retags all in-flight entries so they persist under the
+//   real id after streaming ends.
 //
-// Safe as a module-level singleton: ssr=false in +layout.ts, browser-only.
-// The layout resets on logout / 401.
+// Safe as a module-level singleton: ssr=false in +layout.ts, browser-only. The layout resets on logout / 401.
 
 import { STREAMING_SENTINEL_ID } from "$lib/stores/conversation.svelte.js";
 import type { ToolStartedPayload } from "$lib/sse/router.js";
@@ -94,8 +91,8 @@ export function getToolCalls(): ToolCallEntry[] {
 /**
  * Returns tool-call entries for a specific assistant message turn.
  *
- * During streaming, pass STREAMING_SENTINEL_ID to get in-flight entries.
- * After finalization, pass the real messageId to get the persisted cards.
+ * During streaming, pass STREAMING_SENTINEL_ID to get in-flight entries. After finalization, pass the real messageId
+ * to get the persisted cards.
  * Reactive — reads derive from this automatically.
  *
  * @param assistantMessageId - The message id (or sentinel) of the owning turn.
@@ -111,9 +108,8 @@ export function getToolCallsForMessage(assistantMessageId: string): ToolCallEntr
 /**
  * Record a tool.started event.
  *
- * Adds a new entry in state "started" tagged with the streaming sentinel id.
- * If a duplicate callId arrives (e.g. a reconnect race), the second start is
- * ignored — the existing entry is preserved.
+ * Adds a new entry in state "started" tagged with the streaming sentinel id. If a duplicate callId arrives (e.g. a
+ * reconnect race), the second start is ignored — the existing entry is preserved.
  *
  * @param payload - The ToolStartedPayload from the SSE event.
  */
@@ -136,9 +132,8 @@ export function toolCallStarted(payload: ToolStartedPayload): void {
 /**
  * Record a tool.completed event.
  *
- * Transitions the matching entry from "started" to "completed" and attaches
- * the raw result value. If the callId is unknown (completed without started),
- * this is a no-op — the server guarantees ordering, but defensive.
+ * Transitions the matching entry from "started" to "completed" and attaches the raw result value. If the callId is
+ * unknown (completed without started), this is a no-op — the server guarantees ordering, but defensive.
  *
  * @param conversationId - Conversation the event belongs to (for future per-conv filtering).
  * @param callId         - Correlates to the originating tool.started.
@@ -170,8 +165,8 @@ export function toolCallCompleted(conversationId: string, callId: string, result
 /**
  * Record a tool.failed event.
  *
- * Transitions the matching entry from "started" to "failed" and attaches the
- * model-safe error text. No-op when the callId is unknown.
+ * Transitions the matching entry from "started" to "failed" and attaches the model-safe error text. No-op when the
+ * callId is unknown.
  *
  * @param conversationId - Conversation the event belongs to.
  * @param callId         - Correlates to the originating tool.started.
@@ -203,14 +198,12 @@ export function toolCallFailed(conversationId: string, callId: string, error: st
 /**
  * Retag all tool-call entries from the streaming sentinel to the real messageId.
  *
- * Called when message.completed fires: the streaming slot is finalized with its
- * real server-assigned messageId, and all entries tagged with `oldId` (normally
- * STREAMING_SENTINEL_ID) are retagged to `newId`. This preserves the association
- * between the tool-call chips/cards and the now-finalized assistant message so
- * cards remain visible and clickable after streaming ends.
+ * Called when message.completed fires: the streaming slot is finalized with its real server-assigned messageId, and
+ * all entries tagged with `oldId` (normally STREAMING_SENTINEL_ID) are retagged to `newId`. This preserves the
+ * association between the tool-call chips/cards and the now-finalized assistant message so cards remain visible and
+ * clickable after streaming ends.
  *
- * Only entries with `assistantMessageId === oldId` are affected — previously
- * finalized turns are untouched.
+ * Only entries with `assistantMessageId === oldId` are affected — previously finalized turns are untouched.
  *
  * @param oldId - The id to retag from (typically STREAMING_SENTINEL_ID).
  * @param newId - The real server-assigned messageId.

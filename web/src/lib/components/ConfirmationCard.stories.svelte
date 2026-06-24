@@ -1,18 +1,16 @@
 <script module lang="ts">
-  // ConfirmationCard stories — covers the pending (routine + destructive),
-  // resolved (approved, denied), and expired states of the confirmation card.
+  // ConfirmationCard stories — covers the pending (routine + destructive), resolved (approved, denied), and
+  // expired states of the confirmation card.
   //
-  // The ConfirmationCard uses the confirmations store's `resolveConfirmation`
-  // for the POST action; stories supply injected entries directly as props —
-  // no network call is made during story render.
+  // The ConfirmationCard uses the confirmations store's `resolveConfirmation` for the POST action; stories
+  // supply injected entries directly as props — no network call is made during story render.
   //
   // Reuses the real ConfirmationEntry types from the confirmations store.
   //
-  // A11y note: color-contrast is disabled for all stories. The timer text uses
-  // `opacity: 0.75` and the args text uses `opacity: 0.8` for intentional
-  // de-emphasis, reducing effective contrast below 4.5:1. The Expired story
-  // additionally applies `opacity: 0.5` + `filter: grayscale(0.6)`. All are
-  // genuine design intent, not token bugs.
+  // A11y note: color-contrast is disabled for all stories. The timer text uses `opacity: 0.75` and the args
+  // text uses `opacity: 0.8` for intentional de-emphasis, reducing effective contrast below 4.5:1. The Expired
+  // story additionally applies `opacity: 0.5` + `filter: grayscale(0.6)`. All are genuine design intent, not
+  // token bugs.
 
   import { defineMeta } from "@storybook/addon-svelte-csf";
   import ConfirmationCard from "./ConfirmationCard.svelte";
@@ -24,16 +22,15 @@
     tags: ["autodocs"],
     parameters: {
       layout: "padded",
-      // color-contrast disabled: timer (opacity: 0.75) and args (opacity: 0.8)
-      // are intentional de-emphasis and do not reach 4.5:1.
+      // color-contrast disabled: timer (opacity: 0.75) and args (opacity: 0.8) are intentional de-emphasis and
+      // do not reach 4.5:1.
       a11y: { config: { rules: [{ id: "color-contrast", enabled: false }] } },
     },
   });
 </script>
 
 <!--
-  Pending routine-write card: honey-bordered style, active approve/deny buttons.
-  Covers AC: "confirmation card".
+  Pending routine-write card: honey-bordered style, active approve/deny buttons. Covers AC: "confirmation card".
 -->
 <Story
   name="PendingRoutine"

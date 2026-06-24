@@ -2,17 +2,17 @@
  * App-shell precaching service worker.
  *
  * Architecture: online-first. The SW exists solely to:
- *   1. Precache the SvelteKit build artifacts and static files on install so
- *      cold starts load from the cache (fast shell).
+ *   1. Precache the SvelteKit build artifacts and static files on install so cold starts load from
+ *      the cache (fast shell).
  *   2. Serve those cached assets cache-first on fetch.
- *   3. Serve the shell document ("/index.html") as the navigation fallback so
- *      deep links (e.g. /reminders, /settings) load offline once the shell is
- *      cached — SvelteKit's `$service-worker.build` does NOT include index.html
- *      for adapter-static SPAs, so it must be added explicitly.
+ *   3. Serve the shell document ("/index.html") as the navigation fallback so deep links (e.g.
+ *      /reminders, /settings) load offline once the shell is cached — SvelteKit's
+ *      `$service-worker.build` does NOT include index.html for adapter-static SPAs, so it must be
+ *      added explicitly.
  *   4. Clean up stale versioned caches on activate.
  *
- * Data paths (/api/, /events) and non-GET requests bypass the cache entirely
- * and go straight to the network — the app has no offline data replica.
+ * Data paths (/api/, /events) and non-GET requests bypass the cache entirely and go straight to the
+ * network — the app has no offline data replica.
  *
  * SvelteKit auto-registers this file; do NOT add manual registration elsewhere.
  */
@@ -38,18 +38,16 @@ const CACHE_NAME = `qovira-shell-v${version}`;
 /**
  * The navigation fallback document.
  *
- * SvelteKit's adapter-static emits the shell HTML as the fallback for any
- * unmatched navigation, but $service-worker.build contains only hashed
- * _app/* assets — the HTML document is absent from all three arrays (build,
- * files, prerendered). Adding it explicitly ensures a cold start with no
+ * SvelteKit's adapter-static emits the shell HTML as the fallback for any unmatched navigation, but
+ * $service-worker.build contains only hashed _app/* assets — the HTML document is absent from all
+ * three arrays (build, files, prerendered). Adding it explicitly ensures a cold start with no
  * network can serve the shell for any route.
  *
- * This MUST be the canonical shell URL "/", not "/index.html": the server
- * 301-redirects "/index.html" → "/" (Go's http.ServeFile convention), so
- * precaching "/index.html" stores a `redirected` Response — and a service
- * worker cannot satisfy a navigation request with a redirected response, which
- * fails the navigation with ERR_FAILED (every deep-link reload breaks). "/"
- * returns the shell with a 200 directly, so the cached Response is clean.
+ * This MUST be the canonical shell URL "/", not "/index.html": the server 301-redirects
+ * "/index.html" → "/" (Go's http.ServeFile convention), so precaching "/index.html" stores a
+ * `redirected` Response — and a service worker cannot satisfy a navigation request with a redirected
+ * response, which fails the navigation with ERR_FAILED (every deep-link reload breaks). "/" returns
+ * the shell with a 200 directly, so the cached Response is clean.
  */
 const NAV_FALLBACK = "/";
 
@@ -65,8 +63,8 @@ self.addEventListener("install", (event) => {
     (async () => {
       const cache = await caches.open(CACHE_NAME);
       await cache.addAll(SHELL_ASSETS);
-      // Skip waiting so the new SW activates immediately on pages that have
-      // no outstanding fetch to the old shell.
+      // Skip waiting so the new SW activates immediately on pages that have no outstanding fetch to
+      // the old shell.
       await self.skipWaiting();
     })(),
   );
@@ -102,9 +100,9 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     (async () => {
-      // For navigation requests (HTML document fetches for any SPA route),
-      // try an exact cache match first; fall back to the precached shell
-      // document so deep links work offline without needing their own entry.
+      // For navigation requests (HTML document fetches for any SPA route), try an exact cache match
+      // first; fall back to the precached shell document so deep links work offline without needing
+      // their own entry.
       if (request.mode === "navigate") {
         const cached = await caches.match(request);
         if (cached !== undefined) {
@@ -124,8 +122,8 @@ self.addEventListener("fetch", (event) => {
         return cached;
       }
 
-      // Not in cache yet (possible for assets added after install).
-      // Fetch from network and cache the response for next time.
+      // Not in cache yet (possible for assets added after install). Fetch from network and cache the
+      // response for next time.
       const response = await fetch(request);
       if (response.ok) {
         const cache = await caches.open(CACHE_NAME);

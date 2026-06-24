@@ -1,10 +1,8 @@
 package authhttp_test
 
-// Handler-level tests for the authhttp module: login, logout-one, logout-all,
-// and the self-service me endpoints (GET /api/v1/me, PATCH /api/v1/me,
-// POST /api/v1/me/password).
-// Tests seed a real SQLCipher store (same harness as internal/auth/*_test.go).
-// Protected handlers receive their Principal via httpx.ContextWithPrincipal.
+// Handler-level tests for the authhttp module: login, logout-one, logout-all, and the self-service me endpoints
+// (GET /api/v1/me, PATCH /api/v1/me, POST /api/v1/me/password). Tests seed a real SQLCipher store (same harness as
+// internal/auth/*_test.go). Protected handlers receive their Principal via httpx.ContextWithPrincipal.
 
 import (
 	"bytes"
@@ -65,8 +63,8 @@ func openStore(t *testing.T) *store.Store {
 	return s
 }
 
-// buildModule builds the authhttp.Module backed by the given store, with the
-// provided now-clock (defaults to testNow when nil).
+// buildModule builds the authhttp.Module backed by the given store, with the provided now-clock (defaults to testNow
+// when nil).
 func buildModule(t *testing.T, s *store.Store, nowFn func() time.Time) *authhttp.Module {
 	t.Helper()
 	hasher := auth.NewHasher(fastParams)
@@ -99,8 +97,8 @@ func createUser(t *testing.T, s *store.Store, email, password string) auth.User 
 }
 
 // loginBody is the JSON request body for POST /api/v1/auth/login.
-// G117: the Password field is a test plaintext credential, not a secret read
-// from the environment; gosec's secret-pattern match is a false positive here.
+// G117: the Password field is a test plaintext credential, not a secret read from the environment; gosec's
+// secret-pattern match is a false positive here.
 type loginBody struct { //nolint:gosec // G117: test fixture struct, not production secret handling
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -142,8 +140,8 @@ func serveLogin(t *testing.T, mod *authhttp.Module, body loginBody) *httptest.Re
 	return rr
 }
 
-// serveDelete fires a DELETE request (session or sessions) with the given
-// token injected as both cookie and context principal.
+// serveDelete fires a DELETE request (session or sessions) with the given token injected as both cookie and context
+// principal.
 func serveDelete(
 	t *testing.T,
 	path string,
@@ -257,8 +255,8 @@ func TestLogin_Success_200WithCookiesAndBody(t *testing.T) {
 		t.Errorf("user.role = %q, want %q", resp.User.Role, u.Role)
 	}
 
-	// Assert expiresAt equals the deterministic value computed from testNow.
-	// buildModule uses testNow as the fixed clock, so:
+	// Assert expiresAt equals the deterministic value computed from testNow. buildModule uses testNow as the fixed
+	// clock, so:
 	//   mintNow    = testNow (truncated to second — no sub-second component)
 	//   idleDeadline  = mintNow + DefaultSessionConfig.IdleTTL  (7 days)
 	//   absDeadline   = mintNow + DefaultSessionConfig.AbsoluteTTL (30 days)
@@ -269,9 +267,9 @@ func TestLogin_Success_200WithCookiesAndBody(t *testing.T) {
 		t.Errorf("expiresAt = %q, want %q (testNow=%v + IdleTTL=%v)", resp.ExpiresAt, wantExpiresAt, testNow, auth.DefaultSessionConfig.IdleTTL)
 	}
 
-	// Assert the session cookie's MaxAge equals the absolute TTL in seconds.
-	// The handler sets MaxAge = int(cfg.AbsoluteTTL.Seconds()); with
-	// DefaultSessionConfig.AbsoluteTTL = 30 days that is 2 592 000 seconds.
+	// Assert the session cookie's MaxAge equals the absolute TTL in seconds. The handler sets
+	// MaxAge = int(cfg.AbsoluteTTL.Seconds()); with DefaultSessionConfig.AbsoluteTTL = 30 days that is 2 592 000
+	// seconds.
 	wantMaxAge := int(auth.DefaultSessionConfig.AbsoluteTTL.Seconds())
 	if sessionCookie.MaxAge != wantMaxAge {
 		t.Errorf("session cookie MaxAge = %d, want %d (AbsoluteTTL=%v)", sessionCookie.MaxAge, wantMaxAge, auth.DefaultSessionConfig.AbsoluteTTL)
@@ -280,8 +278,8 @@ func TestLogin_Success_200WithCookiesAndBody(t *testing.T) {
 
 // ── No enumeration: unknown email and wrong password are byte-identical ────────
 
-// TestLogin_InvalidCredentials_UniformBody verifies that unknown-email and
-// wrong-password return byte-identical 401 bodies with code "invalid_credentials".
+// TestLogin_InvalidCredentials_UniformBody verifies that unknown-email and wrong-password return byte-identical 401
+// bodies with code "invalid_credentials".
 func TestLogin_InvalidCredentials_UniformBody(t *testing.T) {
 	t.Parallel()
 
@@ -325,8 +323,8 @@ func TestLogin_InvalidCredentials_UniformBody(t *testing.T) {
 
 // ── Malformed JSON → 400 ──────────────────────────────────────────────────────
 
-// TestLogin_MalformedJSON_Returns400 verifies that an unparseable request body
-// returns 400 application/problem+json with code "malformed_body".
+// TestLogin_MalformedJSON_Returns400 verifies that an unparseable request body returns 400 application/problem+json
+// with code "malformed_body".
 func TestLogin_MalformedJSON_Returns400(t *testing.T) {
 	t.Parallel()
 
@@ -499,9 +497,8 @@ func TestModule_ToolsIsNil(t *testing.T) {
 
 // ── End-to-end wiring through app.New ─────────────────────────────────────────
 
-// TestEndToEnd_LoginThroughAppNew verifies the full wiring: POST /api/v1/auth/login
-// goes through the app's HTTP server (public exemption in isPublicRoute), returns 200,
-// and sets the two expected cookies.
+// TestEndToEnd_LoginThroughAppNew verifies the full wiring: POST /api/v1/auth/login goes through the app's HTTP server
+// (public exemption in isPublicRoute), returns 200, and sets the two expected cookies.
 func TestEndToEnd_LoginThroughAppNew(t *testing.T) {
 	t.Parallel()
 
@@ -515,10 +512,9 @@ func TestEndToEnd_LoginThroughAppNew(t *testing.T) {
 		AutoMigrate: true,
 	}
 
-	// denyAllValidatorCtor is a minimal newValidator for the e2e test.
-	// The auth middleware path (token validation) is exercised by the
-	// Authenticator wired via AuthModuleCtor; login is public so this
-	// deny-all validator is never invoked for the login endpoint.
+	// denyAllValidatorCtor is a minimal newValidator for the e2e test. The auth middleware path (token validation) is
+	// exercised by the Authenticator wired via AuthModuleCtor; login is public so this deny-all validator is never
+	// invoked for the login endpoint.
 	denyAllValidatorCtor := func(s *store.Store) httpx.TokenValidator {
 		sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
 		return auth.NewAuthenticator(sessions)
@@ -587,8 +583,7 @@ func TestEndToEnd_LoginThroughAppNew(t *testing.T) {
 		t.Error("e2e: qovira_csrf cookie missing after login")
 	}
 
-	// The login route is public: no token required.
-	// Also confirm a second POST with wrong password returns 401.
+	// The login route is public: no token required. Also confirm a second POST with wrong password returns 401.
 	b2, _ := json.Marshal(loginBody{Email: u.Email, Password: "wrongpass"}) //nolint:gosec // G117: test fixture only
 	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(b2))
 	r2.Header.Set("Content-Type", "application/json")
@@ -630,8 +625,8 @@ func serveMe(t *testing.T, mod *authhttp.Module, principal store.Principal) *htt
 	return rr
 }
 
-// TestMe_Get_Returns200WithUserBody verifies GET /api/v1/me returns 200 and
-// the user record as {"user": {...}} in camelCase JSON.
+// TestMe_Get_Returns200WithUserBody verifies GET /api/v1/me returns 200 and the user record as {"user": {...}} in
+// camelCase JSON.
 func TestMe_Get_Returns200WithUserBody(t *testing.T) {
 	t.Parallel()
 
@@ -687,8 +682,8 @@ func TestMe_Get_Returns200WithUserBody(t *testing.T) {
 	}
 }
 
-// TestMe_Get_UserIDFromPrincipal verifies that the user ID comes from the
-// Principal in context, not from any request parameter.
+// TestMe_Get_UserIDFromPrincipal verifies that the user ID comes from the Principal in context, not from any request
+// parameter.
 func TestMe_Get_UserIDFromPrincipal(t *testing.T) {
 	t.Parallel()
 
@@ -731,8 +726,8 @@ func servePatchMe(t *testing.T, mod *authhttp.Module, principal store.Principal,
 	return rr
 }
 
-// TestUpdateMe_MergeSemantics verifies that PATCH /api/v1/me changes only the
-// provided fields and leaves omitted ones unchanged.
+// TestUpdateMe_MergeSemantics verifies that PATCH /api/v1/me changes only the provided fields and leaves omitted ones
+// unchanged.
 func TestUpdateMe_MergeSemantics(t *testing.T) {
 	t.Parallel()
 
@@ -783,8 +778,8 @@ func TestUpdateMe_MergeSemantics(t *testing.T) {
 	}
 }
 
-// TestUpdateMe_CannotChangeRoleOrEmail verifies that sending "role" or "email"
-// keys in the PATCH body does not change those fields.
+// TestUpdateMe_CannotChangeRoleOrEmail verifies that sending "role" or "email" keys in the PATCH body does not change
+// those fields.
 func TestUpdateMe_CannotChangeRoleOrEmail(t *testing.T) {
 	t.Parallel()
 
@@ -793,8 +788,8 @@ func TestUpdateMe_CannotChangeRoleOrEmail(t *testing.T) {
 	mod := buildModule(t, s, nil)
 	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
 
-	// Attempt to set role and email via the body — these keys are simply unknown
-	// to the handler's body struct and are dropped silently by encoding/json.
+	// Attempt to set role and email via the body — these keys are simply unknown to the handler's body struct and
+	// are dropped silently by encoding/json.
 	body := map[string]any{
 		"role":        "admin",
 		"email":       "attacker@evil.example",
@@ -851,15 +846,15 @@ func TestUpdateMe_MalformedJSON_Returns400(t *testing.T) {
 
 // ── POST /api/v1/me/password ──────────────────────────────────────────────────
 
-// changePasswordBody is the wire shape for POST /api/v1/me/password.
-// G117: test fixture struct, not production secret handling.
+// changePasswordBody is the wire shape for POST /api/v1/me/password. G117: test fixture struct, not production secret
+// handling.
 type changePasswordBody struct { //nolint:gosec // G117: test fixture struct
 	CurrentPassword string `json:"currentPassword"`
 	NewPassword     string `json:"newPassword"`
 }
 
-// serveChangePassword fires a POST /api/v1/me/password request with the caller's
-// session token injected as a cookie (so SessionTokenFromRequest can find it).
+// serveChangePassword fires a POST /api/v1/me/password request with the caller's session token injected as a cookie
+// (so SessionTokenFromRequest can find it).
 func serveChangePassword(
 	t *testing.T,
 	mod *authhttp.Module,
@@ -949,9 +944,8 @@ func TestChangePassword_HappyPath(t *testing.T) {
 	}
 }
 
-// TestChangePassword_WrongCurrentPassword_Returns422 verifies that a wrong
-// current password produces 422 with code "validation_error" and the pointer
-// "/currentPassword".
+// TestChangePassword_WrongCurrentPassword_Returns422 verifies that a wrong current password produces 422 with code
+// "validation_error" and the pointer "/currentPassword".
 func TestChangePassword_WrongCurrentPassword_Returns422(t *testing.T) {
 	t.Parallel()
 
@@ -1000,10 +994,9 @@ func TestChangePassword_WrongCurrentPassword_Returns422(t *testing.T) {
 	}
 }
 
-// TestChangePassword_WrongCurrentPassword_ProblemDetailIsGeneral verifies that
-// the problem-level "detail" field for a wrong-current-password 422 is a general
-// message ("Request validation failed."), while the specific "incorrect" message
-// lives only on the field error (finding 4: drop duplicated detail).
+// TestChangePassword_WrongCurrentPassword_ProblemDetailIsGeneral verifies that the problem-level "detail" field for a
+// wrong-current-password 422 is a general message ("Request validation failed."), while the specific "incorrect"
+// message lives only on the field error (finding 4: drop duplicated detail).
 func TestChangePassword_WrongCurrentPassword_ProblemDetailIsGeneral(t *testing.T) {
 	t.Parallel()
 
@@ -1057,9 +1050,8 @@ func TestChangePassword_WrongCurrentPassword_ProblemDetailIsGeneral(t *testing.T
 	}
 }
 
-// TestChangePassword_WeakNewPassword_Returns422 verifies that a policy-violating
-// new password produces 422 with code "validation_error" and pointer "/newPassword",
-// even when the current password is correct.
+// TestChangePassword_WeakNewPassword_Returns422 verifies that a policy-violating new password produces 422 with code
+// "validation_error" and pointer "/newPassword", even when the current password is correct.
 func TestChangePassword_WeakNewPassword_Returns422(t *testing.T) {
 	t.Parallel()
 
@@ -1107,9 +1099,8 @@ func TestChangePassword_WeakNewPassword_Returns422(t *testing.T) {
 }
 
 // TestChangePassword_WrongCurrentBeforeWeakNew_Returns422WithCurrentPasswordPointer
-// verifies that a wrong current password is reported (not the weak new password)
-// when both current and new passwords are invalid, confirming the ordering mandated
-// by the issue spec.
+// verifies that a wrong current password is reported (not the weak new password) when both current and new passwords
+// are invalid, confirming the ordering mandated by the issue spec.
 func TestChangePassword_WrongCurrentBeforeWeakNew_Returns422WithCurrentPasswordPointer(t *testing.T) {
 	t.Parallel()
 
@@ -1189,17 +1180,15 @@ func TestChangePassword_MalformedJSON_Returns400(t *testing.T) {
 
 // ── ChangePassword 500 paths ──────────────────────────────────────────────────
 
-// TestChangePassword_NoSessionCookie_Returns500 exercises the
-// "change_password_token_missing" branch in ChangePasswordHandler: the password
-// change itself succeeds, but no session cookie is present so the handler cannot
+// TestChangePassword_NoSessionCookie_Returns500 exercises the "change_password_token_missing" branch in
+// ChangePasswordHandler: the password change itself succeeds, but no session cookie is present so the handler cannot
 // identify which session to keep alive.
 //
-// Setup: the request carries a valid Principal in context (simulating an auth
-// middleware that already resolved the user), but no __Host-qovira_session cookie,
-// so SessionTokenFromRequest returns "".
+// Setup: the request carries a valid Principal in context (simulating an auth middleware that already resolved the
+// user), but no __Host-qovira_session cookie, so SessionTokenFromRequest returns "".
 //
-// Expected: 500 application/problem+json with code "change_password_token_missing"
-// and a generic detail (no raw error or internal string leaked to the client).
+// Expected: 500 application/problem+json with code "change_password_token_missing" and a generic detail (no raw error
+// or internal string leaked to the client).
 func TestChangePassword_NoSessionCookie_Returns500(t *testing.T) {
 	t.Parallel()
 
@@ -1242,25 +1231,22 @@ func TestChangePassword_NoSessionCookie_Returns500(t *testing.T) {
 	if p.Status != http.StatusInternalServerError {
 		t.Errorf("status in body = %d, want 500", p.Status)
 	}
-	// The detail must be generic — no raw error or internal string must leak.
-	// InternalProblem always returns the static "An unexpected error occurred" detail.
+	// The detail must be generic — no raw error or internal string must leak. InternalProblem always returns the
+	// static "An unexpected error occurred" detail.
 	const wantDetail = "An unexpected error occurred. Quote the requestId when contacting support."
 	if p.Detail != wantDetail {
 		t.Errorf("detail = %q, want generic %q (raw error must not leak to client)", p.Detail, wantDetail)
 	}
 }
 
-// TestChangePassword_StaleSessionToken_Returns500 exercises the
-// "password_changed_session_lookup_failed" branch in ChangePasswordHandler: the
-// password change succeeds, but the session cookie value does not resolve to any
-// session in the DB (e.g. it was already revoked or is synthetic).
+// TestChangePassword_StaleSessionToken_Returns500 exercises the "password_changed_session_lookup_failed" branch in
+// ChangePasswordHandler: the password change succeeds, but the session cookie value does not resolve to any session in
+// the DB (e.g. it was already revoked or is synthetic).
 //
-// Setup: the request carries a Principal in context but a session cookie whose
-// token hash does not exist in the sessions table, so sessions.Lookup returns
-// ErrSessionNotFound.
+// Setup: the request carries a Principal in context but a session cookie whose token hash does not exist in the
+// sessions table, so sessions.Lookup returns ErrSessionNotFound.
 //
-// Expected: 500 application/problem+json with code
-// "password_changed_session_lookup_failed" and a generic detail.
+// Expected: 500 application/problem+json with code "password_changed_session_lookup_failed" and a generic detail.
 func TestChangePassword_StaleSessionToken_Returns500(t *testing.T) {
 	t.Parallel()
 
@@ -1272,8 +1258,7 @@ func TestChangePassword_StaleSessionToken_Returns500(t *testing.T) {
 
 	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
 
-	// Use a well-formed but non-existent session token — it will pass the
-	// empty-token guard but fail Lookup.
+	// Use a well-formed but non-existent session token — it will pass the empty-token guard but fail Lookup.
 	const ghostToken = "qov_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 	b, _ := json.Marshal(changePasswordBody{CurrentPassword: oldPW, NewPassword: newPW})

@@ -22,12 +22,11 @@ type AdvanceRecurringJobParams struct {
 	ID        string
 }
 
-// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler self-reschedules a
-// recurring job after its handler succeeds: resets status to 'pending', sets run_at
-// to the next occurrence, clears locked_at, and resets attempt to 0. Only updates
-// rows with status = 'running' (the job the scheduler just leased) to guard against
-// a future double-processor. A 0-row result (e.g. the row was deleted by Cancel) is
-// harmless and silently tolerated by the caller.
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler self-reschedules a recurring job after its handler
+// succeeds: resets status to 'pending', sets run_at to the next occurrence, clears locked_at, and resets
+// attempt to 0. Only updates rows with status = 'running' (the job the scheduler just leased) to guard against a
+// future double-processor. A 0-row result (e.g. the row was deleted by Cancel) is harmless and silently
+// tolerated by the caller.
 func (q *Queries) AdvanceRecurringJob(ctx context.Context, arg AdvanceRecurringJobParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, advanceRecurringJob, arg.RunAt, arg.UpdatedAt, arg.ID)
 	if err != nil {
@@ -47,12 +46,11 @@ type DeadLetterJobParams struct {
 	ID        string
 }
 
-// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler marks an exhausted job as permanently
-// failed. Sets status='failed', records last_error, and clears locked_at. The row is intentionally
-// kept (NOT deleted) so operators can inspect dead-lettered jobs. AND status = 'running' ensures
-// the update only applies to rows the scheduler actually leased, guarding against a future
-// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
-// and silently tolerated by the caller.
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler marks an exhausted job as permanently failed. Sets
+// status='failed', records last_error, and clears locked_at. The row is intentionally kept (NOT deleted) so
+// operators can inspect dead-lettered jobs. AND status = 'running' ensures the update only applies to rows the
+// scheduler actually leased, guarding against a future double-processor. A 0-row result (e.g. the row was
+// already deleted by Cancel) is harmless and silently tolerated by the caller.
 func (q *Queries) DeadLetterJob(ctx context.Context, arg DeadLetterJobParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deadLetterJob, arg.LastError, arg.UpdatedAt, arg.ID)
 	if err != nil {
@@ -65,8 +63,8 @@ const deleteJob = `-- name: DeleteJob :exec
 DELETE FROM jobs WHERE id = ?1
 `
 
-// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler deletes the row after a handler
-// succeeds. The scheduler owns the row lifecycle; no user_id predicate is applicable.
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler deletes the row after a handler succeeds. The
+// scheduler owns the row lifecycle; no user_id predicate is applicable.
 func (q *Queries) DeleteJob(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, deleteJob, id)
 	return err
@@ -78,20 +76,19 @@ SELECT id FROM jobs WHERE key = ?1
 `
 
 // Queries for the jobs table (durable scheduler queue).
-// The scheduler accesses jobs cross-user: the claim selects due jobs across ALL users and
-// resolves scope per-row. This is intentionally unscoped -- each query below carries an
-// explicit scopeguard annotation with the reason.
+// The scheduler accesses jobs cross-user: the claim selects due jobs across ALL users and resolves scope per-row.
+// This is intentionally unscoped -- each query below carries an explicit scopeguard annotation with the reason.
 //
 // Parameters use sqlc named params (@name) per the house convention.
 //
-// NOTE: Several operations use raw SQL via s.Writer() rather than sqlc queries, because
-// sqlc's SQLite ANTLR parser cannot model the required shapes:
+// NOTE: Several operations use raw SQL via s.Writer() rather than sqlc queries, because sqlc's SQLite ANTLR
+// parser cannot model the required shapes:
 //  1. INSERT ... ON CONFLICT(key) DO NOTHING: the upsert clause is not supported.
 //  2. UPDATE ... WHERE id IN (SELECT ... LIMIT @batch) RETURNING ...: compound UPDATE.
 //
 // These are executed as s.Writer().ExecContext / QueryContext in internal/scheduler.
-// scopeguard:allow-unscoped: cross-user lookup by idempotency key. The scheduler resolves
-// the existing job id when ON CONFLICT(key) DO NOTHING suppresses the insert.
+// scopeguard:allow-unscoped: cross-user lookup by idempotency key. The scheduler resolves the existing job id
+// when ON CONFLICT(key) DO NOTHING suppresses the insert.
 func (q *Queries) GetJobIDByKey(ctx context.Context, key sql.NullString) (string, error) {
 	row := q.db.QueryRowContext(ctx, getJobIDByKey, key)
 	var id string
@@ -103,9 +100,9 @@ const getJobStatus = `-- name: GetJobStatus :one
 SELECT status FROM jobs WHERE id = ?1
 `
 
-// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler reads the status of any job
-// regardless of owner to implement Cancel/Reschedule atomicity. Called inside a transaction
-// on the write pool to provide a consistent read-then-write with no TOCTOU window.
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler reads the status of any job regardless of owner to
+// implement Cancel/Reschedule atomicity. Called inside a transaction on the write pool to provide a consistent
+// read-then-write with no TOCTOU window.
 func (q *Queries) GetJobStatus(ctx context.Context, id string) (string, error) {
 	row := q.db.QueryRowContext(ctx, getJobStatus, id)
 	var status string
@@ -123,13 +120,12 @@ type ReclaimStaleJobsParams struct {
 	Threshold sql.NullString
 }
 
-// scopeguard:allow-unscoped: SYSTEM ENGINE -- cross-user reclaim sweep. The scheduler reclaims
-// running rows whose locked_at is older than the lease threshold, returning them to pending so
-// they can be re-leased. This fires on boot (to recover rows orphaned by a prior process crash)
-// and on each poll tick (to recover wedged-but-alive workers that ignore cancellation). The
-// locked_at comparison uses RFC3339 UTC strings, which are lexicographically ordered, matching
-// the pattern used by the claim query's run_at comparison. attempt is deliberately NOT reset:
-// the retry ceiling must still apply to reclaimed jobs.
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- cross-user reclaim sweep. The scheduler reclaims running rows
+// whose locked_at is older than the lease threshold, returning them to pending so they can be re-leased. This
+// fires on boot (to recover rows orphaned by a prior process crash) and on each poll tick (to recover
+// wedged-but-alive workers that ignore cancellation). The locked_at comparison uses RFC3339 UTC strings, which are
+// lexicographically ordered, matching the pattern used by the claim query's run_at comparison. attempt is
+// deliberately NOT reset: the retry ceiling must still apply to reclaimed jobs.
 func (q *Queries) ReclaimStaleJobs(ctx context.Context, arg ReclaimStaleJobsParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, reclaimStaleJobs, arg.UpdatedAt, arg.Threshold)
 	if err != nil {
@@ -149,11 +145,10 @@ type RescheduleJobParams struct {
 	ID        string
 }
 
-// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler moves run_at for any pending job.
-// Only updates rows with status='pending'; returns 0 rows affected when the job is not pending
-// (running or absent today; 'failed'/dead-letter is a later slice). The caller interprets a
-// non-pending status as ErrJobRunning or ErrJobNotFound
-// after reading the status inside the enclosing transaction.
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler moves run_at for any pending job. Only updates rows
+// with status='pending'; returns 0 rows affected when the job is not pending (running or absent today;
+// 'failed'/dead-letter is a later slice). The caller interprets a non-pending status as ErrJobRunning or
+// ErrJobNotFound after reading the status inside the enclosing transaction.
 func (q *Queries) RescheduleJob(ctx context.Context, arg RescheduleJobParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, rescheduleJob, arg.RunAt, arg.UpdatedAt, arg.ID)
 	if err != nil {
@@ -173,12 +168,11 @@ type RetryJobParams struct {
 	ID        string
 }
 
-// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler re-arms a failed job row for retry
-// with a backoff run_at. Sets status='pending', clears locked_at, and advances run_at so the
-// job re-enters the claim queue at the calculated backoff time. AND status = 'running' ensures
-// the update only applies to rows the scheduler actually leased, guarding against a future
-// double-processor. A 0-row result (e.g. the row was already deleted by Cancel) is harmless
-// and silently tolerated by the caller.
+// scopeguard:allow-unscoped: SYSTEM ENGINE -- the scheduler re-arms a failed job row for retry with a backoff
+// run_at. Sets status='pending', clears locked_at, and advances run_at so the job re-enters the claim queue at
+// the calculated backoff time. AND status = 'running' ensures the update only applies to rows the scheduler
+// actually leased, guarding against a future double-processor. A 0-row result (e.g. the row was already
+// deleted by Cancel) is harmless and silently tolerated by the caller.
 func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, retryJob, arg.RunAt, arg.UpdatedAt, arg.ID)
 	if err != nil {

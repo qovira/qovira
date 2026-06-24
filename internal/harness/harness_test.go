@@ -112,9 +112,9 @@ func (b *fakeBus) snapshot() []fakeEvent {
 	return out
 }
 
-// waitForEvents blocks until the bus has at least n events or the timeout expires.
-// Prefer waitForCompleted when testing turn completion — a raw event count is
-// satisfied mid-turn and misses the terminal message.completed event.
+// waitForEvents blocks until the bus has at least n events or the timeout expires. Prefer waitForCompleted when
+// testing turn completion — a raw event count is satisfied mid-turn and misses the terminal message.completed
+// event.
 func waitForEvents(t *testing.T, b *fakeBus, n int, timeout time.Duration) []fakeEvent {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -127,11 +127,10 @@ func waitForEvents(t *testing.T, b *fakeBus, n int, timeout time.Duration) []fak
 	return b.snapshot()
 }
 
-// waitForCompleted blocks until a "message.completed" event is present on the
-// bus (and, optionally, until at least minToolStarted "tool.started" events
-// have also appeared). It returns the full event snapshot once the condition is
-// met, or the snapshot at timeout. Using this instead of waitForEvents avoids
-// sampling the bus mid-turn before the terminal event fires.
+// waitForCompleted blocks until a "message.completed" event is present on the bus (and, optionally, until at least
+// minToolStarted "tool.started" events have also appeared). It returns the full event snapshot once the condition
+// is met, or the snapshot at timeout. Using this instead of waitForEvents avoids sampling the bus mid-turn before
+// the terminal event fires.
 func waitForCompleted(t *testing.T, b *fakeBus, minToolStarted int, timeout time.Duration) []fakeEvent {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -163,8 +162,8 @@ func buildHarness(t *testing.T, s *store.Store, gw harness.Chatter, bus events.P
 	return harness.New(reg, gw, s, bus, harness.Config{}, logger)
 }
 
-// buildServer builds a bare http.Server with the harness routes mounted and no
-// auth middleware (tests inject the principal directly into context).
+// buildServer builds a bare http.Server with the harness routes mounted and no auth middleware (tests inject the
+// principal directly into context).
 func buildServer(h *harness.Harness) *http.Server {
 	router := httpx.NewRouter()
 	h.Routes(router)
@@ -353,8 +352,7 @@ func TestRun_AssistantPersistedBeforeCompleted(t *testing.T) {
 	s := openMigratedStore(t)
 	p := makeTestUser(t, s)
 
-	// A bus that, on message.completed, checks that the assistant message is
-	// already in the DB.
+	// A bus that, on message.completed, checks that the assistant message is already in the DB.
 	assertBus := &assertPersistBus{t: t, s: s, userID: p.UserID}
 
 	gw := &fakeChatter{chunks: []gateway.Chunk{
@@ -410,9 +408,8 @@ func (b *assertPersistBus) Publish(userID string, e events.Event) {
 	}
 	payload, ok := e.Data.(harness.CompletedPayload)
 	if !ok {
-		// The event shape has changed — the DB check was never reached.
-		// Mark this as a violation so the test fails loudly rather than
-		// passing vacuously (done=true, viol=false = silent skip).
+		// The event shape has changed — the DB check was never reached. Mark this as a violation so the test fails
+		// loudly rather than passing vacuously (done=true, viol=false = silent skip).
 		b.viol = true
 		b.done = true
 		b.t.Logf("assertPersistBus: message.completed Data is %T, want harness.CompletedPayload — invariant was not checked", e.Data)
@@ -661,10 +658,9 @@ func TestPostMessage_UpsertConversation(t *testing.T) {
 
 // ── MUST-FIX 1: cross-user conversation ownership guard ───────────────────────
 
-// TestPostMessage_CrossUserConversationRejected verifies the cross-user data-breach
-// fix: user B must be rejected (404) when POSTing into a conversation id that already
-// belongs to user A. A's conversation must remain intact; B's message must NOT be
-// persisted.
+// TestPostMessage_CrossUserConversationRejected verifies the cross-user data-breach fix: user B must be rejected
+// (404) when POSTing into a conversation id that already belongs to user A. A's conversation must remain intact;
+// B's message must NOT be persisted.
 func TestPostMessage_CrossUserConversationRejected(t *testing.T) {
 	t.Parallel()
 
@@ -675,9 +671,8 @@ func TestPostMessage_CrossUserConversationRejected(t *testing.T) {
 	bus := &fakeBus{}
 	gw := &fakeChatter{chunks: []gateway.Chunk{{Done: true}}}
 
-	// Each user needs their own harness/server because the handler resolves the
-	// principal from the injected context — build one shared harness (the store is
-	// shared) and inject principals per-request.
+	// Each user needs their own harness/server because the handler resolves the principal from the injected context
+	// — build one shared harness (the store is shared) and inject principals per-request.
 	h := buildHarness(t, s, gw, bus)
 	srv := buildServer(h)
 

@@ -1,18 +1,17 @@
 -- +goose Up
 -- +goose StatementBegin
--- Add an abandoned flag to messages. An assistant message is marked abandoned when
--- its pending confirmation expires before the user answers: the tool does not execute,
--- the model round is NOT re-entered (expiry is asymmetric with deny), and the flag
--- makes the turn inert — outstandingToolCalls and isTurnComplete treat abandoned
--- assistant messages as terminal so the conversation never hangs waiting for results.
+-- Add an abandoned flag to messages. An assistant message is marked abandoned when its pending confirmation expires
+-- before the user answers: the tool does not execute, the model round is NOT re-entered (expiry is asymmetric with
+-- deny), and the flag makes the turn inert — outstandingToolCalls and isTurnComplete treat abandoned assistant
+-- messages as terminal so the conversation never hangs waiting for results.
 ALTER TABLE messages ADD COLUMN abandoned INTEGER NOT NULL DEFAULT 0 CHECK (abandoned IN (0,1));
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
--- SQLite does not support DROP COLUMN on tables with certain constraints; recreate the
--- table without the abandoned column.  Preserve the composite FK that migration 00008
--- added so a rollback past 00011 does not lose the ownership backstop.
+-- SQLite does not support DROP COLUMN on tables with certain constraints; recreate the table without the abandoned
+-- column.  Preserve the composite FK that migration 00008 added so a rollback past 00011 does not lose the ownership
+-- backstop.
 CREATE TABLE messages_v10 (
     id              TEXT NOT NULL PRIMARY KEY,
     conversation_id TEXT NOT NULL,

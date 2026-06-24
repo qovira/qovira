@@ -9,8 +9,7 @@ import (
 	"github.com/qovira/qovira/internal/store/db"
 )
 
-// ErrConfirmationExpired is the primary expiry signal from the two callers in the
-// lazy-expiry path:
+// ErrConfirmationExpired is the primary expiry signal from the two callers in the lazy-expiry path:
 //
 //   - UpdatePendingConfirmationStatusIfCurrent returns it when the row is 'pending'
 //     but expires_at is already in the past (the CAS UPDATE found zero rows because
@@ -23,16 +22,16 @@ import (
 // Exported so harness.Resolve can map it to HTTP 409 with code "confirmation_expired".
 var ErrConfirmationExpired = errors.New("store: pending confirmation has expired")
 
-// ErrConfirmationNotFound is returned by GetPendingConfirmation when the row
-// does not exist for the bound user. Callers map this to HTTP 404.
+// ErrConfirmationNotFound is returned by GetPendingConfirmation when the row does not exist for the bound user. Callers
+// map this to HTTP 404.
 var ErrConfirmationNotFound = errors.New("store: pending confirmation not found")
 
-// ErrConfirmationAlreadyResolved is returned by UpdatePendingConfirmationStatusIfCurrent
-// when the row's current status is not "pending". Callers map this to HTTP 409.
+// ErrConfirmationAlreadyResolved is returned by UpdatePendingConfirmationStatusIfCurrent when the row's current status
+// is not "pending". Callers map this to HTTP 409.
 var ErrConfirmationAlreadyResolved = errors.New("store: pending confirmation already resolved")
 
-// InsertPendingConfirmationParams holds the caller-supplied fields for inserting
-// a pending_confirmations row. The user_id is taken from the bound Scope.
+// InsertPendingConfirmationParams holds the caller-supplied fields for inserting a pending_confirmations row. The
+// user_id is taken from the bound Scope.
 type InsertPendingConfirmationParams struct {
 	ID             string // gateway tool call ID (ULID); API-addressable
 	ConversationID string
@@ -44,8 +43,8 @@ type InsertPendingConfirmationParams struct {
 	ExpiresAt      string // RFC 3339 UTC
 }
 
-// InsertPendingConfirmation inserts a pending_confirmations row scoped to the bound user.
-// Returns the full persisted row (including server-generated created_at).
+// InsertPendingConfirmation inserts a pending_confirmations row scoped to the bound user. Returns the full persisted
+// row (including server-generated created_at).
 func (sq *ScopedQueries) InsertPendingConfirmation(ctx context.Context, p InsertPendingConfirmationParams) (db.PendingConfirmation, error) {
 	if err := sq.checkUserScope(); err != nil {
 		return db.PendingConfirmation{}, fmt.Errorf("InsertPendingConfirmation: %w", err)
@@ -67,8 +66,8 @@ func (sq *ScopedQueries) InsertPendingConfirmation(ctx context.Context, p Insert
 	return row, nil
 }
 
-// GetPendingConfirmation retrieves a pending_confirmations row by its call ID,
-// scoped to the bound user. Returns ErrConfirmationNotFound when no row exists.
+// GetPendingConfirmation retrieves a pending_confirmations row by its call ID, scoped to the bound user. Returns
+// ErrConfirmationNotFound when no row exists.
 func (sq *ScopedQueries) GetPendingConfirmation(ctx context.Context, callID string) (db.PendingConfirmation, error) {
 	if err := sq.checkUserScope(); err != nil {
 		return db.PendingConfirmation{}, fmt.Errorf("GetPendingConfirmation: %w", err)
@@ -86,11 +85,10 @@ func (sq *ScopedQueries) GetPendingConfirmation(ctx context.Context, callID stri
 	return row, nil
 }
 
-// UpdatePendingConfirmationStatusIfCurrent atomically transitions a pending row from
-// "pending" to the given status (approved or denied) using a CAS UPDATE that also
-// requires expires_at >= now (via NOT (expires_at < @now)). If the row is pending
-// but already past ExpiresAt, it is not updated and ErrConfirmationExpired is returned
-// so the caller can run the expiry CAS instead.
+// UpdatePendingConfirmationStatusIfCurrent atomically transitions a pending row from "pending" to the given status
+// (approved or denied) using a CAS UPDATE that also requires expires_at >= now (via NOT (expires_at < @now)). If the
+// row is pending but already past ExpiresAt, it is not updated and ErrConfirmationExpired is returned so the caller can
+// run the expiry CAS instead.
 //
 // Returns:
 //   - nil on success (rowsAffected == 1).
@@ -134,15 +132,15 @@ func (sq *ScopedQueries) UpdatePendingConfirmationStatusIfCurrent(ctx context.Co
 	return nil
 }
 
-// MarkConfirmationExpired atomically transitions a pending_confirmations row from
-// "pending" to "expired" using a CAS UPDATE (WHERE id=? AND user_id=? AND status='pending').
+// MarkConfirmationExpired atomically transitions a pending_confirmations row from "pending" to "expired" using a CAS
+// UPDATE (WHERE id=? AND user_id=? AND status='pending').
 // Returns:
 //   - nil when the CAS succeeded (the row is now expired).
 //   - ErrConfirmationExpired when rowsAffected==0 — the row either does not exist or
 //     was already resolved/expired before this call (the sweep or a concurrent Resolve won).
 //
-// The caller (harness.Resolve lazy-expiry path) is responsible for reading the row after
-// a zero-rows result to distinguish not-found from already-resolved/already-expired.
+// The caller (harness.Resolve lazy-expiry path) is responsible for reading the row after a zero-rows result to
+// distinguish not-found from already-resolved/already-expired.
 func (sq *ScopedQueries) MarkConfirmationExpired(ctx context.Context, callID string) error {
 	if err := sq.checkUserScope(); err != nil {
 		return fmt.Errorf("MarkConfirmationExpired: %w", err)
@@ -160,14 +158,12 @@ func (sq *ScopedQueries) MarkConfirmationExpired(ctx context.Context, callID str
 	return nil
 }
 
-// ListLapsedConfirmations returns all pending_confirmations rows whose expires_at is
-// before now and whose status is still "pending". This is a cross-user system
-// housekeeping query — it is intentionally unscoped and requires a system scope.
-// Each returned row carries its own user_id so the caller can issue per-row,
-// per-user operations.
+// ListLapsedConfirmations returns all pending_confirmations rows whose expires_at is before now and whose status is
+// still "pending". This is a cross-user system housekeeping query — it is intentionally unscoped and requires a system
+// scope. Each returned row carries its own user_id so the caller can issue per-row, per-user operations.
 //
-// Requires a system scope — returns nil, errUserScopeForSystemMethod for a user scope.
-// This is the query backing SweepExpiredConfirmations.
+// Requires a system scope — returns nil, errUserScopeForSystemMethod for a user scope. This is the query backing
+// SweepExpiredConfirmations.
 func (sq *ScopedQueries) ListLapsedConfirmations(ctx context.Context, now string) ([]db.PendingConfirmation, error) {
 	if !sq.scope.IsSystem() {
 		return nil, fmt.Errorf("ListLapsedConfirmations: %w", errUserScopeForSystemMethod)
@@ -179,14 +175,12 @@ func (sq *ScopedQueries) ListLapsedConfirmations(ctx context.Context, now string
 	return rows, nil
 }
 
-// CountNonExpiredConfirmationsByMessageID returns the count of pending_confirmations
-// rows for the given assistant message that are NOT in 'expired' status
-// (i.e. those in 'pending', 'approved', or 'denied'). User-scoped.
+// CountNonExpiredConfirmationsByMessageID returns the count of pending_confirmations rows for the given assistant
+// message that are NOT in 'expired' status (i.e. those in 'pending', 'approved', or 'denied'). User-scoped.
 //
-// Used to gate MarkMessageAbandoned: the assistant message is abandoned only when
-// this count is zero — meaning no sibling call remains pending or was resolved by
-// the user. This prevents premature abandonment in the multi-confirm case where
-// one call expires while siblings are still pending or have been approved/denied.
+// Used to gate MarkMessageAbandoned: the assistant message is abandoned only when this count is zero — meaning no
+// sibling call remains pending or was resolved by the user. This prevents premature abandonment in the multi-confirm
+// case where one call expires while siblings are still pending or have been approved/denied.
 func (sq *ScopedQueries) CountNonExpiredConfirmationsByMessageID(ctx context.Context, messageID string) (int64, error) {
 	if err := sq.checkUserScope(); err != nil {
 		return 0, fmt.Errorf("CountNonExpiredConfirmationsByMessageID: %w", err)
@@ -201,11 +195,9 @@ func (sq *ScopedQueries) CountNonExpiredConfirmationsByMessageID(ctx context.Con
 	return n, nil
 }
 
-// CountNonExpiredConfirmationsByMessageIDForUser returns the count of
-// pending_confirmations rows for the given assistant message and user that are NOT
-// in 'expired' status. Used by the sweep path where the user_id comes from the
-// lapsed row, not the bound scope. Requires a system scope — returns
-// 0, errUserScopeForSystemMethod for a user scope.
+// CountNonExpiredConfirmationsByMessageIDForUser returns the count of pending_confirmations rows for the given
+// assistant message and user that are NOT in 'expired' status. Used by the sweep path where the user_id comes from the
+// lapsed row, not the bound scope. Requires a system scope — returns 0, errUserScopeForSystemMethod for a user scope.
 func (sq *ScopedQueries) CountNonExpiredConfirmationsByMessageIDForUser(ctx context.Context, messageID, userID string) (int64, error) {
 	if !sq.scope.IsSystem() {
 		return 0, fmt.Errorf("CountNonExpiredConfirmationsByMessageIDForUser: %w", errUserScopeForSystemMethod)
@@ -220,10 +212,10 @@ func (sq *ScopedQueries) CountNonExpiredConfirmationsByMessageIDForUser(ctx cont
 	return n, nil
 }
 
-// MarkConfirmationExpiredByUserID atomically transitions a pending row from "pending"
-// to "expired" keyed by (id, user_id). Used by the sweep path where the user_id
-// comes from each lapsed row returned by ListLapsedConfirmations, not the bound scope.
-// Requires a system scope — returns 0, errUserScopeForSystemMethod for a user scope.
+// MarkConfirmationExpiredByUserID atomically transitions a pending row from "pending" to "expired" keyed by
+// (id, user_id). Used by the sweep path where the user_id comes from each lapsed row returned by
+// ListLapsedConfirmations, not the bound scope. Requires a system scope — returns 0, errUserScopeForSystemMethod for a
+// user scope.
 func (sq *ScopedQueries) MarkConfirmationExpiredByUserID(ctx context.Context, callID, userID string) (int64, error) {
 	if !sq.scope.IsSystem() {
 		return 0, fmt.Errorf("MarkConfirmationExpiredByUserID: %w", errUserScopeForSystemMethod)
@@ -234,9 +226,9 @@ func (sq *ScopedQueries) MarkConfirmationExpiredByUserID(ctx context.Context, ca
 	})
 }
 
-// MarkMessageAbandonedByUserID marks a message as abandoned keyed by (id, user_id).
-// Used by the sweep path where the user_id comes from each lapsed row, not the bound scope.
-// Requires a system scope — returns errUserScopeForSystemMethod for a user scope.
+// MarkMessageAbandonedByUserID marks a message as abandoned keyed by (id, user_id). Used by the sweep path where the
+// user_id comes from each lapsed row, not the bound scope. Requires a system scope — returns
+// errUserScopeForSystemMethod for a user scope.
 func (sq *ScopedQueries) MarkMessageAbandonedByUserID(ctx context.Context, messageID, userID string) error {
 	if !sq.scope.IsSystem() {
 		return fmt.Errorf("MarkMessageAbandonedByUserID: %w", errUserScopeForSystemMethod)

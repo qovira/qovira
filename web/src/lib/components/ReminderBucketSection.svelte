@@ -1,11 +1,10 @@
 <script lang="ts">
   // ReminderBucketSection — shared section scaffold for reminder buckets.
   //
-  // Encapsulates the aria-labelledby section, the h2 heading, and the
-  // role="list" ul so that RemindersView (Storybook) and reminders/+page.svelte
-  // (the route) share one copy of the structural a11y wiring. The `row` snippet
-  // is supplied by each caller so the route can pass oncomplete/onedit callbacks
-  // while the presentational wrapper omits them.
+  // Encapsulates the aria-labelledby section, the h2 heading, and the role="list" ul so that RemindersView
+  // (Storybook) and reminders/+page.svelte (the route) share one copy of the structural a11y wiring. The `row` snippet
+  // is supplied by each caller so the route can pass oncomplete/onedit callbacks while the presentational wrapper
+  // omits them.
 
   import type { Snippet } from "svelte";
   import type { ReminderItem } from "$lib/stores/reminders.svelte.js";

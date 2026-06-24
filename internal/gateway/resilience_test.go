@@ -31,8 +31,8 @@ import (
 
 // ── test helpers ──────────────────────────────────────────────────────────────
 
-// resilienceCfg returns a fast, deterministic ResilienceConfig for tests.
-// sleepFn is a no-op so backoff completes instantly; timeouts are tiny.
+// resilienceCfg returns a fast, deterministic ResilienceConfig for tests. sleepFn is a no-op so backoff completes
+// instantly; timeouts are tiny.
 func resilienceCfg(firstToken, idle time.Duration, maxAttempts int) ResilienceConfig {
 	return ResilienceConfig{
 		FirstTokenTimeout: firstToken,
@@ -43,8 +43,7 @@ func resilienceCfg(firstToken, idle time.Duration, maxAttempts int) ResilienceCo
 	}
 }
 
-// newResilienceGateway builds a Gateway pointed at srv with the given
-// ResilienceConfig and registers cleanup with t.
+// newResilienceGateway builds a Gateway pointed at srv with the given ResilienceConfig and registers cleanup with t.
 func newResilienceGateway(t *testing.T, srv *httptest.Server, cfg ResilienceConfig) *Gateway {
 	t.Helper()
 	fs := newFakeSettings(
@@ -57,14 +56,13 @@ func newResilienceGateway(t *testing.T, srv *httptest.Server, cfg ResilienceConf
 	return gw
 }
 
-// simpleRequest is a minimal ChatRequest for resilience tests (content doesn't
-// matter — we only care about transport/timeout behaviour).
+// simpleRequest is a minimal ChatRequest for resilience tests (content doesn't matter — we only care about
+// transport/timeout behaviour).
 func simpleRequest() ChatRequest {
 	return ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}}
 }
 
-// goodSSE is a minimal well-formed SSE stream that yields one text chunk and a
-// Done chunk.
+// goodSSE is a minimal well-formed SSE stream that yields one text chunk and a Done chunk.
 const goodSSE = "" +
 	`data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}` + "\n\n" +
 	`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}` + "\n\n" +
@@ -82,9 +80,8 @@ func writeSSE(w http.ResponseWriter, payload string) {
 
 // ── AC1: transient failure before first token is retried ─────────────────────
 
-// TestResilience_RetryOnConnectionFailure verifies that a transient connection
-// failure on the first N-1 attempts is retried and the final successful attempt
-// returns a normal stream (AC1).
+// TestResilience_RetryOnConnectionFailure verifies that a transient connection failure on the first N-1 attempts
+// is retried and the final successful attempt returns a normal stream (AC1).
 func TestResilience_RetryOnConnectionFailure(t *testing.T) {
 	t.Parallel()
 
@@ -130,8 +127,8 @@ func TestResilience_RetryOnConnectionFailure(t *testing.T) {
 	}
 }
 
-// TestResilience_RetryOn429 verifies that a 429 response is retried and, on
-// eventual success, returns a normal stream (AC1).
+// TestResilience_RetryOn429 verifies that a 429 response is retried and, on eventual success, returns a normal
+// stream (AC1).
 func TestResilience_RetryOn429(t *testing.T) {
 	t.Parallel()
 
@@ -175,8 +172,8 @@ func TestResilience_RetryOn429(t *testing.T) {
 
 // ── AC2: bounded retries with jittered backoff; 429 Retry-After honoured ─────
 
-// TestResilience_ExhaustRetries_5xx verifies that after MaxAttempts on 5xx the
-// gateway returns ErrUpstream (not a nil error) (AC2).
+// TestResilience_ExhaustRetries_5xx verifies that after MaxAttempts on 5xx the gateway returns ErrUpstream (not
+// a nil error) (AC2).
 func TestResilience_ExhaustRetries_5xx(t *testing.T) {
 	t.Parallel()
 
@@ -199,8 +196,8 @@ func TestResilience_ExhaustRetries_5xx(t *testing.T) {
 	}
 }
 
-// TestResilience_ExhaustRetries_429 verifies that after MaxAttempts on 429 the
-// gateway returns an error that wraps ErrRateLimited (AC2).
+// TestResilience_ExhaustRetries_429 verifies that after MaxAttempts on 429 the gateway returns an error that
+// wraps ErrRateLimited (AC2).
 func TestResilience_ExhaustRetries_429(t *testing.T) {
 	t.Parallel()
 
@@ -223,8 +220,8 @@ func TestResilience_ExhaustRetries_429(t *testing.T) {
 	}
 }
 
-// TestResilience_BackoffSleepCalled verifies that the sleepFn is called between
-// retries, recording the delays (AC2: jittered backoff invoked).
+// TestResilience_BackoffSleepCalled verifies that the sleepFn is called between retries, recording the delays
+// (AC2: jittered backoff invoked).
 func TestResilience_BackoffSleepCalled(t *testing.T) {
 	t.Parallel()
 
@@ -262,8 +259,8 @@ func TestResilience_BackoffSleepCalled(t *testing.T) {
 	}
 }
 
-// TestResilience_RetryAfterHonoured verifies that a 429 with Retry-After is
-// passed to sleepFn (AC2: Retry-After honoured).
+// TestResilience_RetryAfterHonoured verifies that a 429 with Retry-After is passed to sleepFn (AC2: Retry-After
+// honoured).
 func TestResilience_RetryAfterHonoured(t *testing.T) {
 	t.Parallel()
 
@@ -316,8 +313,7 @@ func TestResilience_RetryAfterHonoured(t *testing.T) {
 
 // ── AC3: 4xx surfaces immediately; 451 with opt-in retried ───────────────────
 
-// TestResilience_4xxNoRetry verifies that non-retryable 4xx errors surface
-// immediately with no retry (AC3).
+// TestResilience_4xxNoRetry verifies that non-retryable 4xx errors surface immediately with no retry (AC3).
 func TestResilience_4xxNoRetry(t *testing.T) {
 	t.Parallel()
 
@@ -357,8 +353,8 @@ func TestResilience_4xxNoRetry(t *testing.T) {
 	}
 }
 
-// TestResilience_451_RetryLegalFalse verifies that a 451 with
-// retryLegalUnavailable=false surfaces immediately as ErrUpstream (AC3).
+// TestResilience_451_RetryLegalFalse verifies that a 451 with retryLegalUnavailable=false surfaces immediately
+// as ErrUpstream (AC3).
 func TestResilience_451_RetryLegalFalse(t *testing.T) {
 	t.Parallel()
 
@@ -387,8 +383,8 @@ func TestResilience_451_RetryLegalFalse(t *testing.T) {
 	}
 }
 
-// TestResilience_451_RetryLegalTrue verifies that a 451 with
-// retryLegalUnavailable=true is retried within budget and recovers (AC3).
+// TestResilience_451_RetryLegalTrue verifies that a 451 with retryLegalUnavailable=true is retried within budget
+// and recovers (AC3).
 func TestResilience_451_RetryLegalTrue(t *testing.T) {
 	t.Parallel()
 
@@ -427,9 +423,8 @@ func TestResilience_451_RetryLegalTrue(t *testing.T) {
 
 // ── AC4: no retry after first byte; post-first-byte break surfaces correctly ─
 
-// TestResilience_NoRetryAfterFirstByte verifies that a mid-stream break does
-// not cause the gateway to retry: the iterator simply surfaces the error as a
-// per-yield error and terminates without re-emitting (AC4).
+// TestResilience_NoRetryAfterFirstByte verifies that a mid-stream break does not cause the gateway to retry: the
+// iterator simply surfaces the error as a per-yield error and terminates without re-emitting (AC4).
 func TestResilience_NoRetryAfterFirstByte(t *testing.T) {
 	t.Parallel()
 
@@ -489,16 +484,15 @@ func TestResilience_NoRetryAfterFirstByte(t *testing.T) {
 		t.Errorf("expected 'first' text chunk; got chunks: %v", chunks)
 	}
 
-	// The mid-stream break shows up as a per-yield error (or the stream simply
-	// ends naturally — both are acceptable since bufio.Scanner treats abrupt
-	// close as EOF). The important invariant is no re-emit.
+	// The mid-stream break shows up as a per-yield error (or the stream simply ends naturally — both are acceptable
+	// since bufio.Scanner treats abrupt close as EOF). The important invariant is no re-emit.
 	if iterErr != nil && !errors.Is(iterErr, ErrUpstreamProtocol) {
 		t.Errorf("iterator error = %v; want nil or ErrUpstreamProtocol", iterErr)
 	}
 }
 
-// TestResilience_PostFirstByteBreak_NeverReemits verifies that after an error
-// mid-stream the iterator terminates and does not emit any further chunks (AC4).
+// TestResilience_PostFirstByteBreak_NeverReemits verifies that after an error mid-stream the iterator terminates
+// and does not emit any further chunks (AC4).
 func TestResilience_PostFirstByteBreak_NeverReemits(t *testing.T) {
 	t.Parallel()
 
@@ -554,8 +548,8 @@ func TestResilience_PostFirstByteBreak_NeverReemits(t *testing.T) {
 
 // ── AC5: first-token and idle timeouts ────────────────────────────────────────
 
-// TestResilience_FirstTokenTimeout verifies that if the endpoint never sends
-// any chunk within FirstTokenTimeout the iterator yields ErrTimeout (AC5).
+// TestResilience_FirstTokenTimeout verifies that if the endpoint never sends any chunk within FirstTokenTimeout
+// the iterator yields ErrTimeout (AC5).
 func TestResilience_FirstTokenTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -592,8 +586,8 @@ func TestResilience_FirstTokenTimeout(t *testing.T) {
 	}
 }
 
-// TestResilience_IdleTimeout verifies that a stream that sends one chunk then
-// stalls trips ErrTimeout via the idle timer (AC5).
+// TestResilience_IdleTimeout verifies that a stream that sends one chunk then stalls trips ErrTimeout via the
+// idle timer (AC5).
 func TestResilience_IdleTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -610,8 +604,8 @@ func TestResilience_IdleTimeout(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	// First-token window is generous (we know the first chunk arrives quickly).
-	// Idle window is tiny — the stall after the first chunk should trip it.
+	// First-token window is generous (we know the first chunk arrives quickly). Idle window is tiny — the stall
+	// after the first chunk should trip it.
 	cfg := resilienceCfg(200*time.Millisecond, 5*time.Millisecond, 1)
 	gw := newResilienceGateway(t, srv, cfg)
 
@@ -645,8 +639,8 @@ func TestResilience_IdleTimeout(t *testing.T) {
 	}
 }
 
-// TestResilience_SlowButProgressingStream verifies that a slow-but-progressing
-// stream (each chunk arrives within the idle window) is NOT aborted (AC5).
+// TestResilience_SlowButProgressingStream verifies that a slow-but-progressing stream (each chunk arrives within
+// the idle window) is NOT aborted (AC5).
 func TestResilience_SlowButProgressingStream(t *testing.T) {
 	t.Parallel()
 
@@ -708,8 +702,8 @@ func TestResilience_SlowButProgressingStream(t *testing.T) {
 
 // ── AC6: ctx cancellation aborts promptly ────────────────────────────────────
 
-// TestResilience_CtxCancelDuringRetry verifies that cancelling ctx while the
-// retry loop is sleeping (pre-first-token) aborts immediately (AC6).
+// TestResilience_CtxCancelDuringRetry verifies that cancelling ctx while the retry loop is sleeping
+// (pre-first-token) aborts immediately (AC6).
 func TestResilience_CtxCancelDuringRetry(t *testing.T) {
 	t.Parallel()
 
@@ -720,8 +714,8 @@ func TestResilience_CtxCancelDuringRetry(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Use a sleepFn that cancels the context mid-sleep to simulate cancellation
-	// during backoff without real wall-clock delay.
+	// Use a sleepFn that cancels the context mid-sleep to simulate cancellation during backoff without real
+	// wall-clock delay.
 	fs := newFakeSettings(
 		"primary.baseURL", srv.URL,
 		"primary.apiKey", "sk-test",
@@ -739,15 +733,15 @@ func TestResilience_CtxCancelDuringRetry(t *testing.T) {
 	}
 
 	_, err := gw.Chat(ctx, simpleRequest())
-	// After cancel, the next attempt checks ctx.Err() and should surface as
-	// ErrTimeout or context.Canceled. Either wrapped form is acceptable.
+	// After cancel, the next attempt checks ctx.Err() and should surface as ErrTimeout or context.Canceled. Either
+	// wrapped form is acceptable.
 	if err == nil {
 		t.Fatal("expected non-nil error after context cancel")
 	}
 }
 
-// TestResilience_CtxCancelDuringStream verifies that cancelling ctx while
-// streaming aborts the stream and surfaces ErrTimeout (or context error) (AC6).
+// TestResilience_CtxCancelDuringStream verifies that cancelling ctx while streaming aborts the stream and surfaces
+// ErrTimeout (or context error) (AC6).
 func TestResilience_CtxCancelDuringStream(t *testing.T) {
 	t.Parallel()
 
@@ -759,8 +753,8 @@ func TestResilience_CtxCancelDuringStream(t *testing.T) {
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		// Hang until client cancels. Chunk-based sync in the consumer loop
-		// (cancel on "x" TextDelta) is sufficient; no extra channel needed.
+		// Hang until client cancels. Chunk-based sync in the consumer loop (cancel on "x" TextDelta) is sufficient; no
+		// extra channel needed.
 		<-r.Context().Done()
 	}))
 	t.Cleanup(srv.Close)
@@ -796,8 +790,8 @@ func TestResilience_CtxCancelDuringStream(t *testing.T) {
 
 // ── AC7: ErrContextLength never retried ──────────────────────────────────────
 
-// TestResilience_ContextLengthNeverRetried verifies that ErrContextLength
-// surfaces immediately with exactly one server call (AC7).
+// TestResilience_ContextLengthNeverRetried verifies that ErrContextLength surfaces immediately with exactly one
+// server call (AC7).
 func TestResilience_ContextLengthNeverRetried(t *testing.T) {
 	t.Parallel()
 
@@ -825,9 +819,8 @@ func TestResilience_ContextLengthNeverRetried(t *testing.T) {
 
 // ── AC8: all tests pass under -race (enforced by Makefile `race` target) ─────
 //
-// No explicit test here — all of the above are designed to be race-clean:
-// shared state uses atomic.Int32, channels, and contexts. goroutine lifetimes
-// are bounded by context cancellation (defer dr.cancel in streamWithTimeouts)
+// No explicit test here — all of the above are designed to be race-clean: shared state uses atomic.Int32, channels,
+// and contexts. goroutine lifetimes are bounded by context cancellation (defer dr.cancel in streamWithTimeouts)
 // and httptest server shutdown (t.Cleanup(srv.Close)).
 
 // ── Cleanup: the streaming producer goroutine must not accumulate ────────────
@@ -846,8 +839,7 @@ func eventually(timeout time.Duration, cond func() bool) bool {
 	}
 }
 
-// streamForeverHandler streams SSE text chunks until the client disconnects
-// (its request context is cancelled).
+// streamForeverHandler streams SSE text chunks until the client disconnects (its request context is cancelled).
 func streamForeverHandler(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -870,13 +862,11 @@ func streamForeverHandler(t *testing.T) http.HandlerFunc {
 	}
 }
 
-// TestResilience_EarlyBreak_NoGoroutineAccumulation drives the early-break
-// cleanup path many times — a consumer that reads one chunk and breaks while the
-// endpoint is still streaming — and asserts the streaming producer goroutines do
-// not accumulate. It guards against a cleanup regression in which a consumer exit
-// fails to terminate its producer (the iterator cancels streamCtx on every exit,
-// which unblocks a producer parked on a channel send, and dr.cancel aborts one
-// parked on the body read). Not parallel: it reads the process-global
+// TestResilience_EarlyBreak_NoGoroutineAccumulation drives the early-break cleanup path many times — a consumer
+// that reads one chunk and breaks while the endpoint is still streaming — and asserts the streaming producer
+// goroutines do not accumulate. It guards against a cleanup regression in which a consumer exit fails to
+// terminate its producer (the iterator cancels streamCtx on every exit, which unblocks a producer parked on a
+// channel send, and dr.cancel aborts one parked on the body read). Not parallel: it reads the process-global
 // runtime.NumGoroutine.
 func TestResilience_EarlyBreak_NoGoroutineAccumulation(t *testing.T) {
 	srv := httptest.NewServer(streamForeverHandler(t))
@@ -910,8 +900,8 @@ func TestResilience_EarlyBreak_NoGoroutineAccumulation(t *testing.T) {
 		consumeOneThenBreak()
 	}
 
-	// A cleanup regression that leaked one producer per iteration would push the
-	// count to ~baseline+iterations; the small slack absorbs scheduler noise.
+	// A cleanup regression that leaked one producer per iteration would push the count to ~baseline+iterations; the
+	// small slack absorbs scheduler noise.
 	if !eventually(3*time.Second, func() bool {
 		runtime.GC()
 		return runtime.NumGoroutine() <= baseline+5
