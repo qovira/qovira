@@ -14,6 +14,7 @@
   // muted text below 4.5:1. This is genuine design intent, not a token bug.
 
   import { defineMeta } from "@storybook/addon-svelte-csf";
+  import { expect } from "storybook/test";
   import ToolCallChip from "./ToolCallChip.svelte";
   import type { ToolCallEntry } from "$lib/stores/tool-calls.svelte.js";
 
@@ -38,6 +39,7 @@
 <!--
   In-progress chip: tool.started state — shows the animated spinner and argsSummary.
   Covers AC: "tool chip (in-progress)".
+  play: asserts the chip renders the argsSummary text and the chip element is visible.
 -->
 <Story
   name="InProgress"
@@ -53,11 +55,20 @@
       argsSummary: "Buy oat milk · tomorrow 9 am",
     } satisfies ToolCallEntry,
   }}
+  play={async ({ canvas }) => {
+    // The chip renders with the argsSummary text visible.
+    // argsSummary is placed in .tool-chip__args via {@html renderSafeMarkdown(...)}.
+    await expect(await canvas.findByText(/buy oat milk/i)).toBeVisible();
+    // The in-progress chip uses role="status" (aria-live=polite).
+    const chip = canvas.getByRole("status");
+    await expect(chip).toBeVisible();
+  }}
 />
 
 <!--
   Resolved entity card: tool.completed for a write tool that returns a reminder
   shape. Covers AC: "resolved entity card".
+  play: asserts the entity card link renders with the reminder title and links to /reminders.
 -->
 <Story
   name="EntityCard"
@@ -77,6 +88,14 @@
         dueAt: new Date(Date.now() + 86_400_000).toISOString(),
       },
     } satisfies ToolCallEntry,
+  }}
+  play={async ({ canvas }) => {
+    // The entity card renders as a link to /reminders.
+    const link = await canvas.findByRole("link");
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", "/reminders");
+    // The reminder title must appear inside the link.
+    await expect(link).toHaveAccessibleName(/buy oat milk/i);
   }}
 />
 
@@ -146,6 +165,7 @@
 
 <!--
   Error state: tool.failed — shows the soft recoverable error chip.
+  play: asserts the alert role renders with the error text.
 -->
 <Story
   name="ErrorState"
@@ -160,5 +180,13 @@
       argsSummary: "Buy oat milk",
       error: "Could not complete the operation. Please try again.",
     } satisfies ToolCallEntry,
+  }}
+  play={async ({ canvas }) => {
+    // Failed chip uses role="alert".
+    const alert = await canvas.findByRole("alert");
+    await expect(alert).toBeVisible();
+    // The specific error detail text must appear inside the chip.
+    // Use a more specific phrase that only matches the error detail, not the label.
+    await expect(await canvas.findByText(/please try again/i)).toBeVisible();
   }}
 />

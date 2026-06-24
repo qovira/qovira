@@ -10,6 +10,7 @@
   // deterministic regardless of when the story runs.
 
   import { defineMeta } from "@storybook/addon-svelte-csf";
+  import { expect, userEvent } from "storybook/test";
   import { setReminders, resetReminders } from "$lib/stores/reminders.svelte.js";
   import type { ReminderItem } from "$lib/stores/reminders.svelte.js";
   import RemindersView from "./RemindersView.svelte";
@@ -197,6 +198,8 @@
 <!--
   WithCompleted: mix of active (today) and completed reminders.
   The Done section accordion shows the completed count.
+  play: exercises the accordion expand/collapse — clicking "Done" toggles aria-expanded
+  and shows/hides the completed items list.
 -->
 <Story
   name="WithCompleted"
@@ -207,5 +210,29 @@
       completed({ id: "r-done-2", title: "Call Alice", dueAt: "2026-06-14T14:00:00Z" }),
     ]);
     return () => resetReminders();
+  }}
+  play={async ({ canvas }) => {
+    // The Done toggle button is closed initially (aria-expanded=false).
+    // The button's aria-label is "Show completed reminders" (from reminders_done_toggle_label).
+    const doneToggle = await canvas.findByRole("button", { name: /show completed reminders/i });
+    await expect(doneToggle).toHaveAttribute("aria-expanded", "false");
+
+    // Completed items must NOT be visible when collapsed.
+    await expect(canvas.queryByText("Buy oat milk")).toBeNull();
+
+    // Click to expand.
+    await userEvent.click(doneToggle);
+    await expect(doneToggle).toHaveAttribute("aria-expanded", "true");
+
+    // Completed items must now be visible.
+    await expect(await canvas.findByText("Buy oat milk")).toBeVisible();
+    await expect(canvas.getByText("Call Alice")).toBeVisible();
+
+    // Click again to collapse.
+    await userEvent.click(doneToggle);
+    await expect(doneToggle).toHaveAttribute("aria-expanded", "false");
+
+    // Items are hidden again.
+    await expect(canvas.queryByText("Buy oat milk")).toBeNull();
   }}
 />
