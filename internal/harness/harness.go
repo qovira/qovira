@@ -427,19 +427,29 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 	trimLevel := 0
 
 	for step := range h.stepCap {
+		// Load the conversation history once per step iteration. All helpers that
+		// read messages within this step use this slice, eliminating redundant
+		// SQLCipher round-trips. When a message is persisted during the step, the
+		// returned row (from RETURNING) is appended so downstream helpers in the same
+		// iteration see exactly what a fresh ListMessages would return at that point.
+		msgs, err := sq.ListMessages(ctx, conv)
+		if err != nil {
+			return fmt.Errorf("harness: list messages (step %d): %w", step, err)
+		}
+
 		// ── Resume path: process outstanding tool calls from the last assistant message ──
 		// Before calling the gateway, check whether the last assistant message has
 		// tool_calls with unresolved results. This handles the re-entry case from
 		// Resolve: the conversation is in mid-round state (assistant message persisted
 		// but tool calls not fully resolved). Process them idempotently first.
-		pendingCalls, err := outstandingToolCalls(ctx, sq, conv)
-		if err != nil {
-			return fmt.Errorf("harness: check outstanding tool calls (step %d): %w", step, err)
+		pendingCalls, pendErr := outstandingToolCalls(msgs)
+		if pendErr != nil {
+			return fmt.Errorf("harness: check outstanding tool calls (step %d): %w", step, pendErr)
 		}
 		if len(pendingCalls) > 0 {
 			// There are unresolved tool calls from a previous (persisted) round.
 			// Process them idempotently without calling the gateway.
-			suspended, procErr := h.processToolCalls(ctx, sq, conv, principal.UserID, pendingCalls, toolMap, scope, origin, step)
+			suspended, procErr := h.processToolCalls(ctx, sq, msgs, conv, principal.UserID, pendingCalls, toolMap, scope, origin, step)
 			if procErr != nil {
 				return procErr
 			}
@@ -455,11 +465,7 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 			// spurious re-entry (e.g. G2 acquired the lock after G1 already finished the
 			// turn). Return immediately without emitting any event — the lock is still
 			// held here, so the check and the gate are atomic w.r.t. all other goroutines.
-			done, guardErr := isTurnComplete(ctx, sq, conv)
-			if guardErr != nil {
-				return fmt.Errorf("harness: turn-completion guard (step %d): %w", step, guardErr)
-			}
-			if done {
+			if isTurnComplete(msgs) {
 				return nil // turn already finished by a concurrent runner — no-op
 			}
 
@@ -468,7 +474,7 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 			// runStep executes one model call (assemble → chat → stream → consume),
 			// handling ErrContextLength at BOTH setup and stream levels with bounded
 			// trim-and-retry inline.
-			sr := h.runStep(ctx, sq, conv, principal.UserID, gwTools, profile, &trimLevel, step)
+			sr := h.runStep(ctx, sq, msgs, conv, principal.UserID, gwTools, profile, &trimLevel, step)
 			if sr.termDone {
 				return sr.termErr
 			}
@@ -478,7 +484,7 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 
 			// Done with no tool calls: this is the final reply — persist and stop.
 			if len(sr.calls) == 0 {
-				assistantID, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), "", "stop")
+				assistantRow, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), "", "stop")
 				if err != nil {
 					return fmt.Errorf("harness: persist final assistant message: %w", err)
 				}
@@ -486,7 +492,7 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 					Type: "message.completed",
 					Data: CompletedPayload{
 						ConversationID: conv,
-						MessageID:      assistantID,
+						MessageID:      assistantRow.ID,
 						FinishReason:   "stop",
 					},
 				})
@@ -499,12 +505,17 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 			if err != nil {
 				return fmt.Errorf("harness: marshal tool_calls (step %d): %w", step, err)
 			}
-			if _, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), string(toolCallsJSON), "tool_calls"); err != nil {
+			assistantRow, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), string(toolCallsJSON), "tool_calls")
+			if err != nil {
 				return fmt.Errorf("harness: persist assistant message with tool_calls (step %d): %w", step, err)
 			}
+			// Append the persisted assistant row so findAssistantMessageForCall (called
+			// from insertPendingConfirmation inside processToolCalls) sees it in the
+			// same step — preserving persist-then-read ordering without a re-query.
+			msgs = append(msgs, insertRowToListRow(assistantRow))
 
 			// Process tool calls using the idempotent, state-driven loop.
-			suspended, procErr := h.processToolCalls(ctx, sq, conv, principal.UserID, sr.calls, toolMap, scope, origin, step)
+			suspended, procErr := h.processToolCalls(ctx, sq, msgs, conv, principal.UserID, sr.calls, toolMap, scope, origin, step)
 			if procErr != nil {
 				return procErr
 			}
@@ -514,12 +525,12 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 				return nil
 			}
 		}
-		// Loop: next iteration will check for outstanding calls or call the gateway.
+		// Loop: next iteration will re-load messages at the top of the next step.
 	}
 
 	// Step cap reached: persist a graceful message and end the turn.
 	const capMessage = "I wasn't able to finish that — I reached the maximum number of steps. Please try again."
-	assistantID, err := persistAssistantMessage(ctx, sq, conv, capMessage, "", "step_cap")
+	capRow, err := persistAssistantMessage(ctx, sq, conv, capMessage, "", "step_cap")
 	if err != nil {
 		return fmt.Errorf("harness: persist step-cap message: %w", err)
 	}
@@ -527,7 +538,7 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 		Type: "message.completed",
 		Data: CompletedPayload{
 			ConversationID: conv,
-			MessageID:      assistantID,
+			MessageID:      capRow.ID,
 			FinishReason:   "step_cap",
 		},
 	})
@@ -561,6 +572,11 @@ type stepResult struct {
 // Neither level advances the outer step counter — CL retries are "free" w.r.t.
 // the step cap, bounded instead by h.maxContextRetries via handleContextLength.
 //
+// msgs is the conversation history loaded once by the caller at the top of the
+// step iteration; runStep does not re-query the store. On context-length retries
+// the same slice is re-used with a harder trimLevel — history does not change
+// between retries.
+//
 // The returned stepResult carries exactly one meaningful outcome:
 //   - text/calls populated, err nil, termDone false: consumed round; caller processes.
 //   - err non-nil, termDone false: infra error; caller returns err.
@@ -569,6 +585,7 @@ type stepResult struct {
 func (h *Harness) runStep(
 	ctx context.Context,
 	sq *store.ScopedQueries,
+	msgs []db.ListMessagesRow,
 	conv ConversationID,
 	userID string,
 	gwTools []gateway.ToolSchema,
@@ -580,7 +597,7 @@ func (h *Harness) runStep(
 	// Each iteration re-assembles the request with the current trimLevel so
 	// that harder trims on successive CL errors are applied correctly.
 	for {
-		req, err := h.assembleChatRequest(ctx, sq, conv, gwTools, profile, *trimLevel)
+		req, err := h.assembleChatRequest(msgs, gwTools, profile, *trimLevel)
 		if err != nil {
 			return stepResult{err: fmt.Errorf("harness: assemble request (step %d): %w", step, err)}
 		}
@@ -686,7 +703,7 @@ func (h *Harness) handleContextLength(
 
 	// Retries exhausted. Emit exactly one graceful terminal event.
 	const msg = "This conversation has grown too long for me to continue. Please start a new conversation."
-	assistantID, persistErr := persistAssistantMessage(ctx, sq, conv, msg, "", "context_length")
+	clRow, persistErr := persistAssistantMessage(ctx, sq, conv, msg, "", "context_length")
 	if persistErr != nil {
 		// Persist failure is infrastructure — propagate; StartTurn emits turn.failed.
 		return true, fmt.Errorf("harness: persist context-length message: %w", persistErr)
@@ -697,7 +714,7 @@ func (h *Harness) handleContextLength(
 		Type: "message.completed",
 		Data: CompletedPayload{
 			ConversationID: conv,
-			MessageID:      assistantID,
+			MessageID:      clRow.ID,
 			FinishReason:   "context_length",
 		},
 	})
@@ -709,7 +726,9 @@ func (h *Harness) handleContextLength(
 // assembleChatRequest builds a gateway.ChatRequest from the persisted message
 // history. It:
 //  1. Composes a per-turn system prompt (identity + user context + memory slot).
-//  2. Loads and round-trips each persisted message (user/assistant/tool roles).
+//  2. Round-trips each message in msgs (user/assistant/tool roles) to a gateway
+//     message. msgs is the in-memory slice maintained by run() — no store query
+//     is performed here.
 //  3. Applies the sliding-window trim so that only history fitting within
 //     h.historyTokenBudget estimated tokens is included (oldest groups dropped
 //     first; newest group is always kept to satisfy the boundary rule).
@@ -724,18 +743,11 @@ func (h *Harness) handleContextLength(
 //   - role "assistant" without tool_calls → {Role:"assistant", Content}
 //   - role "tool"      → {Role:"tool", ToolCallID, Content}
 func (h *Harness) assembleChatRequest(
-	ctx context.Context,
-	sq *store.ScopedQueries,
-	conv ConversationID,
+	msgs []db.ListMessagesRow,
 	gwTools []gateway.ToolSchema,
 	profile db.User,
 	trimLevel int,
 ) (gateway.ChatRequest, error) {
-	msgs, err := sq.ListMessages(ctx, conv)
-	if err != nil {
-		return gateway.ChatRequest{}, fmt.Errorf("list messages: %w", err)
-	}
-
 	// Convert persisted messages to gateway messages (faithful role round-trip).
 	rawMsgs := make([]gateway.Message, 0, len(msgs))
 	for _, m := range msgs {
@@ -789,9 +801,14 @@ func (h *Harness) assembleChatRequest(
 // still waiting. Returns (suspended=true, nil) when the turn suspends; returns
 // (false, nil) when all calls are handled and the outer loop should continue;
 // returns (false, err) on an infrastructure error.
+//
+// msgs is the in-memory message slice maintained by run(). On the normal path it
+// includes the just-persisted assistant row (appended before this call) so that
+// findAssistantMessageForCall can locate it without a re-query.
 func (h *Harness) processToolCalls(
 	ctx context.Context,
 	sq *store.ScopedQueries,
+	msgs []db.ListMessagesRow,
 	conv, userID string,
 	calls []*gateway.ToolCall,
 	toolMap map[string]capability.Tool,
@@ -801,10 +818,7 @@ func (h *Harness) processToolCalls(
 ) (suspended bool, err error) {
 	// Build a set of call IDs that already have a persisted tool-result message.
 	// This is the idempotency check — re-entry after resume skips already-done calls.
-	doneIDs, err := toolResultSet(ctx, sq, conv)
-	if err != nil {
-		return false, fmt.Errorf("harness: load tool-result set (step %d): %w", step, err)
-	}
+	doneIDs := toolResultSet(msgs)
 
 	allHandled := true
 	for _, c := range calls {
@@ -871,7 +885,7 @@ func (h *Harness) processToolCalls(
 				if errors.Is(getErr, store.ErrConfirmationNotFound) {
 					// No row yet: create one and emit confirmation.required.
 					// Reuse the `tool` variable looked up above — avoids a fourth map access.
-					if insertErr := h.insertPendingConfirmation(ctx, sq, conv, userID, c, tool); insertErr != nil {
+					if insertErr := h.insertPendingConfirmation(ctx, sq, msgs, conv, userID, c, tool); insertErr != nil {
 						return false, fmt.Errorf("harness: insert pending confirmation for call %q: %w", c.ID, insertErr)
 					}
 					allHandled = false // waiting for user
@@ -919,28 +933,47 @@ func (h *Harness) processToolCalls(
 	return !allHandled, nil
 }
 
-// outstandingToolCalls inspects the persisted message history to determine whether
+// ── Pure in-memory helpers (no store I/O) ─────────────────────────────────────
+
+// insertRowToListRow converts a db.InsertMessageRow (returned by RETURNING on
+// INSERT) to a db.ListMessagesRow so it can be appended to the in-memory slice
+// that run() threads through helpers. Both types carry the same columns in the
+// same order, so a direct conversion suffices — and if they ever diverge this
+// stops compiling, which is a louder failure than a silently-partial copy.
+func insertRowToListRow(r db.InsertMessageRow) db.ListMessagesRow {
+	return db.ListMessagesRow(r)
+}
+
+// buildToolResultSet returns the set of tool call IDs that already have a
+// persisted tool-result row in msgs. It is the shared sub-helper used by both
+// outstandingToolCalls and toolResultSet — a single source of truth for the
+// rule "a tool call is done when a role=tool row with its ID exists".
+func buildToolResultSet(msgs []db.ListMessagesRow) map[string]bool {
+	set := make(map[string]bool)
+	for _, m := range msgs {
+		if m.Role == "tool" && m.ToolCallID.Valid && m.ToolCallID.String != "" {
+			set[m.ToolCallID.String] = true
+		}
+	}
+	return set
+}
+
+// outstandingToolCalls inspects the in-memory message slice to determine whether
 // the last assistant message has tool_calls entries that do not yet have a
 // corresponding tool-result message. It returns the outstanding calls in original
 // order. If there are no outstanding calls (either because the last message is not
-// an assistant+tool_calls message, or all calls already have results), the returned
-// slice is empty.
-func outstandingToolCalls(ctx context.Context, sq *store.ScopedQueries, conv string) ([]*gateway.ToolCall, error) {
-	msgs, err := sq.ListMessages(ctx, conv)
-	if err != nil {
-		return nil, fmt.Errorf("list messages for outstanding calls: %w", err)
-	}
+// an assistant+tool_calls message, or all calls already have results), the
+// returned slice is nil.
+//
+// The caller (run) loads msgs once per step iteration via sq.ListMessages; this
+// function performs no store I/O.
+func outstandingToolCalls(msgs []db.ListMessagesRow) ([]*gateway.ToolCall, error) {
 	if len(msgs) == 0 {
 		return nil, nil
 	}
 
 	// Build a set of tool call IDs that already have results.
-	resultIDs := make(map[string]bool)
-	for _, m := range msgs {
-		if m.Role == "tool" && m.ToolCallID.Valid && m.ToolCallID.String != "" {
-			resultIDs[m.ToolCallID.String] = true
-		}
-	}
+	resultIDs := buildToolResultSet(msgs)
 
 	// Find the last assistant message that has tool_calls.
 	// Abandoned messages (Abandoned != 0) are only inert when ALL of their
@@ -1000,48 +1033,35 @@ func outstandingToolCalls(ctx context.Context, sq *store.ScopedQueries, conv str
 //
 // Calling this while holding the per-conversation lock guarantees that the check
 // and the subsequent gateway call are atomic w.r.t. all other goroutines.
-func isTurnComplete(ctx context.Context, sq *store.ScopedQueries, conv string) (bool, error) {
-	msgs, err := sq.ListMessages(ctx, conv)
-	if err != nil {
-		return false, fmt.Errorf("list messages for turn-completion guard: %w", err)
-	}
+func isTurnComplete(msgs []db.ListMessagesRow) bool {
 	if len(msgs) == 0 {
-		return false, nil
+		return false
 	}
 	last := msgs[len(msgs)-1]
 	if last.Role != "assistant" {
-		return false, nil
+		return false
 	}
 	// An abandoned assistant message is terminal: expiry ended the turn without a
 	// model round. Treat the conversation as complete so run never re-enters.
 	if last.Abandoned != 0 {
-		return true, nil
+		return true
 	}
 	// An assistant message with tool_calls is not yet complete — tool results are
 	// still outstanding (the resume path above handles this before we reach here,
 	// so in practice this branch is not reached, but guard it for correctness).
 	if last.ToolCalls.Valid && last.ToolCalls.String != "" {
-		return false, nil
+		return false
 	}
 	// Last message is an assistant final reply (no tool_calls) — turn is done.
-	return true, nil
+	return true
 }
 
 // toolResultSet builds a set of tool call IDs that already have a persisted
-// tool-result message in the conversation. This drives the idempotency check in
-// processToolCalls.
-func toolResultSet(ctx context.Context, sq *store.ScopedQueries, conv string) (map[string]bool, error) {
-	msgs, err := sq.ListMessages(ctx, conv)
-	if err != nil {
-		return nil, fmt.Errorf("list messages for tool-result set: %w", err)
-	}
-	set := make(map[string]bool)
-	for _, m := range msgs {
-		if m.Role == "tool" && m.ToolCallID.Valid && m.ToolCallID.String != "" {
-			set[m.ToolCallID.String] = true
-		}
-	}
-	return set, nil
+// tool-result message in msgs. This drives the idempotency check in
+// processToolCalls. It delegates to buildToolResultSet so the boundary rule
+// lives in one place.
+func toolResultSet(msgs []db.ListMessagesRow) map[string]bool {
+	return buildToolResultSet(msgs)
 }
 
 // executeToolAndPersist executes a known tool (Auto or approved Confirm) and
@@ -1139,16 +1159,21 @@ func (h *Harness) persistBlockRefusal(
 // insertPendingConfirmation persists a pending_confirmations row for a Confirm-tier
 // tool call and emits the confirmation.required event. Called only when the row
 // does not yet exist.
+//
+// msgs is the in-memory slice threaded from run(); it already includes the
+// just-persisted assistant row so findAssistantMessageForCall can locate it
+// without a re-query.
 func (h *Harness) insertPendingConfirmation(
 	ctx context.Context,
 	sq *store.ScopedQueries,
+	msgs []db.ListMessagesRow,
 	conv, userID string,
 	call *gateway.ToolCall,
 	tool capability.Tool,
 ) error {
 	// Look up the assistant message ID that holds this tool call. It is the most
 	// recent assistant message in this conversation that has tool_calls.
-	msgID, err := findAssistantMessageForCall(ctx, sq, conv, call.ID)
+	msgID, err := findAssistantMessageForCall(msgs, call.ID)
 	if err != nil {
 		return fmt.Errorf("find assistant message for call %q: %w", call.ID, err)
 	}
@@ -1276,13 +1301,13 @@ func (h *Harness) persistExpiredResultByUserID(ctx context.Context, sysSQ *store
 }
 
 // findAssistantMessageForCall finds the ID of the most recent assistant message
-// in the conversation that contains a tool_calls array. This is the parent message
-// for the pending_confirmations row.
-func findAssistantMessageForCall(ctx context.Context, sq *store.ScopedQueries, conv, callID string) (string, error) {
-	msgs, err := sq.ListMessages(ctx, conv)
-	if err != nil {
-		return "", fmt.Errorf("list messages: %w", err)
-	}
+// in msgs that contains the given tool call ID in its tool_calls array. This is
+// the parent message for the pending_confirmations row.
+//
+// msgs is the in-memory slice maintained by run(); on the normal path it already
+// includes the just-persisted assistant row (appended before processToolCalls is
+// called), so no store query is needed.
+func findAssistantMessageForCall(msgs []db.ListMessagesRow, callID string) (string, error) {
 	// Walk backwards: the most recently persisted assistant message with tool_calls
 	// is the one that triggered the Confirm path.
 	for _, m := range slices.Backward(msgs) {
@@ -1725,29 +1750,30 @@ func (h *Harness) persistToolError(
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // persistAssistantMessage inserts the assistant reply into the messages table
-// and returns the new message ID. toolCallsJSON is the JSON array string for the
-// tool_calls column, or "" if the message has no tool calls. finishReason is the
-// value to record in the finish_reason column: "tool_calls" for a tool-call round,
-// "stop" for a final text reply, or another value for synthetic terminal messages
-// (e.g. "step_cap", "context_length").
+// and returns the full persisted row (including server-generated created_at and
+// abandoned flag). toolCallsJSON is the JSON array string for the tool_calls
+// column, or "" if the message has no tool calls. finishReason is the value to
+// record in the finish_reason column: "tool_calls" for a tool-call round, "stop"
+// for a final text reply, or another value for synthetic terminal messages (e.g.
+// "step_cap", "context_length").
+//
+// Returning the full row allows callers to append it to the in-memory message
+// slice (via insertRowToListRow) so downstream helpers in the same iteration see
+// the new row without a re-query, preserving persist-then-read ordering.
 func persistAssistantMessage(
 	ctx context.Context,
 	sq *store.ScopedQueries,
 	conv, content, toolCallsJSON, finishReason string,
-) (string, error) {
-	msgID := generateID()
-	_, err := sq.InsertMessage(ctx, store.InsertMessageParams{
-		ID:             msgID,
+) (db.InsertMessageRow, error) {
+	row, err := sq.InsertMessage(ctx, store.InsertMessageParams{
+		ID:             generateID(),
 		ConversationID: conv,
 		Role:           "assistant",
 		Content:        content,
 		ToolCalls:      toolCallsJSON,
 		FinishReason:   finishReason,
 	})
-	if err != nil {
-		return "", err
-	}
-	return msgID, nil
+	return row, err
 }
 
 // riskTierString returns the stable string label for a RiskTier.
