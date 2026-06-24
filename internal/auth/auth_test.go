@@ -460,27 +460,6 @@ func TestDummyVerify_ReturnsFalseNotError(t *testing.T) {
 	}
 }
 
-// TestDummyVerify_ActualDerivation verifies that DummyVerify actually performs
-// a real argon2id derivation (not a short-circuit) by checking that it takes a
-// measurable non-zero amount of time even with minimal params.
-func TestDummyVerify_ActualDerivation(t *testing.T) {
-	t.Parallel()
-
-	// Even with m=64/t=1/p=1 argon2id must do actual work — this is a loose
-	// sanity check rather than a timing bound.
-	h := fastHasher(t)
-
-	// Verify returns false without error, confirming it ran a full derivation
-	// path (not a special-case short-circuit that skips KDF work).
-	ok, err := h.DummyVerify("not-the-right-password")
-	if err != nil {
-		t.Fatalf("DummyVerify: unexpected error: %v", err)
-	}
-	if ok {
-		t.Error("DummyVerify returned true unexpectedly")
-	}
-}
-
 // ── AC6: table-driven policy-boundary tests (already covered above) ──────────
 
 // TestVerify_ParamsDecodedFromPHC confirms that Verify re-derives using the

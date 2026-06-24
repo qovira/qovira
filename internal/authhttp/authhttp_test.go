@@ -247,9 +247,6 @@ func TestLogin_Success_200WithCookiesAndBody(t *testing.T) {
 	if err := json.Unmarshal([]byte(bodyStr), &resp); err != nil {
 		t.Fatalf("unmarshal login response: %v; body=%s", err, bodyStr)
 	}
-	if resp.ExpiresAt == "" {
-		t.Error("response expiresAt is empty")
-	}
 	if resp.User.ID != u.ID {
 		t.Errorf("user.id = %q, want %q", resp.User.ID, u.ID)
 	}
@@ -258,6 +255,26 @@ func TestLogin_Success_200WithCookiesAndBody(t *testing.T) {
 	}
 	if resp.User.Role != string(u.Role) {
 		t.Errorf("user.role = %q, want %q", resp.User.Role, u.Role)
+	}
+
+	// Assert expiresAt equals the deterministic value computed from testNow.
+	// buildModule uses testNow as the fixed clock, so:
+	//   mintNow    = testNow (truncated to second — no sub-second component)
+	//   idleDeadline  = mintNow + DefaultSessionConfig.IdleTTL  (7 days)
+	//   absDeadline   = mintNow + DefaultSessionConfig.AbsoluteTTL (30 days)
+	//   ExpiresAt = min(idleDeadline, absDeadline) = mintNow + 7 days (idle binds)
+	mintNow := testNow.Truncate(time.Second)
+	wantExpiresAt := mintNow.Add(auth.DefaultSessionConfig.IdleTTL).UTC().Format(time.RFC3339)
+	if resp.ExpiresAt != wantExpiresAt {
+		t.Errorf("expiresAt = %q, want %q (testNow=%v + IdleTTL=%v)", resp.ExpiresAt, wantExpiresAt, testNow, auth.DefaultSessionConfig.IdleTTL)
+	}
+
+	// Assert the session cookie's MaxAge equals the absolute TTL in seconds.
+	// The handler sets MaxAge = int(cfg.AbsoluteTTL.Seconds()); with
+	// DefaultSessionConfig.AbsoluteTTL = 30 days that is 2 592 000 seconds.
+	wantMaxAge := int(auth.DefaultSessionConfig.AbsoluteTTL.Seconds())
+	if sessionCookie.MaxAge != wantMaxAge {
+		t.Errorf("session cookie MaxAge = %d, want %d (AbsoluteTTL=%v)", sessionCookie.MaxAge, wantMaxAge, auth.DefaultSessionConfig.AbsoluteTTL)
 	}
 }
 
@@ -1167,5 +1184,132 @@ func TestChangePassword_MalformedJSON_Returns400(t *testing.T) {
 	}
 	if p.Code != "malformed_body" {
 		t.Errorf("code = %q, want malformed_body", p.Code)
+	}
+}
+
+// ── ChangePassword 500 paths ──────────────────────────────────────────────────
+
+// TestChangePassword_NoSessionCookie_Returns500 exercises the
+// "change_password_token_missing" branch in ChangePasswordHandler: the password
+// change itself succeeds, but no session cookie is present so the handler cannot
+// identify which session to keep alive.
+//
+// Setup: the request carries a valid Principal in context (simulating an auth
+// middleware that already resolved the user), but no __Host-qovira_session cookie,
+// so SessionTokenFromRequest returns "".
+//
+// Expected: 500 application/problem+json with code "change_password_token_missing"
+// and a generic detail (no raw error or internal string leaked to the client).
+func TestChangePassword_NoSessionCookie_Returns500(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	const oldPW = "correct-horse"
+	const newPW = "new-correct-horse"
+	u := createUser(t, s, "pw-no-cookie@example.com", oldPW)
+	mod := buildModule(t, s, nil)
+
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+
+	b, _ := json.Marshal(changePasswordBody{CurrentPassword: oldPW, NewPassword: newPW})
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/me/password", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	// Intentionally NO session cookie added.
+	ctx := httpx.ContextWithPrincipal(r.Context(), principal)
+	ctx = httpx.ContextWithRequestID(ctx, "test-req-id")
+	r = r.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	mod.ChangePasswordHandler()(rr, r)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/problem+json" {
+		t.Errorf("Content-Type = %q, want application/problem+json", ct)
+	}
+
+	var p struct {
+		Status int    `json:"status"`
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &p); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
+	}
+	if p.Code != "change_password_token_missing" {
+		t.Errorf("code = %q, want change_password_token_missing", p.Code)
+	}
+	if p.Status != http.StatusInternalServerError {
+		t.Errorf("status in body = %d, want 500", p.Status)
+	}
+	// The detail must be generic — no raw error or internal string must leak.
+	// InternalProblem always returns the static "An unexpected error occurred" detail.
+	const wantDetail = "An unexpected error occurred. Quote the requestId when contacting support."
+	if p.Detail != wantDetail {
+		t.Errorf("detail = %q, want generic %q (raw error must not leak to client)", p.Detail, wantDetail)
+	}
+}
+
+// TestChangePassword_StaleSessionToken_Returns500 exercises the
+// "password_changed_session_lookup_failed" branch in ChangePasswordHandler: the
+// password change succeeds, but the session cookie value does not resolve to any
+// session in the DB (e.g. it was already revoked or is synthetic).
+//
+// Setup: the request carries a Principal in context but a session cookie whose
+// token hash does not exist in the sessions table, so sessions.Lookup returns
+// ErrSessionNotFound.
+//
+// Expected: 500 application/problem+json with code
+// "password_changed_session_lookup_failed" and a generic detail.
+func TestChangePassword_StaleSessionToken_Returns500(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	const oldPW = "correct-horse"
+	const newPW = "new-correct-horse"
+	u := createUser(t, s, "pw-stale-token@example.com", oldPW)
+	mod := buildModule(t, s, nil)
+
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+
+	// Use a well-formed but non-existent session token — it will pass the
+	// empty-token guard but fail Lookup.
+	const ghostToken = "qov_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+	b, _ := json.Marshal(changePasswordBody{CurrentPassword: oldPW, NewPassword: newPW})
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/me/password", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: httpx.SessionCookieName, Value: ghostToken}) //nolint:gosec // G124: test request
+	ctx := httpx.ContextWithPrincipal(r.Context(), principal)
+	ctx = httpx.ContextWithRequestID(ctx, "test-req-id")
+	r = r.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	mod.ChangePasswordHandler()(rr, r)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/problem+json" {
+		t.Errorf("Content-Type = %q, want application/problem+json", ct)
+	}
+
+	var p struct {
+		Status int    `json:"status"`
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &p); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
+	}
+	if p.Code != "password_changed_session_lookup_failed" {
+		t.Errorf("code = %q, want password_changed_session_lookup_failed", p.Code)
+	}
+	if p.Status != http.StatusInternalServerError {
+		t.Errorf("status in body = %d, want 500", p.Status)
+	}
+	// The detail must be generic — no raw error, session ID, or internal path must leak.
+	const wantDetail = "An unexpected error occurred. Quote the requestId when contacting support."
+	if p.Detail != wantDetail {
+		t.Errorf("detail = %q, want generic %q (raw error must not leak to client)", p.Detail, wantDetail)
 	}
 }

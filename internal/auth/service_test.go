@@ -9,6 +9,7 @@ import (
 
 	"github.com/qovira/qovira/internal/auth"
 	"github.com/qovira/qovira/internal/store"
+	"github.com/qovira/qovira/internal/store/db"
 )
 
 // ── test helpers ─────────────────────────────────────────────────────────────
@@ -841,8 +842,18 @@ func TestAuthenticate_UnknownEmail_ErrorIsUniform(t *testing.T) {
 
 // TestAuthenticate_RehashOnLogin_UpgradesWeakHash verifies that when the stored
 // hash uses weaker parameters than the current Hasher, Authenticate succeeds AND
-// transparently upgrades the stored PHC to the current parameters. Subsequent
-// calls must still authenticate correctly using the upgraded hash.
+// transparently upgrades the stored PHC to the current parameters.
+//
+// The critical assertion is that the raw PasswordHash row in the database is
+// rewritten to encode the stronger params after the first Authenticate call.  We
+// verify this by reading the raw db.User row before and after login and
+// confirming that:
+//   - Before login: strongHasher.NeedsRehash(row.PasswordHash) == true  (weak params stored)
+//   - After login:  strongHasher.NeedsRehash(row.PasswordHash) == false (strong params stored)
+//
+// This test FAILS if the opportunistic rehash block in service.go:395-399 is
+// removed or bypassed, because the stored hash would remain at weak params and
+// the post-login NeedsRehash check would still return true.
 func TestAuthenticate_RehashOnLogin_UpgradesWeakHash(t *testing.T) {
 	t.Parallel()
 
@@ -885,6 +896,16 @@ func TestAuthenticate_RehashOnLogin_UpgradesWeakHash(t *testing.T) {
 	strongHasher := auth.NewHasher(fastParams)
 	strongSvc := auth.NewService(s, strongHasher, fastPolicy)
 
+	// Read the raw hash BEFORE login to confirm it is currently weak.
+	rawQ := db.New(s.Reader())
+	rowBefore, err := rawQ.GetUserByID(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID (before rehash): %v", err)
+	}
+	if !strongHasher.NeedsRehash(rowBefore.PasswordHash) {
+		t.Fatal("pre-condition failed: stored hash does not need rehash — weak params not encoded correctly")
+	}
+
 	got, err := strongSvc.Authenticate(context.Background(), in.Email, pw)
 	if err != nil {
 		t.Fatalf("Authenticate (should rehash): %v", err)
@@ -893,7 +914,18 @@ func TestAuthenticate_RehashOnLogin_UpgradesWeakHash(t *testing.T) {
 		t.Errorf("User.ID mismatch after rehash: got %q, want %q", got.ID, created.ID)
 	}
 
-	// Second authenticate: must still succeed (the stored hash was upgraded).
+	// Read the raw hash AFTER login.  The rehash must have been written back.
+	// If the rehash block in service.go is removed this assertion will fail because
+	// NeedsRehash will still return true (the weak hash is unchanged).
+	rowAfter, err := rawQ.GetUserByID(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID (after rehash): %v", err)
+	}
+	if strongHasher.NeedsRehash(rowAfter.PasswordHash) {
+		t.Errorf("stored PasswordHash still encodes weak params after Authenticate — rehash did not run or was not persisted.\nbefore: %q\nafter:  %q", rowBefore.PasswordHash, rowAfter.PasswordHash)
+	}
+
+	// Second authenticate: must still succeed with the upgraded (strong) hash.
 	got2, err := strongSvc.Authenticate(context.Background(), in.Email, pw)
 	if err != nil {
 		t.Fatalf("Authenticate after rehash: %v", err)

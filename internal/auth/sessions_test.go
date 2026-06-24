@@ -355,6 +355,48 @@ func TestBump_AfterInterval_WritesAndExtendsValidity(t *testing.T) {
 	}
 }
 
+// TestBump_ZeroRows_ReturnsFalseNil verifies that a Bump call on a session that
+// was deleted between the throttle check and the UPDATE returns (false, nil) —
+// not an error.
+//
+// This exercises the "zero-rows-matched" branch in sessions.go (Bump returns
+// n > 0 — when n == 0 it returns false, nil).  The session is minted, then
+// deleted via DeleteByToken; the stale Session value is then passed to Bump with
+// now advanced past BumpInterval.  A database error on a missing row is NOT
+// expected here: the UPDATE simply touches zero rows and returns normally.
+//
+// This test FAILS if Bump treats a zero-row UPDATE as an error (e.g. returns
+// a non-nil err for RowsAffected == 0).
+func TestBump_ZeroRows_ReturnsFalseNil(t *testing.T) {
+	t.Parallel()
+
+	_, svc, sessions := openSessionsStore(t)
+	ctx := context.Background()
+	u := createTestUser(t, svc, "bump-zero@example.com")
+	now := time.Now().UTC()
+
+	token, sess, _, err := sessions.Mint(ctx, u.ID, now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+
+	// Delete the session so the UPDATE in Bump will match zero rows.
+	if err := sessions.DeleteByToken(ctx, token); err != nil {
+		t.Fatalf("DeleteByToken: %v", err)
+	}
+
+	// Advance past BumpInterval so the throttle check does not short-circuit.
+	bumpNow := now.Add(testSessionConfig.BumpInterval + time.Second)
+
+	bumped, err := sessions.Bump(ctx, sess, bumpNow)
+	if err != nil {
+		t.Errorf("Bump on deleted session returned error %v, want (false, nil)", err)
+	}
+	if bumped {
+		t.Errorf("Bump on deleted session returned bumped=true, want false")
+	}
+}
+
 // ── AC4: Revocation ──────────────────────────────────────────────────────────
 
 // TestDeleteByToken_RemovesSingleSession verifies that DeleteByToken removes
