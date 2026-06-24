@@ -43,11 +43,7 @@ type Cataloger interface {
 	Catalog() []capability.Tool
 }
 
-// Logger is a re-export alias that lets callers pass a *slog.Logger without
-// importing slog directly in test helpers. The harness uses slog internally.
-type Logger = slog.Logger
-
-// NewDiscardLogger returns a Logger that discards all output below Error, for use in tests.
+// NewDiscardLogger returns a *slog.Logger that discards all output below Error, for use in tests.
 func NewDiscardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(nilWriter{}, &slog.HandlerOptions{Level: slog.LevelError}))
 }
@@ -344,7 +340,7 @@ func (h *Harness) StartTurn(
 		// does not crash the server.
 		defer func() {
 			if r := recover(); r != nil {
-				h.logger.Error("harness: turn panicked", "conversationId", conv, "panic", r)
+				h.logger.Error("harness: turn panicked", "conversationId", conv, "panic", sanitizePanic(r))
 				h.bus.Publish(principal.UserID, events.Event{
 					Type: "turn.failed",
 					Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
@@ -436,7 +432,7 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 		// tool_calls with unresolved results. This handles the re-entry case from
 		// Resolve: the conversation is in mid-round state (assistant message persisted
 		// but tool calls not fully resolved). Process them idempotently first.
-		pendingCalls, _, err := outstandingToolCalls(ctx, sq, conv)
+		pendingCalls, err := outstandingToolCalls(ctx, sq, conv)
 		if err != nil {
 			return fmt.Errorf("harness: check outstanding tool calls (step %d): %w", step, err)
 		}
@@ -482,7 +478,7 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 
 			// Done with no tool calls: this is the final reply — persist and stop.
 			if len(sr.calls) == 0 {
-				assistantID, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), "")
+				assistantID, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), "", "stop")
 				if err != nil {
 					return fmt.Errorf("harness: persist final assistant message: %w", err)
 				}
@@ -503,7 +499,7 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 			if err != nil {
 				return fmt.Errorf("harness: marshal tool_calls (step %d): %w", step, err)
 			}
-			if _, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), string(toolCallsJSON)); err != nil {
+			if _, err := persistAssistantMessage(ctx, sq, conv, string(sr.text), string(toolCallsJSON), "tool_calls"); err != nil {
 				return fmt.Errorf("harness: persist assistant message with tool_calls (step %d): %w", step, err)
 			}
 
@@ -523,7 +519,7 @@ func (h *Harness) run(ctx context.Context, conv ConversationID, origin Origin, p
 
 	// Step cap reached: persist a graceful message and end the turn.
 	const capMessage = "I wasn't able to finish that — I reached the maximum number of steps. Please try again."
-	assistantID, err := persistAssistantMessage(ctx, sq, conv, capMessage, "")
+	assistantID, err := persistAssistantMessage(ctx, sq, conv, capMessage, "", "step_cap")
 	if err != nil {
 		return fmt.Errorf("harness: persist step-cap message: %w", err)
 	}
@@ -626,6 +622,13 @@ func (h *Harness) runStep(
 				})
 			}
 			if chunk.ToolCall != nil {
+				// Normalize empty/missing IDs before persistence so the idempotency
+				// keys (resultIDs / doneIDs) and the partial-unique DB index engage.
+				// Without this, a NULL-id result is never matched by the idempotency
+				// check and the tool re-runs on every loop iteration until stepCap.
+				if chunk.ToolCall.ID == "" {
+					chunk.ToolCall.ID = generateID()
+				}
 				calls = append(calls, chunk.ToolCall)
 			}
 			if chunk.Done {
@@ -648,21 +651,12 @@ func (h *Harness) runStep(
 				continue
 			}
 			// Non-CL stream error: infra abort.
-			return stepResult{err: classifyGatewayError(streamErr, step, "stream")}
+			return stepResult{err: fmt.Errorf("harness: stream (step %d): %w", step, streamErr)}
 		}
 
 		// Stream consumed successfully.
 		return stepResult{text: textAccum, calls: calls}
 	}
-}
-
-// classifyGatewayError wraps a non-context-length gateway or stream error for
-// return to StartTurn as an infrastructure abort. Context-length errors are
-// handled by the caller before reaching here; this function only sees
-// faultToolError and faultInfrastructure. Both abort the turn the same way:
-// a gateway returning a ToolError is unusual but treated as infrastructure.
-func classifyGatewayError(err error, step int, phase string) error {
-	return fmt.Errorf("harness: %s (step %d): %w", phase, step, err)
 }
 
 // handleContextLength implements the bounded trim-and-retry logic for
@@ -692,7 +686,7 @@ func (h *Harness) handleContextLength(
 
 	// Retries exhausted. Emit exactly one graceful terminal event.
 	const msg = "This conversation has grown too long for me to continue. Please start a new conversation."
-	assistantID, persistErr := persistAssistantMessage(ctx, sq, conv, msg, "")
+	assistantID, persistErr := persistAssistantMessage(ctx, sq, conv, msg, "", "context_length")
 	if persistErr != nil {
 		// Persist failure is infrastructure — propagate; StartTurn emits turn.failed.
 		return true, fmt.Errorf("harness: persist context-length message: %w", persistErr)
@@ -820,10 +814,15 @@ func (h *Harness) processToolCalls(
 		}
 
 		// Look up the tool once — reused for the policy gate, the unknown-tool path,
-		// and execution below. Avoids triple map lookup from the original code.
+		// and execution below.
 		tool, found := toolMap[c.Name]
 
-		dec := policy(toolRisk(c.Name, toolMap), origin.Trust)
+		// Unknown tools have no risk tier; the !found path below handles them before
+		// the policy switch, so pass a zero risk only when found is true.
+		var dec Decision
+		if found {
+			dec = policy(tool.Risk, origin.Trust)
+		}
 
 		// Unknown tools: no risk tier; skips the policy gate. Emit tool.started and
 		// persist a model-visible "unknown tool" error so the model can self-correct.
@@ -920,28 +919,19 @@ func (h *Harness) processToolCalls(
 	return !allHandled, nil
 }
 
-// toolRisk returns the RiskTier of the named tool, or a default Confirm tier
-// for unknown tools (the unknown-tool path is handled before this is called in practice).
-func toolRisk(name string, toolMap map[string]capability.Tool) capability.RiskTier {
-	if t, ok := toolMap[name]; ok {
-		return t.Risk
-	}
-	return capability.RiskRead // unknown tools bypass the confirm gate above
-}
-
 // outstandingToolCalls inspects the persisted message history to determine whether
 // the last assistant message has tool_calls entries that do not yet have a
-// corresponding tool-result message. It returns the outstanding calls (in original
-// order) and the assistant message ID. If there are no outstanding calls (either
-// because the last message is not an assistant+tool_calls message, or all calls
-// already have results), the returned slice is empty.
-func outstandingToolCalls(ctx context.Context, sq *store.ScopedQueries, conv string) ([]*gateway.ToolCall, string, error) {
+// corresponding tool-result message. It returns the outstanding calls in original
+// order. If there are no outstanding calls (either because the last message is not
+// an assistant+tool_calls message, or all calls already have results), the returned
+// slice is empty.
+func outstandingToolCalls(ctx context.Context, sq *store.ScopedQueries, conv string) ([]*gateway.ToolCall, error) {
 	msgs, err := sq.ListMessages(ctx, conv)
 	if err != nil {
-		return nil, "", fmt.Errorf("list messages for outstanding calls: %w", err)
+		return nil, fmt.Errorf("list messages for outstanding calls: %w", err)
 	}
 	if len(msgs) == 0 {
-		return nil, "", nil
+		return nil, nil
 	}
 
 	// Build a set of tool call IDs that already have results.
@@ -971,11 +961,11 @@ func outstandingToolCalls(ctx context.Context, sq *store.ScopedQueries, conv str
 		// is wrong because they will all show status="expired" (and have synthetic
 		// tool-results) or the message would not have been abandoned.
 		if m.Abandoned != 0 {
-			return nil, "", nil
+			return nil, nil
 		}
 		var tcs []gateway.ToolCall
 		if jsonErr := json.Unmarshal([]byte(m.ToolCalls.String), &tcs); jsonErr != nil {
-			return nil, "", fmt.Errorf("unmarshal tool_calls for message %s: %w", m.ID, jsonErr)
+			return nil, fmt.Errorf("unmarshal tool_calls for message %s: %w", m.ID, jsonErr)
 		}
 		// Collect calls that do NOT yet have a persisted tool-result. An expired
 		// call's synthetic tool-result is in resultIDs, so it is treated as "done"
@@ -989,11 +979,11 @@ func outstandingToolCalls(ctx context.Context, sq *store.ScopedQueries, conv str
 		}
 		if len(outstanding) == 0 {
 			// All calls for this assistant message have results — not a suspended state.
-			return nil, "", nil
+			return nil, nil
 		}
-		return outstanding, m.ID, nil
+		return outstanding, nil
 	}
-	return nil, "", nil
+	return nil, nil
 }
 
 // isTurnComplete reports whether the turn for the given conversation has already
@@ -1423,7 +1413,7 @@ func (h *Harness) Resolve(ctx context.Context, convID, callID string, approved b
 
 		defer func() {
 			if r := recover(); r != nil {
-				h.logger.Error("harness: resume turn panicked", "conversationId", conv, "callId", callID, "panic", r)
+				h.logger.Error("harness: resume turn panicked", "conversationId", conv, "callId", callID, "panic", sanitizePanic(r))
 				h.bus.Publish(principal.UserID, events.Event{
 					Type: "turn.failed",
 					Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
@@ -1540,7 +1530,7 @@ func (h *Harness) expireCallAndMaybeAbandon(
 		}()
 		defer func() {
 			if r := recover(); r != nil {
-				h.logger.Error("harness: expiry resume panicked", "conversationId", conv, "callId", callID, "panic", r)
+				h.logger.Error("harness: expiry resume panicked", "conversationId", conv, "callId", callID, "panic", sanitizePanic(r))
 				h.bus.Publish(principal.UserID, events.Event{
 					Type: "turn.failed",
 					Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
@@ -1670,7 +1660,7 @@ func (h *Harness) SweepExpiredConfirmations(ctx context.Context) (int, error) {
 			}()
 			defer func() {
 				if r := recover(); r != nil {
-					h.logger.Error("harness: sweep expiry resume panicked", "conversationId", conv, "panic", r)
+					h.logger.Error("harness: sweep expiry resume panicked", "conversationId", conv, "panic", sanitizePanic(r))
 					h.bus.Publish(principal.UserID, events.Event{
 						Type: "turn.failed",
 						Data: TurnFailedPayload{ConversationID: conv, Code: "infrastructure"},
@@ -1736,11 +1726,14 @@ func (h *Harness) persistToolError(
 
 // persistAssistantMessage inserts the assistant reply into the messages table
 // and returns the new message ID. toolCallsJSON is the JSON array string for the
-// tool_calls column, or "" if the message has no tool calls.
+// tool_calls column, or "" if the message has no tool calls. finishReason is the
+// value to record in the finish_reason column: "tool_calls" for a tool-call round,
+// "stop" for a final text reply, or another value for synthetic terminal messages
+// (e.g. "step_cap", "context_length").
 func persistAssistantMessage(
 	ctx context.Context,
 	sq *store.ScopedQueries,
-	conv, content, toolCallsJSON string,
+	conv, content, toolCallsJSON, finishReason string,
 ) (string, error) {
 	msgID := generateID()
 	_, err := sq.InsertMessage(ctx, store.InsertMessageParams{
@@ -1749,7 +1742,7 @@ func persistAssistantMessage(
 		Role:           "assistant",
 		Content:        content,
 		ToolCalls:      toolCallsJSON,
-		FinishReason:   "stop",
+		FinishReason:   finishReason,
 	})
 	if err != nil {
 		return "", err
@@ -1777,6 +1770,22 @@ func riskTierString(r capability.RiskTier) string {
 // field of a ToolStartedPayload. Longer JSON is truncated with "…".
 const maxArgsSummaryBytes = 256
 
+// truncateOnRuneBoundary returns s capped at limit bytes, backing up to the
+// start of a UTF-8 rune so a multi-byte rune is never split (a raw byte cut can
+// produce ill-formed UTF-8), and appending "…" when truncation occurs. Strings
+// already within the cap are returned unchanged.
+func truncateOnRuneBoundary(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	// Back up from the byte limit until we land on the start of a rune.
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
 // argsSummary returns a compact JSON summary of the given raw arguments, truncated
 // to maxArgsSummaryBytes on a valid UTF-8 rune boundary. Truncating at a raw byte
 // offset can split a multi-byte rune and produce ill-formed UTF-8, which would
@@ -1785,16 +1794,7 @@ func argsSummary(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	s := string(raw)
-	if len(s) <= maxArgsSummaryBytes {
-		return s
-	}
-	// Back up from the byte limit until we land on the start of a rune.
-	cut := maxArgsSummaryBytes
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "…"
+	return truncateOnRuneBoundary(string(raw), maxArgsSummaryBytes)
 }
 
 // isToolResultUniqueViolation reports whether err is a UNIQUE constraint
@@ -1805,4 +1805,18 @@ func argsSummary(raw json.RawMessage) string {
 func isToolResultUniqueViolation(err error) bool {
 	var sqliteErr sqlite3.Error
 	return errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
+}
+
+// maxPanicMsgBytes is the maximum number of bytes from a panic value's string
+// representation that are logged. Mirrors the maxArgsSummaryBytes cap used for
+// tool arguments, preventing unbounded sensitive data from appearing in logs.
+const maxPanicMsgBytes = 256
+
+// sanitizePanic returns a bounded, type-tagged string representation of a
+// recovered panic value. It logs only the dynamic type and a truncated message
+// string (capped at maxPanicMsgBytes), so sensitive tool arguments or upstream
+// error strings embedded in the panic value cannot reach the log sink unbounded.
+func sanitizePanic(r any) string {
+	msg := truncateOnRuneBoundary(fmt.Sprintf("%v", r), maxPanicMsgBytes)
+	return fmt.Sprintf("%T: %s", r, msg)
 }
