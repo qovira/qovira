@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,14 +43,44 @@ func newHTTPClient() *http.Client {
 //	https://h/v1/  → https://h/v1
 //
 // The function validates that the URL has both a scheme and a host, returning
-// an error when either is absent.
+// an error when either is absent. It rejects any scheme other than http/https
+// and any URL carrying embedded userinfo (credentials), without echoing the
+// raw URL or any userinfo into the returned error string.
 func v1BaseURL(rawBase string) (*url.URL, error) {
 	u, err := url.Parse(rawBase)
 	if err != nil {
-		return nil, fmt.Errorf("gateway: parse base URL %q: %w", rawBase, err)
+		// Do not include rawBase or the url.Error (which re-embeds the raw URL)
+		// in the message: a caller-supplied URL may contain embedded credentials
+		// that must not reach error strings or logs. Extract only the Op/Err
+		// fields that are safe to expose.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return nil, fmt.Errorf("gateway: base URL could not be parsed: %w", ue.Err)
+		}
+		return nil, fmt.Errorf("gateway: base URL could not be parsed")
 	}
+
+	// Reject userinfo FIRST, before any error that would echo the raw URL or
+	// the scheme. Credentials embedded in URLs must never reach error strings.
+	if u.User != nil {
+		return nil, fmt.Errorf("gateway: base URL must not contain userinfo (credentials in URLs are not allowed)")
+	}
+
 	if u.Scheme == "" || u.Host == "" {
-		return nil, fmt.Errorf("gateway: base URL %q missing scheme or host", rawBase)
+		// Don't echo rawBase: a scheme-confused input (e.g. "user:pass@host"
+		// parses with no userinfo and an empty host) could otherwise leak
+		// credentials into the error string.
+		return nil, fmt.Errorf("gateway: base URL must include a scheme and host")
+	}
+
+	// Reject any scheme other than http/https. url.Parse lower-cases the
+	// scheme, so a direct comparison suffices. The scheme itself is safe to
+	// include in the error — it cannot carry a password.
+	switch u.Scheme {
+	case "http", "https":
+		// accepted
+	default:
+		return nil, fmt.Errorf("gateway: base URL has unsupported scheme %q (only http/https allowed)", u.Scheme)
 	}
 
 	// Normalise the path: strip trailing slash, then ensure /v1 suffix.
@@ -143,4 +174,16 @@ func (g *Gateway) getJSON(ctx context.Context, endpointURL, apiKey string) (*htt
 func drainClose(rc io.ReadCloser) {
 	_, _ = io.Copy(io.Discard, rc)
 	_ = rc.Close()
+}
+
+// errBodyLimit is the maximum number of bytes read from a non-2xx response
+// body when constructing an error. It matches the cap used in dialChatResolved
+// so that probe and chat paths cannot drift independently.
+const errBodyLimit = 8 << 10 // 8 KiB
+
+// readErrBody reads up to errBodyLimit bytes from rc and returns them.
+// It does not close rc; the caller is responsible for closing the body.
+func readErrBody(rc io.ReadCloser) []byte {
+	b, _ := io.ReadAll(io.LimitReader(rc, errBodyLimit))
+	return b
 }

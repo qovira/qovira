@@ -222,11 +222,11 @@ func NewScriptedChatterFromFile(path string) (*ScriptedChatter, error) {
 func (sc *ScriptedChatter) Chat(ctx context.Context, req ChatRequest) (iter.Seq2[Chunk, error], error) {
 	chunks := sc.selectChunks(req)
 	seq := func(yield func(Chunk, error) bool) {
-		for _, sc2 := range chunks {
+		for _, sc := range chunks {
 			// Honour DelayMs before yielding — this lets a consumer observe a
 			// turn mid-stream (e.g. Playwright checking SSE events mid-turn).
-			if sc2.DelayMs > 0 {
-				delay := time.Duration(sc2.DelayMs) * time.Millisecond
+			if sc.DelayMs > 0 {
+				delay := time.Duration(sc.DelayMs) * time.Millisecond
 				select {
 				case <-ctx.Done():
 					yield(Chunk{}, ctx.Err())
@@ -242,12 +242,12 @@ func (sc *ScriptedChatter) Chat(ctx context.Context, req ChatRequest) (iter.Seq2
 			default:
 			}
 
-			chunk, err := toChunk(sc2, req.Messages)
+			out, err := toChunk(sc, req.Messages)
 			if err != nil {
 				yield(Chunk{}, err)
 				return
 			}
-			if !yield(chunk, nil) {
+			if !yield(out, nil) {
 				return
 			}
 		}
@@ -329,13 +329,13 @@ func matchesRule(m scriptMatch, userMsg string) bool {
 // msgs is the full ChatRequest.Messages slice used to resolve $fromResult
 // references in tool call arguments.  A resolution failure is returned as an
 // error; the caller must stop iteration and surface it.
-func toChunk(sc scriptChunk, msgs []Message) (Chunk, error) {
-	if sc.ToolCall != nil {
-		callID := sc.ToolCall.ID
+func toChunk(chunk scriptChunk, msgs []Message) (Chunk, error) {
+	if chunk.ToolCall != nil {
+		callID := chunk.ToolCall.ID
 		if callID == "" {
 			callID = id.New()
 		}
-		args := sc.ToolCall.Arguments
+		args := chunk.ToolCall.Arguments
 		if args == nil {
 			args = json.RawMessage(`{}`)
 		}
@@ -348,20 +348,22 @@ func toChunk(sc scriptChunk, msgs []Message) (Chunk, error) {
 		return Chunk{
 			ToolCall: &ToolCall{
 				ID:        callID,
-				Name:      sc.ToolCall.Name,
+				Name:      chunk.ToolCall.Name,
 				Arguments: resolved,
 			},
 		}, nil
 	}
 	return Chunk{
-		TextDelta: sc.TextDelta,
-		Done:      sc.Done,
+		TextDelta: chunk.TextDelta,
+		Done:      chunk.Done,
 	}, nil
 }
 
 // resolveArguments walks the raw JSON arguments, replaces any $fromResult
 // marker objects with the resolved value from msgs, and re-marshals the result.
-// Arguments with no $fromResult markers are returned byte-equivalent.
+// Arguments with no $fromResult markers are semantically equivalent to the
+// input — object keys may be reordered and whitespace normalised by the
+// decode-and-re-marshal round-trip, but all values are preserved faithfully.
 func resolveArguments(args json.RawMessage, msgs []Message) (json.RawMessage, error) {
 	// Unmarshal into any so we can walk and mutate the tree. UseNumber keeps
 	// numeric literals as json.Number so they re-marshal without float64

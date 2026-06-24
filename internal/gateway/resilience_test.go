@@ -12,7 +12,7 @@ package gateway
 // Goroutine leak prevention:
 //   - Every test uses t.Cleanup(srv.Close) so the httptest server's goroutines
 //     drain before the test exits.
-//   - The streaming iterator always terminates because dialChat derives a
+//   - The streaming iterator always terminates because dialChatResolved derives a
 //     cancellable context that is cancelled on every exit path of the consumer.
 
 import (

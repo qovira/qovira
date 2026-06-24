@@ -3,6 +3,7 @@ package gateway_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -381,6 +382,121 @@ func TestParseSSE_MalformedJSONInline(t *testing.T) {
 	}
 	if !errors.Is(err, gateway.ErrMalformedStream) {
 		t.Errorf("error %v does not wrap ErrMalformedStream", err)
+	}
+}
+
+// ── GW1 #1: Zero-arg tool call yields valid JSON arguments ──────────────────
+
+// TestParseSSE_ZeroArgToolCall verifies that a tool call whose argument
+// fragments are all empty strings (zero-param tool) emits Arguments that
+// round-trips through json.Marshal rather than the invalid json.RawMessage("").
+func TestParseSSE_ZeroArgToolCall(t *testing.T) {
+	t.Parallel()
+
+	// A minimal stream: the function has no arguments (empty string fragment).
+	const ssePayload = "" +
+		`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_z","type":"function","function":{"name":"noop","arguments":""}}]},"finish_reason":null}]}` + "\n\n" +
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n" +
+		"data: [DONE]\n"
+
+	chunks, err := gateway.ParseSSE(strings.NewReader(ssePayload))
+	if err != nil {
+		t.Fatalf("ParseSSE: unexpected error: %v", err)
+	}
+
+	var tool *gateway.ToolCall
+	for _, c := range chunks {
+		if c.ToolCall != nil {
+			tool = c.ToolCall
+		}
+	}
+	if tool == nil {
+		t.Fatal("no ToolCall emitted")
+	}
+
+	// Arguments must be valid JSON (at minimum "{}") so json.Marshal round-trips.
+	if _, jsonErr := json.Marshal(tool); jsonErr != nil {
+		t.Errorf("json.Marshal of ToolCall containing Arguments %q failed: %v", string(tool.Arguments), jsonErr)
+	}
+	// Specifically, the Arguments must be a valid JSON value — not an empty string.
+	var dummy any
+	if jsonErr := json.Unmarshal(tool.Arguments, &dummy); jsonErr != nil {
+		t.Errorf("json.Unmarshal(Arguments=%q) failed: %v", string(tool.Arguments), jsonErr)
+	}
+	// The canonical value for a zero-arg tool is the empty object.
+	if string(tool.Arguments) != `{}` {
+		t.Errorf("Arguments = %q, want %q", string(tool.Arguments), `{}`)
+	}
+}
+
+// ── GW1 #3: Aggregate args-bytes cap and index-count cap ─────────────────────
+
+// TestParseSSE_ArgsCapExceeded verifies that streaming a total argument payload
+// that exceeds the aggregate args-bytes cap returns an error wrapping
+// ErrMalformedStream instead of buffering unboundedly.
+//
+// Each individual SSE line stays small (under the per-line 4 MiB cap) but
+// many lines accumulate a total that exceeds any sane per-stream aggregate cap.
+func TestParseSSE_ArgsCapExceeded(t *testing.T) {
+	t.Parallel()
+
+	// Emit 10 MiB total in 1 KiB fragments across 10 240 SSE lines.
+	// Any reasonable aggregate cap (e.g. 8 MiB) will be exceeded well
+	// before all lines are consumed.
+	const fragSize = 1024
+	const numFrags = 10 * 1024 // 10 MiB total
+	frag := strings.Repeat("x", fragSize)
+
+	var b strings.Builder
+	// First fragment establishes the tool call (id + name).
+	fmt.Fprintf(&b,
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c0\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"%s\"}}]},\"finish_reason\":null}]}\n\n",
+		frag,
+	)
+	// Subsequent fragments accumulate argument bytes.
+	for range numFrags - 1 {
+		fmt.Fprintf(&b,
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"%s\"}}]},\"finish_reason\":null}]}\n\n",
+			frag,
+		)
+	}
+	b.WriteString(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n")
+	b.WriteString("data: [DONE]\n")
+
+	_, err := gateway.ParseSSE(strings.NewReader(b.String()))
+	if err == nil {
+		t.Fatal("ParseSSE: expected error for oversized args, got nil")
+	}
+	if !errors.Is(err, gateway.ErrMalformedStream) {
+		t.Errorf("error = %v, want wrapping ErrMalformedStream", err)
+	}
+}
+
+// TestParseSSE_IndexCountCapExceeded verifies that a stream with more distinct
+// tool-call indices than maxSSEToolCallIndices returns an error wrapping
+// ErrMalformedStream.
+func TestParseSSE_IndexCountCapExceeded(t *testing.T) {
+	t.Parallel()
+
+	// Generate a stream with far more distinct tool-call indices than any
+	// reasonable cap. Use 200 indices — well above any expected cap of 64 or 128.
+	const numIndices = 200
+	var b strings.Builder
+	for i := range numIndices {
+		fmt.Fprintf(&b,
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":%d,\"id\":\"c%d\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
+			i, i,
+		)
+	}
+	b.WriteString(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n")
+	b.WriteString("data: [DONE]\n")
+
+	_, err := gateway.ParseSSE(strings.NewReader(b.String()))
+	if err == nil {
+		t.Fatal("ParseSSE: expected error for too many tool-call indices, got nil")
+	}
+	if !errors.Is(err, gateway.ErrMalformedStream) {
+		t.Errorf("error = %v, want wrapping ErrMalformedStream", err)
 	}
 }
 

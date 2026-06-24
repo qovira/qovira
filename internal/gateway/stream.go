@@ -23,6 +23,19 @@ var ErrMalformedStream = errors.New("gateway: malformed SSE stream")
 // stream still can't force unbounded buffering.
 const maxSSELineBytes = 4 << 20 // 4 MiB
 
+// maxSSETotalArgsBytes is the aggregate cap on the total bytes written across
+// ALL in-flight tool-call argument builders in a single stream. Each individual
+// line is already capped at maxSSELineBytes, but a hostile or malfunctioning
+// upstream that keeps making progress within IdleTimeout can drive unbounded
+// memory via many small lines. This cap limits the total to 8 MiB — generous
+// for any real model output, but bounded against adversarial streams.
+const maxSSETotalArgsBytes = 8 << 20 // 8 MiB
+
+// maxSSEToolCallIndices is the maximum number of distinct tool-call indices
+// allowed in a single stream. The inFlight map and order slice are bounded by
+// this constant so a hostile stream cannot grow them without limit.
+const maxSSEToolCallIndices = 128
+
 // Chunk is one unit of streamed output from the model. Exactly one of
 // TextDelta, ToolCall, or Done is meaningful per chunk — they are never set
 // simultaneously.
@@ -120,6 +133,10 @@ func streamSSE(r io.Reader, emit func(Chunk) bool) error {
 	inFlight := make(map[int]*inFlightToolCall)
 	// order preserves the first-seen order of tool-call indices for deterministic output.
 	var order []int
+	// totalArgsBytes tracks the aggregate bytes written across all in-flight
+	// argument builders. It is checked against maxSSETotalArgsBytes on every
+	// fragment write so a hostile stream cannot force unbounded allocation.
+	var totalArgsBytes int
 
 	var finalUsage *sseUsage
 
@@ -178,6 +195,11 @@ func streamSSE(r io.Reader, emit func(Chunk) bool) error {
 			for _, tc := range delta.ToolCalls {
 				ifl, exists := inFlight[tc.Index]
 				if !exists {
+					// Cap the number of distinct tool-call indices before
+					// allocating a new assembler.
+					if len(inFlight) >= maxSSEToolCallIndices {
+						return fmt.Errorf("%w: too many tool-call indices (limit %d)", ErrMalformedStream, maxSSEToolCallIndices)
+					}
 					ifl = &inFlightToolCall{}
 					inFlight[tc.Index] = ifl
 					order = append(order, tc.Index)
@@ -189,7 +211,14 @@ func streamSSE(r io.Reader, emit func(Chunk) bool) error {
 				if tc.Function.Name != "" {
 					ifl.name = tc.Function.Name
 				}
-				ifl.args.WriteString(tc.Function.Arguments)
+				// Enforce the aggregate args-bytes cap before writing.
+				if frag := tc.Function.Arguments; frag != "" {
+					totalArgsBytes += len(frag)
+					if totalArgsBytes > maxSSETotalArgsBytes {
+						return fmt.Errorf("%w: tool-call arguments exceed aggregate limit of %d bytes", ErrMalformedStream, maxSSETotalArgsBytes)
+					}
+					ifl.args.WriteString(frag)
+				}
 			}
 
 			// finish_reason signals the end of the choice sequence. Flush all
@@ -198,19 +227,33 @@ func streamSSE(r io.Reader, emit func(Chunk) bool) error {
 			if choice.FinishReason != nil {
 				for _, idx := range order {
 					ifl := inFlight[idx]
+					// Normalise empty argument strings to the valid JSON empty
+					// object "{}". An empty json.RawMessage("") is not valid
+					// JSON and would cause json.Marshal of any containing value
+					// to fail with "unexpected end of JSON input".
+					args := ifl.args.String()
+					var rawArgs json.RawMessage
+					if args == "" {
+						rawArgs = json.RawMessage("{}")
+					} else {
+						rawArgs = json.RawMessage(args)
+					}
 					tc := &ToolCall{
 						ID:        ifl.id,
 						Name:      ifl.name,
-						Arguments: json.RawMessage(ifl.args.String()),
+						Arguments: rawArgs,
 					}
 					if !emit(Chunk{ToolCall: tc}) {
 						return nil
 					}
 				}
 				// Clear the in-flight map so a second finish_reason (unlikely but
-				// tolerated) doesn't double-emit.
+				// tolerated) doesn't double-emit. Reset the byte counter so the
+				// cap reflects currently-buffered allocation, not a cumulative
+				// total across multiple finish_reason rounds.
 				clear(inFlight)
 				order = order[:0]
+				totalArgsBytes = 0
 			}
 		}
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 )
 
@@ -93,8 +92,7 @@ func (g *Gateway) Probe(ctx context.Context, role Role) ProbeResult {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Non-2xx: classify and record the error; do not proceed to step 2.
-		body, _ := io.ReadAll(resp.Body)
-		result.Err = ClassifyResponse(resp.StatusCode, resp.Header, body)
+		result.Err = ClassifyResponse(resp.StatusCode, resp.Header, readErrBody(resp.Body))
 		return result
 	}
 
@@ -150,8 +148,7 @@ func (g *Gateway) Probe(ctx context.Context, role Role) ProbeResult {
 	defer drainClose(chatResp.Body)
 
 	if chatResp.StatusCode < 200 || chatResp.StatusCode >= 300 {
-		rawBody, _ := io.ReadAll(chatResp.Body)
-		result.Err = ClassifyResponse(chatResp.StatusCode, chatResp.Header, rawBody)
+		result.Err = ClassifyResponse(chatResp.StatusCode, chatResp.Header, readErrBody(chatResp.Body))
 		return result
 	}
 

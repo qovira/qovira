@@ -79,36 +79,23 @@ type dialResult struct {
 	cancel context.CancelFunc
 }
 
-// dialChat is the single retryable unit: resolve → build wire body → POST →
-// classify non-2xx. On a 2xx response it returns a dialResult whose body must
-// be closed (and whose cancel must be called) by the caller.
+// dialChatResolved is the single retryable unit: POST a pre-built wire body to
+// a pre-resolved endpoint → classify non-2xx. On a 2xx response it returns a
+// dialResult whose body must be closed (and whose cancel must be called) by
+// the caller.
 //
-// dialChat derives its own child context from ctx so that each attempt can be
-// independently cancelled; ctx cancellation always propagates.
-func (g *Gateway) dialChat(ctx context.Context, req ChatRequest) (dialResult, error) {
+// resolve and buildWireRequest are NOT called here — they are hoisted to the
+// top of chatWithResilience so the 6 settings reads and the wire-body
+// allocation happen exactly once per Chat call, not once per retry attempt.
+//
+// dialChatResolved derives its own child context from ctx so that each attempt
+// can be independently cancelled; ctx cancellation always propagates.
+func (g *Gateway) dialChatResolved(ctx context.Context, endpointURL string, resolved Resolved, wireBody []byte) (dialResult, error) {
 	// Derive a cancellable child context so per-attempt timeouts can be managed
 	// by the resilience layer without affecting the parent.
 	attemptCtx, cancel := context.WithCancel(ctx)
 
-	resolved, err := g.resolve(attemptCtx, RoleChat)
-	if err != nil {
-		cancel()
-		return dialResult{}, err
-	}
-
-	endpointURL, err := chatEndpointURL(resolved.BaseURL)
-	if err != nil {
-		cancel()
-		return dialResult{}, err
-	}
-
-	body, err := buildWireRequest(req, resolved.Model)
-	if err != nil {
-		cancel()
-		return dialResult{}, err
-	}
-
-	resp, err := g.postJSON(attemptCtx, endpointURL, resolved.APIKey, body) //nolint:bodyclose // Non-2xx path closes via drainClose below; 2xx body is owned by dialResult and closed by streamWithTimeouts.
+	resp, err := g.postJSON(attemptCtx, endpointURL, resolved.APIKey, wireBody) //nolint:bodyclose // Non-2xx path closes via drainClose below; 2xx body is owned by dialResult and closed by streamWithTimeouts.
 	if err != nil {
 		cancel()
 		return dialResult{}, err
@@ -116,7 +103,7 @@ func (g *Gateway) dialChat(ctx context.Context, req ChatRequest) (dialResult, er
 
 	// Non-2xx: classify and close immediately.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		limitedBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		limitedBody := readErrBody(resp.Body)
 		drainClose(resp.Body)
 		cancel()
 
@@ -200,9 +187,9 @@ func isLegalUnavailable(err error) bool {
 	return errors.As(err, &le)
 }
 
-// legalUnavailableError is a private sentinel returned by dialChat when the
-// upstream responds with 451. It wraps ErrUpstream so that callers who don't
-// know about 451 still see an upstream error, and errors.As allows the
+// legalUnavailableError is a private sentinel returned by dialChatResolved when
+// the upstream responds with 451. It wraps ErrUpstream so that callers who
+// don't know about 451 still see an upstream error, and errors.As allows the
 // resilience layer to apply the retryLegalUnavailable policy.
 type legalUnavailableError struct{}
 
@@ -268,6 +255,29 @@ func (g *Gateway) chatWithResilience(
 		return nil, err
 	}
 
+	// Resolve the endpoint coordinates once. This covers the 6 settings reads
+	// (primary.baseURL, primary.apiKey, primary.model + 3 role overrides) that
+	// dialChat previously issued on every retry attempt. The "changes take effect
+	// on the next Chat call" contract refers to separate Chat invocations, not
+	// to re-resolution mid-retry within a single call.
+	resolved, err := g.resolve(ctx, RoleChat)
+	if err != nil {
+		return nil, err
+	}
+
+	endpointURL, err := chatEndpointURL(resolved.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the wire body once. The payload is identical across all retry
+	// attempts for a given resolved model, so allocating and marshalling it
+	// once and reusing the []byte across retries is both correct and cheaper.
+	wireBody, err := buildWireRequest(req, resolved.Model)
+	if err != nil {
+		return nil, err
+	}
+
 	var lastErr error
 	for attempt := 0; attempt < cfg.MaxAttempts; attempt++ {
 		// Check context before each attempt.
@@ -275,7 +285,7 @@ func (g *Gateway) chatWithResilience(
 			return nil, fmt.Errorf("%w: %w", ErrTimeout, ctx.Err())
 		}
 
-		dr, dialErr := g.dialChat(ctx, req)
+		dr, dialErr := g.dialChatResolved(ctx, endpointURL, resolved, wireBody)
 		if dialErr == nil {
 			// 2xx: wrap the body in the timeout-aware streaming iterator.
 			seq := g.streamWithTimeouts(ctx, dr, cfg)
