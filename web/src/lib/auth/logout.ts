@@ -20,15 +20,22 @@ import { notifyTearDown, resetSession } from "$lib/stores/session.svelte.js";
  * we still complete the client-side logout).
  */
 export async function logout(): Promise<void> {
-  // Best-effort: ignore errors (expired/already-revoked sessions return 401).
-  await Api.DELETE("/auth/session", {});
+  // Best-effort network call — ignore all errors (expired/already-revoked
+  // sessions return 401 as a non-throwing ProblemError; genuine network
+  // failures throw a TypeError). The finally block guarantees local teardown
+  // runs unconditionally, even if the DELETE never reaches the server.
+  try {
+    await Api.DELETE("/auth/session", {});
+  } catch {
+    // Network failures (fetch rejected) — swallow and proceed with local teardown.
+  } finally {
+    // Tear down SSE connection (no-op until SSE slice wires the seam).
+    notifyTearDown();
 
-  // Tear down SSE connection (no-op until SSE slice wires the seam).
-  notifyTearDown();
+    // Clear client-side session state.
+    resetSession();
 
-  // Clear client-side session state.
-  resetSession();
-
-  // Return to login page.
-  await goto("/login");
+    // Return to login page.
+    await goto("/login");
+  }
 }

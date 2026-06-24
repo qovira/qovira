@@ -202,6 +202,55 @@ describe("confirmationResolved()", () => {
     flushSync();
     expect(getConfirmations()).toHaveLength(0);
   });
+
+  it("terminal-state guard: does NOT transition a resolved entry back to pending or overwrite decision", () => {
+    // A confirmation that has already been resolved must not be overwritten by a
+    // second call (e.g. a duplicate SSE event or a race condition).
+    confirmationRequired({
+      conversationId: "c1",
+      callId: "call-guard",
+      name: "delete_reminder",
+      risk: "destructive",
+      args: {},
+      expiresAt: "2030-01-01T00:00:00Z",
+    });
+    flushSync();
+
+    confirmationResolved("call-guard", "approve");
+    flushSync();
+
+    // Second resolve with a DIFFERENT decision must be ignored — terminal guard.
+    confirmationResolved("call-guard", "deny");
+    flushSync();
+
+    const entry = getConfirmations()[0] as ResolvedConfirmation;
+    expect(entry.state).toBe("resolved");
+    // The first decision (approve) must be preserved, not overwritten by deny.
+    expect(entry.decision).toBe("approve");
+  });
+
+  it("terminal-state guard: does NOT transition an expired entry via confirmationResolved", () => {
+    // An expired confirmation cannot be resolved — the guard rejects non-pending states.
+    confirmationRequired({
+      conversationId: "c1",
+      callId: "call-guard-exp",
+      name: "delete_reminder",
+      risk: "destructive",
+      args: {},
+      expiresAt: "2020-01-01T00:00:00Z",
+    });
+    flushSync();
+    confirmationExpired("call-guard-exp");
+    flushSync();
+
+    // Attempt to resolve an already-expired entry — must be a no-op.
+    confirmationResolved("call-guard-exp", "approve");
+    flushSync();
+
+    const entry = getConfirmations()[0] as ExpiredConfirmation;
+    // State must remain expired, not transition to resolved.
+    expect(entry.state).toBe("expired");
+  });
 });
 
 // ---------------------------------------------------------------------------

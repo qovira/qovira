@@ -180,12 +180,23 @@ async function reconcile(): Promise<void> {
       const query = cursor !== null ? { cursor } : {};
       const result = await Api.GET("/reminders", { params: { query } });
 
-      // Guard: when Api.GET returns a problem+json error it does NOT throw — it
-      // returns { data: undefined, error }. Treat this like a network throw:
-      // log and leave the reminders store untouched so a transient server error
-      // during (re)connect reconcile never silently clears every reminder.
-      if (result.error !== undefined) {
-        console.warn("[sse] reconcile: reminders page error", result.error);
+      // openapi-fetch has two non-2xx paths (index.mjs:179-201):
+      //
+      //  A. Content-Length: 0 (+ no chunked Transfer-Encoding) → early-return
+      //     { error: undefined, response }. This is the normal server-returned
+      //     empty-body case (e.g. a 500/429 whose body is truly zero bytes).
+      //     Only the `!result.response.ok` clause below catches this.
+      //
+      //  B. Any other non-2xx (Content-Length absent or non-zero) → reads the
+      //     body via response.text() → error is at minimum "" (never undefined).
+      //     The `result.error !== undefined` clause catches this case, which
+      //     also covers problem+json errors (thrown by the middleware and wrapped
+      //     into { error: ProblemError } by the `wrap()` helper in api/index.ts).
+      //
+      // Both paths must bail so a transient server error never silently wipes
+      // the reminders store. Guard on BOTH to cover both openapi-fetch branches.
+      if (result.error !== undefined || !result.response.ok) {
+        console.warn("[sse] reconcile: reminders page error", result.error ?? result.response.status);
         return;
       }
 

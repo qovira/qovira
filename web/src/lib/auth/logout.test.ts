@@ -86,4 +86,35 @@ describe("logout", () => {
     expect(resetSession).toHaveBeenCalledTimes(1);
     expect(goto).toHaveBeenCalledWith("/login");
   });
+
+  it("completes the client-side teardown (notifyTearDown + resetSession + goto) even when the DELETE network call throws", async () => {
+    // Simulate a hard network failure — fetch rejects entirely (offline / DNS failure).
+    // Without try/finally, the teardown steps after the await would be skipped,
+    // leaving the SSE connection open and the session store in authenticated state.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))),
+    );
+
+    // logout() should not propagate the network throw — it wraps the call in try/finally.
+    await logout();
+
+    // All local teardown steps must have run despite the network throw.
+    expect(notifyTearDown).toHaveBeenCalledTimes(1);
+    expect(resetSession).toHaveBeenCalledTimes(1);
+    expect(goto).toHaveBeenCalledWith("/login");
+  });
+
+  it("network throw: teardown order is preserved — notifyTearDown fires before resetSession", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new TypeError("Network unavailable"))),
+    );
+
+    await logout();
+
+    const tearDownOrder = notifyTearDown.mock.invocationCallOrder[0] ?? 0;
+    const resetOrder = resetSession.mock.invocationCallOrder[0] ?? 0;
+    expect(tearDownOrder).toBeLessThan(resetOrder);
+  });
 });

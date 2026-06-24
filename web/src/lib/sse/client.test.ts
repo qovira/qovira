@@ -58,9 +58,24 @@ describe("nextBackoff()", () => {
   });
 
   it("caps at BACKOFF_MAX_MS (30 000ms) — jitter is applied AFTER clamping", () => {
-    // After fix: clamp THEN jitter → result ≤ 30 000ms, NOT 36 000ms.
+    // Input 15 000 (doubled = 30 000, exactly at the ceiling) exercises the
+    // jitter band that straddles the ceiling: jitter ∈ [0.8, 1.2] produces
+    // values in [24 000, 36 000] before clamping, so both sub-ceiling and
+    // above-ceiling samples occur within the 50 iterations.
+    //
+    // With jitter-THEN-clamp (correct, current impl):
+    //   Math.min(30000 * jitter, 30000) → [24 000, 30 000] — always ≤ 30 000 ✓
+    //
+    // With clamp-THEN-jitter (wrong order):
+    //   Math.min(30000, 30000) = 30000; then 30000 * jitter → up to 36 000 ✗
+    //   The `toBeLessThanOrEqual(30_000)` assertion would catch this.
+    //
+    // (The old input 30 000 also discriminated at the upper bound, but always
+    // produced exactly 30 000 for the correct impl since doubled=60 000 > ceiling
+    // for every jitter value — so all 50 iterations landed at the ceiling,
+    // leaving the jitter band below the ceiling completely unexercised.)
     for (let i = 0; i < 50; i++) {
-      const result = nextBackoff(30_000);
+      const result = nextBackoff(15_000);
       expect(result).toBeLessThanOrEqual(30_000);
       expect(result).toBeGreaterThanOrEqual(24_000);
     }
@@ -410,21 +425,37 @@ describe("makeHandlers() — onReminderEvent dispatch", () => {
     expect(notifyReminderFiredMock).not.toHaveBeenCalled();
   });
 
-  it("routes reminder.created to upsertReminder (regression guard)", () => {
-    const reminder = { id: "rem-1", userId: "u1", title: "T", dueAt: "2030-01-01T00:00:00Z", status: "active" };
+  it("routes reminder.created to upsertReminder with the specific id rem-7 (regression guard)", () => {
+    const reminder = { id: "rem-7", userId: "u1", title: "T", dueAt: "2030-01-01T00:00:00Z", status: "active" };
     const handlers = makeHandlers();
     handlers.onReminderEvent("reminder.created", reminder);
     expect(upsertReminderMock).toHaveBeenCalledOnce();
-    expect(upsertReminderMock).toHaveBeenCalledWith(reminder);
+    // Concrete id check — must route rem-7 exactly, not any reminder.
+    expect(upsertReminderMock).toHaveBeenCalledWith(expect.objectContaining({ id: "rem-7" }));
     expect(notifyReminderFiredMock).not.toHaveBeenCalled();
   });
 
-  it("routes reminder.deleted to removeReminder (regression guard)", () => {
+  it("routes reminder.deleted to removeReminder with the specific id rem-7 (regression guard)", () => {
     const handlers = makeHandlers();
-    handlers.onReminderEvent("reminder.deleted", { id: "rem-1" });
+    handlers.onReminderEvent("reminder.deleted", { id: "rem-7" });
     expect(removeReminderMock).toHaveBeenCalledOnce();
-    expect(removeReminderMock).toHaveBeenCalledWith("rem-1");
+    // Concrete id check — must remove rem-7, not any id.
+    expect(removeReminderMock).toHaveBeenCalledWith("rem-7");
     expect(notifyReminderFiredMock).not.toHaveBeenCalled();
+  });
+
+  it("routes reminder.fired with specific reminderId rem-7 to notifyReminderFired", () => {
+    const handlers = makeHandlers();
+    handlers.onReminderEvent("reminder.fired", {
+      reminderId: "rem-7",
+      title: "Stand up meeting",
+      dueAt: "2030-03-15T09:00:00Z",
+      firedAt: "2030-03-15T09:00:01Z",
+    });
+    expect(notifyReminderFiredMock).toHaveBeenCalledOnce();
+    expect(notifyReminderFiredMock).toHaveBeenCalledWith(
+      expect.objectContaining({ reminderId: "rem-7", title: "Stand up meeting" }),
+    );
   });
 });
 
@@ -509,6 +540,115 @@ describe("makeHandlers() — onMessageCompleted conversation reconcile", () => {
 
     expect(finalizeStreamingMessageMock).not.toHaveBeenCalled();
     expect(setConversationHistoryMock).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// makeHandlers() — SSE race-window guard via real production handler
+//
+// The race window exists between the synchronous pivot of the active conversation
+// id and the resolution of the history fetch. During this window, residual SSE
+// events for the OLD conversation must be silently dropped by the guards in
+// makeHandlers() (the production handler factory). These tests exercise the
+// REAL makeHandlers() — not a hand-rolled stub — so they actually guard the
+// production code path for each event type.
+// ---------------------------------------------------------------------------
+
+describe("makeHandlers() — SSE event guards via real handler (race-window)", () => {
+  let applyStreamingDeltaMock: ReturnType<typeof vi.fn>;
+  let finalizeStreamingMsgMock: ReturnType<typeof vi.fn>;
+  let toolCallStartedMock: ReturnType<typeof vi.fn>;
+  let toolCallCompletedMock: ReturnType<typeof vi.fn>;
+  let toolCallFailedMock: ReturnType<typeof vi.fn>;
+  let confirmationRequiredMock: ReturnType<typeof vi.fn>;
+  let confirmationExpiredMock: ReturnType<typeof vi.fn>;
+  let getActiveConversationIdMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const convModule = await import("$lib/stores/conversation.svelte.js");
+    applyStreamingDeltaMock = convModule.applyStreamingDelta as ReturnType<typeof vi.fn>;
+    finalizeStreamingMsgMock = convModule.finalizeStreamingMessage as ReturnType<typeof vi.fn>;
+    getActiveConversationIdMock = convModule.getActiveConversationId as ReturnType<typeof vi.fn>;
+
+    const toolsModule = await import("$lib/stores/tool-calls.svelte.js");
+    toolCallStartedMock = toolsModule.toolCallStarted as ReturnType<typeof vi.fn>;
+    toolCallCompletedMock = toolsModule.toolCallCompleted as ReturnType<typeof vi.fn>;
+    toolCallFailedMock = toolsModule.toolCallFailed as ReturnType<typeof vi.fn>;
+
+    const confModule = await import("$lib/stores/confirmations.svelte.js");
+    confirmationRequiredMock = confModule.confirmationRequired as ReturnType<typeof vi.fn>;
+    confirmationExpiredMock = confModule.confirmationExpired as ReturnType<typeof vi.fn>;
+
+    // Default: "conv-new" is the currently active conversation.
+    getActiveConversationIdMock.mockReturnValue("conv-new");
+
+    applyStreamingDeltaMock.mockReset();
+    finalizeStreamingMsgMock.mockReset();
+    toolCallStartedMock.mockReset();
+    toolCallCompletedMock.mockReset();
+    toolCallFailedMock.mockReset();
+    confirmationRequiredMock.mockReset();
+    confirmationExpiredMock.mockReset();
+  });
+
+  afterEach(() => {
+    getActiveConversationIdMock.mockReturnValue(null);
+  });
+
+  it("onMessageDelta from a stale conversation does NOT call applyStreamingDelta", () => {
+    const handlers = makeHandlers();
+    // "conv-old" is the stale conversation; active is "conv-new".
+    handlers.onMessageDelta("conv-old", "stale text");
+    expect(applyStreamingDeltaMock).not.toHaveBeenCalled();
+  });
+
+  it("onMessageDelta from the active conversation DOES call applyStreamingDelta", () => {
+    const handlers = makeHandlers();
+    handlers.onMessageDelta("conv-new", "fresh text");
+    expect(applyStreamingDeltaMock).toHaveBeenCalledWith("fresh text");
+  });
+
+  it("onToolStarted from a stale conversation does NOT call toolCallStarted", () => {
+    const handlers = makeHandlers();
+    handlers.onToolStarted({
+      conversationId: "conv-old",
+      callId: "call-stale-1",
+      name: "list_reminders",
+      risk: "read",
+      argsSummary: "{}",
+    });
+    expect(toolCallStartedMock).not.toHaveBeenCalled();
+  });
+
+  it("onToolCompleted from a stale conversation does NOT call toolCallCompleted", () => {
+    const handlers = makeHandlers();
+    handlers.onToolCompleted("conv-old", "call-stale-1", { ok: true });
+    expect(toolCallCompletedMock).not.toHaveBeenCalled();
+  });
+
+  it("onToolFailed from a stale conversation does NOT call toolCallFailed", () => {
+    const handlers = makeHandlers();
+    handlers.onToolFailed("conv-old", "call-stale-1", "some error");
+    expect(toolCallFailedMock).not.toHaveBeenCalled();
+  });
+
+  it("onConfirmationRequired from a stale conversation does NOT call confirmationRequired", () => {
+    const handlers = makeHandlers();
+    handlers.onConfirmationRequired({
+      conversationId: "conv-old",
+      callId: "call-stale-c1",
+      name: "delete_reminder",
+      risk: "destructive",
+      args: {},
+      expiresAt: "2030-01-01T00:00:00Z",
+    });
+    expect(confirmationRequiredMock).not.toHaveBeenCalled();
+  });
+
+  it("onConfirmationExpired from a stale conversation does NOT call confirmationExpired", () => {
+    const handlers = makeHandlers();
+    handlers.onConfirmationExpired("conv-old", "call-stale-c1");
+    expect(confirmationExpiredMock).not.toHaveBeenCalled();
   });
 });
 
@@ -645,6 +785,117 @@ describe("reconcile() — reminders store is left untouched on server error (Fix
     }
 
     // setReminders must NOT have been called — the store is left as-is.
+    expect(setRemindersMock).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Production fix — reconcile() does NOT wipe reminders on empty-body non-2xx
+//
+// openapi-fetch 0.17.0 has TWO non-2xx code paths (index.mjs:179-201):
+//
+//   A. Content-Length: 0  →  early-return { error: undefined, response }
+//      (`error` is genuinely undefined; only the `!result.response.ok` guard catches this)
+//
+//   B. Content-Length absent/non-zero  →  error = await response.text() → ""
+//      (`error` is "" which is !== undefined; the existing `result.error !== undefined` guard catches this)
+//
+// These tests use `Content-Length: "0"` to force path A, so they exclusively
+// exercise the `!result.response.ok` clause. Without it they PASS; with it FAIL.
+//
+// Mutation verification (confirmed): removing ONLY `|| !result.response.ok`
+// from the guard while keeping `result.error !== undefined` makes these two
+// tests FAIL, because path A returns `{ error: undefined }` which the first
+// clause does not catch. Adding the header is what forces path A.
+// ---------------------------------------------------------------------------
+
+describe("reconcile() — empty-body 500 does NOT wipe reminders store", () => {
+  let setRemindersMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+
+    const remindersModule = await import("$lib/stores/reminders.svelte.js");
+    setRemindersMock = remindersModule.setReminders as ReturnType<typeof vi.fn>;
+    setRemindersMock.mockReset();
+  });
+
+  afterEach(async () => {
+    closeSseConnection();
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not call setReminders when /reminders returns a Content-Length:0 500 (openapi-fetch path A — error is undefined)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+        // SSE /events — open stream so reconcile is triggered.
+        if (url === "/events") {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("event: ping\ndata: \n\n"));
+              controller.close();
+            },
+          });
+          return Promise.resolve(
+            new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+          );
+        }
+
+        // /api/v1/reminders — Content-Length: 0 forces openapi-fetch's early-return
+        // branch (index.mjs:180-181): { error: undefined, response } where response.ok
+        // is false. Only the `!result.response.ok` guard catches this; result.error is
+        // undefined so the `result.error !== undefined` clause alone would miss it.
+        return Promise.resolve(new Response(null, { status: 500, headers: { "Content-Length": "0" } }));
+      }),
+    );
+
+    openSseConnection();
+
+    // Drain enough microtask turns for connection + reconcile attempt.
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve();
+    }
+
+    // setReminders must NOT have been called — the store is left as-is.
+    // Without `!result.response.ok`, this call would proceed and setReminders([])
+    // would wipe the local reminder list.
+    expect(setRemindersMock).not.toHaveBeenCalled();
+  });
+
+  it("does not call setReminders when /reminders returns a Content-Length:0 4xx (openapi-fetch path A — error is undefined)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+        if (url === "/events") {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("event: ping\ndata: \n\n"));
+              controller.close();
+            },
+          });
+          return Promise.resolve(
+            new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+          );
+        }
+
+        // 429 Too Many Requests with Content-Length: 0 — same path A as above.
+        return Promise.resolve(new Response(null, { status: 429, headers: { "Content-Length": "0" } }));
+      }),
+    );
+
+    openSseConnection();
+
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve();
+    }
+
     expect(setRemindersMock).not.toHaveBeenCalled();
   });
 });

@@ -72,4 +72,29 @@ describe("shouldCache", () => {
   it("returns false for cross-origin requests", () => {
     expect(shouldCache("https://cdn.example.com/some-asset.js", "GET", ORIGIN)).toBe(false);
   });
+
+  // --- branch: HEAD method is also cacheable ---
+  it("returns true for HEAD requests on app-shell assets (HEAD is a safe read-only method)", () => {
+    expect(shouldCache(`${ORIGIN}/`, "HEAD", ORIGIN)).toBe(true);
+  });
+
+  it("returns false for HEAD requests on /api/ paths", () => {
+    expect(shouldCache(`${ORIGIN}/api/v1/me`, "HEAD", ORIGIN)).toBe(false);
+  });
+
+  // --- branch: unparseable URL --- (the new URL() try/catch path)
+  it("returns false for an unparseable URL", () => {
+    expect(shouldCache("not a valid url at all", "GET", ORIGIN)).toBe(false);
+  });
+
+  // --- branch: no selfOrigin provided (fallback to parsed.origin) ---
+  // When selfOrigin is omitted, the function defaults to parsed.origin, so
+  // same-origin paths are always cacheable (no cross-origin rejection).
+  it("returns true when selfOrigin is omitted and the URL is same-origin", () => {
+    expect(shouldCache(`${ORIGIN}/index.html`, "GET")).toBe(true);
+  });
+
+  it("returns false when selfOrigin is omitted and the URL is an /api/ path", () => {
+    expect(shouldCache(`${ORIGIN}/api/v1/me`, "GET")).toBe(false);
+  });
 });

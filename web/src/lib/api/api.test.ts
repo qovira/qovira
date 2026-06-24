@@ -262,6 +262,48 @@ describe("problem+json parsing", () => {
     // The raw error (not a ProblemError) is in result.error
     expect(result.error).not.toBeInstanceOf(ProblemError);
   });
+
+  it("does NOT produce a ProblemError when Content-Type is problem+json but body is a valid JSON non-problem shape", async () => {
+    // A response with Content-Type: application/problem+json but a body that does
+    // NOT satisfy isProblemShape (missing required fields). The middleware must
+    // fall through to openapi-fetch's default handling rather than crashing or
+    // producing a malformed ProblemError.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ message: "oops", code: 500 }), {
+          status: 500,
+          headers: { "Content-Type": "application/problem+json" },
+        }),
+      ),
+    );
+
+    const result = await Api.GET("/me", {});
+    expect(result.data).toBeUndefined();
+    // The malformed problem+json body does not become a ProblemError — it falls
+    // through and openapi-fetch returns it as the generic `error` field.
+    expect(result.error).not.toBeInstanceOf(ProblemError);
+  });
+
+  it("does NOT produce a ProblemError when Content-Type is problem+json but body is empty / non-JSON", async () => {
+    // A null body with problem+json Content-Type. The qovira middleware detects
+    // the problem+json Content-Type and calls response.clone().json() to inspect
+    // the body. In this runtime (happy-dom) that throws a SyntaxError on a null
+    // body. Since wrap() only catches ProblemError, the SyntaxError propagates.
+    // The key invariant: the thrown error must NOT be a ProblemError (the middleware
+    // must not wrap a parse failure as if it were a valid problem body).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 500,
+          headers: { "Content-Type": "application/problem+json" },
+        }),
+      ),
+    );
+
+    await expect(Api.GET("/me", {})).rejects.not.toBeInstanceOf(ProblemError);
+  });
 });
 
 // -------------------------------------------------------------------------
