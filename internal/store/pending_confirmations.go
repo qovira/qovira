@@ -162,15 +162,16 @@ func (sq *ScopedQueries) MarkConfirmationExpired(ctx context.Context, callID str
 
 // ListLapsedConfirmations returns all pending_confirmations rows whose expires_at is
 // before now and whose status is still "pending". This is a cross-user system
-// housekeeping query — it is intentionally unscoped and requires a system scope (or the
-// write pool directly, as the sweep helper does). Each returned row carries its own
-// user_id so the caller can issue per-row, per-user operations.
+// housekeeping query — it is intentionally unscoped and requires a system scope.
+// Each returned row carries its own user_id so the caller can issue per-row,
+// per-user operations.
 //
+// Requires a system scope — returns nil, errUserScopeForSystemMethod for a user scope.
 // This is the query backing SweepExpiredConfirmations.
 func (sq *ScopedQueries) ListLapsedConfirmations(ctx context.Context, now string) ([]db.PendingConfirmation, error) {
-	// This is a system-housekeeping query; it intentionally bypasses the user-scope
-	// guard. The store.SystemScope() must be used for the sweep path. Callers that
-	// hold a user scope should not call this method.
+	if !sq.scope.IsSystem() {
+		return nil, fmt.Errorf("ListLapsedConfirmations: %w", errUserScopeForSystemMethod)
+	}
 	rows, err := sq.readQ.ListLapsedConfirmations(ctx, now)
 	if err != nil {
 		return nil, fmt.Errorf("ListLapsedConfirmations: %w", err)
@@ -203,9 +204,12 @@ func (sq *ScopedQueries) CountNonExpiredConfirmationsByMessageID(ctx context.Con
 // CountNonExpiredConfirmationsByMessageIDForUser returns the count of
 // pending_confirmations rows for the given assistant message and user that are NOT
 // in 'expired' status. Used by the sweep path where the user_id comes from the
-// lapsed row, not the bound scope. This method bypasses the scope check — system
-// housekeeping path only.
+// lapsed row, not the bound scope. Requires a system scope — returns
+// 0, errUserScopeForSystemMethod for a user scope.
 func (sq *ScopedQueries) CountNonExpiredConfirmationsByMessageIDForUser(ctx context.Context, messageID, userID string) (int64, error) {
+	if !sq.scope.IsSystem() {
+		return 0, fmt.Errorf("CountNonExpiredConfirmationsByMessageIDForUser: %w", errUserScopeForSystemMethod)
+	}
 	n, err := sq.readQ.CountNonExpiredConfirmationsByMessageID(ctx, db.CountNonExpiredConfirmationsByMessageIDParams{
 		MessageID: messageID,
 		UserID:    userID,
@@ -219,9 +223,11 @@ func (sq *ScopedQueries) CountNonExpiredConfirmationsByMessageIDForUser(ctx cont
 // MarkConfirmationExpiredByUserID atomically transitions a pending row from "pending"
 // to "expired" keyed by (id, user_id). Used by the sweep path where the user_id
 // comes from each lapsed row returned by ListLapsedConfirmations, not the bound scope.
-// This method bypasses the scope check intentionally — it is called from
-// SweepExpiredConfirmations which operates as system housekeeping.
+// Requires a system scope — returns 0, errUserScopeForSystemMethod for a user scope.
 func (sq *ScopedQueries) MarkConfirmationExpiredByUserID(ctx context.Context, callID, userID string) (int64, error) {
+	if !sq.scope.IsSystem() {
+		return 0, fmt.Errorf("MarkConfirmationExpiredByUserID: %w", errUserScopeForSystemMethod)
+	}
 	return sq.writeQ.MarkConfirmationExpired(ctx, db.MarkConfirmationExpiredParams{
 		ID:     callID,
 		UserID: userID,
@@ -230,8 +236,11 @@ func (sq *ScopedQueries) MarkConfirmationExpiredByUserID(ctx context.Context, ca
 
 // MarkMessageAbandonedByUserID marks a message as abandoned keyed by (id, user_id).
 // Used by the sweep path where the user_id comes from each lapsed row, not the bound scope.
-// This method bypasses the scope check intentionally — system housekeeping.
+// Requires a system scope — returns errUserScopeForSystemMethod for a user scope.
 func (sq *ScopedQueries) MarkMessageAbandonedByUserID(ctx context.Context, messageID, userID string) error {
+	if !sq.scope.IsSystem() {
+		return fmt.Errorf("MarkMessageAbandonedByUserID: %w", errUserScopeForSystemMethod)
+	}
 	_, err := sq.writeQ.MarkMessageAbandoned(ctx, db.MarkMessageAbandonedParams{
 		ID:     messageID,
 		UserID: userID,

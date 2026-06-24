@@ -156,8 +156,11 @@ func (sq *ScopedQueries) ListMessages(ctx context.Context, conversationID string
 // InsertMessageByUserID inserts a tool-result message keyed by (conversation_id, user_id, tool_call_id)
 // using the supplied userID directly rather than the bound scope. The msgID must be supplied by the
 // caller (use id.New()). Used by the sweep path where the user_id comes from the lapsed row, not the
-// bound scope. This method bypasses the scope check intentionally — system housekeeping only.
+// bound scope. Requires a system scope — returns errUserScopeForSystemMethod for a user scope.
 func (sq *ScopedQueries) InsertMessageByUserID(ctx context.Context, msgID, conv, userID, callID, content string) error {
+	if !sq.scope.IsSystem() {
+		return fmt.Errorf("InsertMessageByUserID: %w", errUserScopeForSystemMethod)
+	}
 	_, err := sq.writeQ.InsertMessage(ctx, db.InsertMessageParams{
 		ID:             msgID,
 		ConversationID: conv,
