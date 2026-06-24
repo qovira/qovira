@@ -14,7 +14,7 @@
 //
 // Backoff: 500ms initial, 2× per attempt, max 30s, jittered ±20% (clamped after jitter).
 
-import { Api } from "$lib/api/index.js";
+import { Api, callUnauthorizedHandler } from "$lib/api/index.js";
 import { setReminders, upsertReminder, removeReminder } from "$lib/stores/reminders.svelte.js";
 import {
   applyStreamingDelta,
@@ -179,6 +179,16 @@ async function reconcile(): Promise<void> {
       // exactOptionalPropertyTypes: pass cursor via spread so absent key is omitted entirely.
       const query = cursor !== null ? { cursor } : {};
       const result = await Api.GET("/reminders", { params: { query } });
+
+      // Guard: when Api.GET returns a problem+json error it does NOT throw — it
+      // returns { data: undefined, error }. Treat this like a network throw:
+      // log and leave the reminders store untouched so a transient server error
+      // during (re)connect reconcile never silently clears every reminder.
+      if (result.error !== undefined) {
+        console.warn("[sse] reconcile: reminders page error", result.error);
+        return;
+      }
+
       const page = result.data as RemindersPage | undefined;
       if (page?.data !== undefined) {
         allReminders.push(...page.data);
@@ -230,7 +240,8 @@ async function reconcileConversationHistory(): Promise<void> {
 // Stream reader — reads chunks from a fetch ReadableStream
 // ---------------------------------------------------------------------------
 
-async function readStream(
+/** Exported for unit-testing the CRLF-normalization and frame-dispatch seam. */
+export async function readStream(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
   handlers: RouterHandlers,
@@ -242,9 +253,16 @@ async function readStream(
   try {
     while (!signal.aborted) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        break;
+      }
 
-      buffer += decoder.decode(value, { stream: true });
+      // Normalize CRLF → LF before boundary scanning so that a spec-compliant
+      // proxy rewriting to CRLF (\r\n\r\n) doesn't prevent frame dispatch.
+      // parser.ts already does this normalization internally; mirror it here so
+      // the frame-boundary scan (lastIndexOf("\n\n")) and the remainder slice
+      // both operate on a consistent LF-only buffer.
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
       // Extract complete frames from the buffer. After parsing, retain only
       // the portion after the last "\n\n" — that is the incomplete frame tail.
@@ -289,9 +307,12 @@ async function connectionLoop(): Promise<void> {
       if (!response.ok) {
         if (response.status === 401) {
           // 401 means the session has been revoked on the server. Deactivate the
-          // loop now; the onUnauthorized hook (wired in the layout) will call
-          // closeSseConnection() → notifyTearDown() → resetSession() → redirect.
+          // loop and invoke the centralised unauthorised handler — the same
+          // authority the REST path uses — so the session is torn down and the
+          // user is redirected to /login. The bare fetch() here bypasses
+          // openapi-fetch middleware, so we call the seam explicitly.
           _active = false;
+          await Promise.resolve(callUnauthorizedHandler());
           return;
         }
         // Other non-2xx: fall through to the backoff retry path.

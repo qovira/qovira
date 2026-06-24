@@ -3,7 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { nextBackoff, BACKOFF_INITIAL_MS } from "./backoff.js";
-import { openSseConnection, closeSseConnection, makeHandlers } from "./client.js";
+import { openSseConnection, closeSseConnection, makeHandlers, readStream } from "./client.js";
+import { onUnauthorized, callUnauthorizedHandler } from "$lib/api/index.js";
 
 // ---------------------------------------------------------------------------
 // Module mocks (hoisted — must be at the top level of the file)
@@ -508,5 +509,198 @@ describe("makeHandlers() — onMessageCompleted conversation reconcile", () => {
 
     expect(finalizeStreamingMessageMock).not.toHaveBeenCalled();
     expect(setConversationHistoryMock).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M3 — 401 on /events must invoke the unauthorizedHandler teardown seam
+//
+// When the bare fetch("/events") returns 401, the SSE loop must call
+// callUnauthorizedHandler() (the same authority the REST path uses) so that
+// notifyTearDown / resetSession / goto("/login") fire. Merely setting
+// _active = false is insufficient — the session store keeps reporting
+// authenticated and the user is never redirected.
+// ---------------------------------------------------------------------------
+
+describe("SSE client — 401 on /events invokes the unauthorized handler (M3)", () => {
+  let handlerSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    handlerSpy = vi.fn();
+    // Register a spy as the central 401 authority. Cast required: vi.fn() returns
+    // a generic Mock type that is wider than (() => void) | (() => Promise<void>).
+    onUnauthorized(handlerSpy as () => void);
+  });
+
+  afterEach(async () => {
+    closeSseConnection();
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    // Restore a no-op so the handler doesn't bleed between suites.
+    onUnauthorized(() => {
+      // no-op
+    });
+  });
+
+  it("calls callUnauthorizedHandler when /events returns 401", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(null, {
+            status: 401,
+            headers: { "Content-Type": "application/problem+json" },
+          }),
+        ),
+      ),
+    );
+
+    openSseConnection();
+
+    // Drain microtask turns for the connection attempt and 401 handling to complete.
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+
+    expect(handlerSpy).toHaveBeenCalledOnce();
+  });
+
+  it("callUnauthorizedHandler is the seam — the registered handler is invoked", () => {
+    const spy = vi.fn();
+    // Cast required: vi.fn() returns Mock which is wider than (() => void) | (() => Promise<void>).
+    onUnauthorized(spy as () => void);
+    void callUnauthorizedHandler();
+    expect(spy).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 2 — reconcile() does NOT wipe reminders on a server error response
+//
+// When Api.GET("/reminders") returns a problem+json error (non-2xx),
+// openapi-fetch returns { data: undefined, error } without throwing.
+// The reconcile loop must detect result.error and bail out — leaving the
+// reminders store untouched — rather than calling setReminders([]).
+// ---------------------------------------------------------------------------
+
+describe("reconcile() — reminders store is left untouched on server error (Fix 2)", () => {
+  let setRemindersMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+
+    const remindersModule = await import("$lib/stores/reminders.svelte.js");
+    setRemindersMock = remindersModule.setReminders as ReturnType<typeof vi.fn>;
+    setRemindersMock.mockClear();
+  });
+
+  afterEach(async () => {
+    closeSseConnection();
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not call setReminders when the /reminders endpoint returns a non-2xx error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+        // SSE /events — return a successful open stream so reconcile is triggered.
+        if (url === "/events") {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("event: ping\ndata: \n\n"));
+              controller.close();
+            },
+          });
+          return Promise.resolve(
+            new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+          );
+        }
+
+        // /api/v1/reminders — return a 503 problem+json error.
+        const body = JSON.stringify({
+          type: "https://qovira.com/problems/service-unavailable",
+          title: "Service Unavailable",
+          status: 503,
+          detail: "Upstream database is unreachable",
+          code: "service_unavailable",
+          requestId: "req-test-1",
+        });
+        return Promise.resolve(
+          new Response(body, { status: 503, headers: { "Content-Type": "application/problem+json" } }),
+        );
+      }),
+    );
+
+    openSseConnection();
+
+    // Drain enough microtask turns for connection + reconcile attempt.
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve();
+    }
+
+    // setReminders must NOT have been called — the store is left as-is.
+    expect(setRemindersMock).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3 — readStream dispatches events from CRLF-terminated frames
+//
+// The SSE spec allows \r\n line endings. A CRLF-framed stream (\r\n\r\n frame
+// boundaries) must dispatch events identically to a LF-framed stream.
+// Without normalization, lastIndexOf("\n\n") never matches \r\n\r\n and the
+// client buffers forever, dispatching nothing.
+// ---------------------------------------------------------------------------
+
+describe("readStream() — CRLF-framed events are dispatched (Fix 3)", () => {
+  it("dispatches an event from a CRLF-terminated frame", async () => {
+    const dispatchedEvents: { event: string; data: string }[] = [];
+
+    // Build a mock RouterHandlers whose onReminderEvent captures dispatches.
+    // We use reminder.created as a canary — any routable event works.
+    const handlers = makeHandlers();
+
+    // Intercept the stores to capture what gets routed.
+    const remindersModule = await import("$lib/stores/reminders.svelte.js");
+    const upsertReminderMock = remindersModule.upsertReminder as ReturnType<typeof vi.fn>;
+    upsertReminderMock.mockClear();
+    upsertReminderMock.mockImplementation((r: unknown) => {
+      dispatchedEvents.push({ event: "reminder.created", data: JSON.stringify(r) });
+    });
+
+    // Build a CRLF-framed SSE event: lines end with \r\n, frame ends with \r\n\r\n.
+    const reminderPayload = JSON.stringify({
+      id: "rem-crlf",
+      userId: "u1",
+      title: "CRLF test",
+      dueAt: "2030-01-01T00:00:00Z",
+      tz: "UTC",
+      autoComplete: false,
+      status: "active",
+      createdAt: "2025-01-01T00:00:00Z",
+      updatedAt: "2025-01-01T00:00:00Z",
+    });
+    const crlfFrame = `event: reminder.created\r\ndata: ${reminderPayload}\r\n\r\n`;
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(crlfFrame));
+        controller.close();
+      },
+    });
+
+    const controller = new AbortController();
+    await readStream(stream, controller.signal, handlers);
+
+    expect(dispatchedEvents).toHaveLength(1);
+    expect(dispatchedEvents[0]?.event).toBe("reminder.created");
+
+    upsertReminderMock.mockRestore();
   });
 });

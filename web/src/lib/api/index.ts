@@ -91,6 +91,18 @@ export function onUnauthorized(cb: (() => void) | (() => Promise<void>)): void {
   unauthorizedHandler = cb;
 }
 
+/**
+ * Invoke the currently registered unauthorised handler.
+ *
+ * Call this from any code path that detects a 401 but bypasses the
+ * openapi-fetch middleware (e.g. the bare fetch("/events") SSE stream).
+ * This is the single seam that ensures every 401 — REST or SSE — triggers
+ * the same teardown: notifyTearDown → resetSession → redirect to /login.
+ */
+export function callUnauthorizedHandler(): void | Promise<void> {
+  return unauthorizedHandler();
+}
+
 // ---------------------------------------------------------------------------
 // Cookie helper
 // ---------------------------------------------------------------------------
