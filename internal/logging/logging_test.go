@@ -235,6 +235,17 @@ func TestNewLogger_Redaction_Combined(t *testing.T) {
 	if strings.Contains(line, secretToken) {
 		t.Errorf("log line leaked config.Secret token value %q\nline: %s", secretToken, line)
 	}
+
+	// Both redaction paths must emit the sentinel, not silently drop the
+	// attribute. Count occurrences: one for the sensitive-key path (password),
+	// one for the config.Secret LogValue path (token_field). A regression that
+	// drops an attribute rather than substituting [REDACTED] would yield a count
+	// less than 2 and make this assertion fail.
+	const sentinel = "[REDACTED]"
+	count := strings.Count(line, sentinel)
+	if count != 2 {
+		t.Errorf("expected exactly 2 occurrences of %q in log line, got %d\nline: %s", sentinel, count, line)
+	}
 }
 
 // capturingHandler is a minimal slog.Handler implementation used for the

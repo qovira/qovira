@@ -52,7 +52,7 @@ non-200 status. Designed to be called by the Dockerfile HEALTHCHECK instruction.
 		},
 	}
 
-	cmd.Flags().String("config", "", "path to config file (default: auto-discovered)")
+	cmd.Flags().String("config", "", "path to TOML config file (optional; env vars and defaults are used when unset)")
 
 	return cmd
 }

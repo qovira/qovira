@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -203,6 +204,25 @@ func TestNew_ProtectedRoute_WithBearerToken_Returns401(t *testing.T) {
 // margin is meaningful.
 const shutdownTimeout = 15 * time.Second
 
+// waitReady polls the TCP address addr until a connection succeeds or ctx is
+// cancelled. It returns true when the server is accepting connections, false
+// when ctx expires first.
+func waitReady(ctx context.Context, addr string) bool {
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 10*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
 // TestRun_GracefulShutdown verifies that cancelling ctx makes Run return
 // within the bounded shutdown timeout and the store is closed afterward.
 func TestRun_GracefulShutdown(t *testing.T) {
@@ -224,8 +244,22 @@ func TestRun_GracefulShutdown(t *testing.T) {
 		runDone <- a.Run(ctx)
 	}()
 
-	// Give the server a moment to start, then signal shutdown.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the server to bind its ephemeral port rather than sleeping a
+	// fixed duration. ListenAddr blocks until BaseContext fires (i.e. the
+	// socket is open), then we dial once to confirm reachability.
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer readyCancel()
+
+	boundAddr := a.ListenAddr(readyCtx)
+	if boundAddr == "" {
+		cancel()
+		t.Fatal("server did not become ready within 5 s")
+	}
+	if !waitReady(readyCtx, boundAddr) {
+		cancel()
+		t.Fatal("server bound but did not accept connections within 5 s")
+	}
+
 	cancel()
 
 	// Run must return within the shutdown timeout plus a small margin.

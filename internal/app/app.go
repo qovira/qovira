@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/qovira/qovira/internal/auth"
@@ -80,7 +81,7 @@ func isPublicRoute(r *http.Request) bool {
 	}
 
 	// All other /api/v1/… paths are protected.
-	if path == "/api/v1" || (len(path) > len("/api/v1") && path[:len("/api/v1/")] == "/api/v1/") {
+	if path == "/api/v1" || strings.HasPrefix(path, "/api/v1/") {
 		return false
 	}
 
@@ -96,6 +97,10 @@ type App struct {
 	cancelConns context.CancelFunc
 	logger      *slog.Logger
 	sched       *scheduler.Scheduler
+	// listenAddr receives the bound address exactly once from BaseContext when
+	// the HTTP server calls it with the real net.Listener. Buffered (capacity 1)
+	// so the send never blocks even if nobody reads it.
+	listenAddr chan string
 }
 
 // AuthModuleCtor returns a module constructor that builds the auth HTTP module
@@ -242,7 +247,7 @@ func New(
 	// Step 9: module registration loop.
 	for _, m := range modules {
 		m.Routes(router)
-		if err := reg.Add(m); err != nil {
+		if err = reg.Add(m); err != nil {
 			return nil, fmt.Errorf("app: register %s tools: %w", m.Name(), err)
 		}
 	}
@@ -261,7 +266,7 @@ func New(
 	// satisfying the invariant that all handlers are registered before the first tick.
 	remMod := reminders.New(s, sched, bus, sched, logger)
 	remMod.Routes(router)
-	if err := reg.Add(remMod); err != nil {
+	if err = reg.Add(remMod); err != nil {
 		return nil, fmt.Errorf("app: register %s tools: %w", remMod.Name(), err)
 	}
 
@@ -306,7 +311,18 @@ func New(
 	connCtx, cancelConns := context.WithCancel(context.Background())
 	mws := httpx.StandardChain(logger, validator, isPublicRoute)
 	srv := httpx.NewServer(cfg.HTTPAddr, version, router, bus, mws...)
-	srv.BaseContext = func(net.Listener) context.Context { return connCtx }
+
+	// listenAddr is populated once, from BaseContext, with the real bound
+	// address the OS assigned. Capacity 1 so the non-blocking send in
+	// BaseContext never blocks even when the caller ignores ListenAddr().
+	listenAddr := make(chan string, 1)
+	srv.BaseContext = func(l net.Listener) context.Context {
+		select {
+		case listenAddr <- l.Addr().String():
+		default:
+		}
+		return connCtx
+	}
 
 	return &App{
 		store:       s,
@@ -314,6 +330,7 @@ func New(
 		cancelConns: cancelConns,
 		logger:      logger,
 		sched:       sched,
+		listenAddr:  listenAddr,
 	}, nil
 }
 
@@ -399,3 +416,24 @@ func (a *App) Server() *http.Server { return a.srv }
 
 // Logger returns the logger in use. Useful in tests to access the configured slog.Logger.
 func (a *App) Logger() *slog.Logger { return a.logger }
+
+// ListenAddr returns the network address the HTTP server is actually bound to.
+// Exposed for tests that need the OS-assigned ephemeral port when the server was
+// configured with ":0" / "127.0.0.1:0" — the OS assigns the port and BaseContext
+// reports it back through this channel. It blocks until the server calls
+// BaseContext (i.e. until ListenAndServe has opened its socket) or until ctx is
+// cancelled, whichever comes first; returns an empty string when ctx is
+// cancelled before the server is ready.
+func (a *App) ListenAddr(ctx context.Context) string {
+	select {
+	case addr := <-a.listenAddr:
+		// Put it back so subsequent calls also see it.
+		select {
+		case a.listenAddr <- addr:
+		default:
+		}
+		return addr
+	case <-ctx.Done():
+		return ""
+	}
+}

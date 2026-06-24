@@ -59,7 +59,7 @@ func newServeCmd() *cobra.Command {
 	}
 
 	// Reserve the --config flag so later slices can populate it without breaking the flag surface.
-	cmd.Flags().String("config", "", "path to config file (default: auto-discovered)")
+	cmd.Flags().String("config", "", "path to TOML config file (optional; env vars and defaults are used when unset)")
 
 	return cmd
 }

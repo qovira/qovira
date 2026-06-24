@@ -18,7 +18,7 @@ func newAdminCmd() *cobra.Command {
 		},
 	}
 
-	admin.PersistentFlags().String("config", "", "path to config file (default: auto-discovered)")
+	admin.PersistentFlags().String("config", "", "path to TOML config file (optional; env vars and defaults are used when unset)")
 
 	admin.AddCommand(
 		newAdminResetPasswordCmd(),

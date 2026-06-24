@@ -21,7 +21,7 @@ func newMigrateCmd() *cobra.Command {
 	}
 
 	// --config is a persistent flag on the parent so all subcommands inherit it.
-	migrate.PersistentFlags().String("config", "", "path to config file (default: auto-discovered)")
+	migrate.PersistentFlags().String("config", "", "path to TOML config file (optional; env vars and defaults are used when unset)")
 
 	migrate.AddCommand(
 		newMigrateUpCmd(),
