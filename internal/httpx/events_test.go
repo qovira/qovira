@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,10 +104,117 @@ func TestWriteSSEPing_Format(t *testing.T) {
 	}
 }
 
+// TestWriteSSEEvent_MarshalSkip verifies that when the event payload cannot be
+// marshaled to JSON, writeSSEEvent skips the event (writes nothing to the
+// ResponseWriter) and returns nil rather than an error, so the stream continues.
+// A channel value is used as the payload because encoding/json cannot marshal
+// channels and returns an error for them.
+func TestWriteSSEEvent_MarshalSkip(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	// A channel is not JSON-marshalable; json.Marshal returns an error for it.
+	unmarshalablePayload := make(chan struct{})
+	evt := events.Event{Type: "bad.event", Data: unmarshalablePayload}
+
+	err := writeSSEEvent(w, evt, 1)
+
+	// Must return nil — the stream should not be killed by one bad event.
+	if err != nil {
+		t.Errorf("writeSSEEvent with unmarshalable data returned err = %v, want nil (skip, not kill)", err)
+	}
+	// Must write nothing — no partial SSE frame.
+	if body := w.Body.String(); body != "" {
+		t.Errorf("writeSSEEvent wrote %q to the wire for an unmarshalable event, want empty (skip)", body)
+	}
+}
+
+// TestWriteSSEPing_HeartbeatFrame verifies that writeSSEPing emits the exact
+// SSE ping frame documented in the function comment:
+//
+//	event: ping\ndata: \n\n
+//
+// The ping keeps proxies and load-balancers from closing idle connections and
+// must not carry any event id.
+func TestWriteSSEPing_HeartbeatFrame(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	if err := writeSSEPing(w); err != nil {
+		t.Fatalf("writeSSEPing: %v", err)
+	}
+
+	body := w.Body.String()
+
+	// Must begin with "event: ping\n".
+	if !strings.HasPrefix(body, "event: ping\n") {
+		t.Errorf("heartbeat frame does not start with 'event: ping\\n'; got: %q", body)
+	}
+	// Must carry a data field (even if empty) as documented.
+	if !strings.Contains(body, "data: \n") {
+		t.Errorf("heartbeat frame missing 'data: \\n'; got: %q", body)
+	}
+	// Must end with the SSE blank-line terminator.
+	if !strings.HasSuffix(body, "\n\n") {
+		t.Errorf("heartbeat frame does not end with blank line '\\n\\n'; got: %q", body)
+	}
+	// Must NOT carry an id field — heartbeat pings are not sequenced events.
+	if strings.Contains(body, "id:") {
+		t.Errorf("heartbeat frame must not carry an id field; got: %q", body)
+	}
+}
+
 // ---- eventsHandler integration tests ----------------------------------------
+
+// readyWriter wraps httptest.ResponseRecorder and sends a token on flushCh for
+// every Flush call. eventsHandler flushes after the initial status line (flush 1 =
+// readiness) and again after writing each event (flush 2 = event written). Tests
+// can wait for specific flush counts to synchronise deterministically without
+// sleeping.
+//
+// flushCh is buffered to 16 so that a Flush never blocks the handler goroutine
+// even if the test goroutine is slow to drain it.
+type readyWriter struct {
+	*httptest.ResponseRecorder
+	flushCh chan struct{} // one token per Flush call; buffered
+}
+
+func newReadyWriter() *readyWriter {
+	return &readyWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		flushCh:          make(chan struct{}, 16),
+	}
+}
+
+// Flush forwards to the embedded recorder and sends a token on flushCh so
+// tests can count and sequence on flush events.
+func (rw *readyWriter) Flush() {
+	rw.ResponseRecorder.Flush()
+	rw.flushCh <- struct{}{}
+}
+
+// waitFlush waits for the n-th Flush call (1-based) or until the timeout
+// fires, failing the test if the deadline is exceeded.
+func (rw *readyWriter) waitFlush(t *testing.T, n int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for i := range n {
+		select {
+		case <-rw.flushCh:
+		case <-deadline:
+			t.Fatalf("timed out waiting for flush #%d (received %d so far)", n, i)
+		}
+	}
+}
 
 // TestEventsHandler_StreamsEvent verifies that a published event reaches the
 // response writer as a complete SSE frame with event:, id:, and data: fields.
+//
+// Synchronisation is flush-based:
+//   - Flush 1: initial-flush guard — handler is subscribed and in the select loop.
+//   - Flush 2: handler processed and wrote the published event.
+//
+// Cancelling only after flush 2 ensures the body contains the event.
 func TestEventsHandler_StreamsEvent(t *testing.T) {
 	t.Parallel()
 
@@ -118,7 +226,7 @@ func TestEventsHandler_StreamsEvent(t *testing.T) {
 
 	ctx = principalCtx(ctx, store.Principal{UserID: "u1"})
 	r := newGETWithCtx(ctx, t)
-	w := httptest.NewRecorder()
+	w := newReadyWriter()
 
 	// Run the handler in a goroutine — it blocks until the context is cancelled.
 	done := make(chan struct{})
@@ -127,15 +235,16 @@ func TestEventsHandler_StreamsEvent(t *testing.T) {
 		handler.ServeHTTP(w, r)
 	}()
 
-	// Give the handler time to subscribe and flush the initial status line.
-	// Then publish an event.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for flush 1 — handler is subscribed and in the select loop.
+	w.waitFlush(t, 1, 2*time.Second)
+
+	// Publish an event; the handler will write it and flush (flush 2).
 	bus.Publish("u1", events.Event{Type: "reminder.fired", Data: map[string]string{"id": "r1"}})
 
-	// Allow the handler to pick up and write the event.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for flush 2 — event has been written to the response body.
+	w.waitFlush(t, 1, 2*time.Second)
 
-	// Cancel the context to shut the handler down.
+	// Safe to cancel now — the body already contains the event.
 	cancel()
 
 	select {
@@ -240,6 +349,7 @@ func TestEventsHandler_405NonGET(t *testing.T) {
 // request context causes the handler to exit and the bus subscription to be
 // released. A subsequent Publish must not panic. The test uses -race to confirm
 // there are no data races.
+// Readiness is determined by the first Flush call, not by a fixed sleep.
 func TestEventsHandler_ContextCancelUnsubscribes(t *testing.T) {
 	t.Parallel()
 
@@ -249,7 +359,7 @@ func TestEventsHandler_ContextCancelUnsubscribes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = principalCtx(ctx, store.Principal{UserID: "u2"})
 	r := newGETWithCtx(ctx, t)
-	w := httptest.NewRecorder()
+	w := newReadyWriter()
 
 	done := make(chan struct{})
 	go func() {
@@ -257,10 +367,10 @@ func TestEventsHandler_ContextCancelUnsubscribes(t *testing.T) {
 		handler.ServeHTTP(w, r)
 	}()
 
-	// Allow the handler to subscribe.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for flush 1 — handler is subscribed and in the select loop.
+	w.waitFlush(t, 1, 2*time.Second)
 
-	// Cancel — the handler must exit.
+	// Handler is subscribed; cancel to trigger unsubscription.
 	cancel()
 
 	select {
@@ -278,6 +388,7 @@ func TestEventsHandler_ContextCancelUnsubscribes(t *testing.T) {
 // SetWriteDeadline with the zero time before entering the select loop. This is
 // the regression guard for the bug where the server's global WriteTimeout (60 s)
 // would force-close every SSE stream after ~60 s.
+// Readiness is determined by the first Flush call, not by a fixed sleep.
 func TestEventsHandler_ClearsWriteDeadline(t *testing.T) {
 	t.Parallel()
 
@@ -289,7 +400,7 @@ func TestEventsHandler_ClearsWriteDeadline(t *testing.T) {
 
 	ctx = principalCtx(ctx, store.Principal{UserID: "u-deadline"})
 	r := newGETWithCtx(ctx, t)
-	w := &deadlineRecorder{header: make(http.Header)}
+	w := newDeadlineRecorder()
 
 	done := make(chan struct{})
 	go func() {
@@ -297,9 +408,15 @@ func TestEventsHandler_ClearsWriteDeadline(t *testing.T) {
 		handler.ServeHTTP(w, r)
 	}()
 
-	// Allow the handler to reach the SetWriteDeadline call (it happens
-	// immediately after the initial flush, before the select loop).
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the handler's initial flush — the deterministic readiness signal.
+	// SetWriteDeadline is called immediately after the initial flush, before the
+	// select loop, so at this point we know the deadline has already been cleared.
+	select {
+	case <-w.readyCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not emit initial flush within 2 s")
+	}
+
 	cancel()
 
 	select {
@@ -365,12 +482,23 @@ func (b *bareWriter) Write(p []byte) (int, error) { return b.body.Write(p) }
 
 // deadlineRecorder is a ResponseWriter that supports Flush and SetWriteDeadline.
 // It records every SetWriteDeadline call so tests can assert the handler cleared
-// the deadline before entering the select loop.
+// the deadline before entering the select loop. readyCh is closed on the first
+// Flush call so tests can wait for the handler's initial-flush guard without a
+// fixed sleep.
 type deadlineRecorder struct {
 	header    http.Header
 	status    int
 	body      strings.Builder
 	deadlines []time.Time // one entry per SetWriteDeadline call, in order
+	readyCh   chan struct{}
+	flushOnce sync.Once
+}
+
+func newDeadlineRecorder() *deadlineRecorder {
+	return &deadlineRecorder{
+		header:  make(http.Header),
+		readyCh: make(chan struct{}),
+	}
 }
 
 func (d *deadlineRecorder) Header() http.Header         { return d.header }
@@ -378,8 +506,11 @@ func (d *deadlineRecorder) WriteHeader(code int)        { d.status = code }
 func (d *deadlineRecorder) Write(p []byte) (int, error) { return d.body.Write(p) }
 
 // Flush satisfies http.Flusher so that http.NewResponseController.Flush()
-// succeeds and the handler proceeds past the initial-flush guard.
-func (d *deadlineRecorder) Flush() {}
+// succeeds and the handler proceeds past the initial-flush guard. It signals
+// readyCh on the first call.
+func (d *deadlineRecorder) Flush() {
+	d.flushOnce.Do(func() { close(d.readyCh) })
+}
 
 // SetWriteDeadline satisfies the interface that http.NewResponseController
 // looks for. It records the supplied deadline and returns nil.

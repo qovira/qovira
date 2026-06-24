@@ -53,65 +53,219 @@ func (e *unauthenticatedError) Error() string { return "invalid token: " + e.tok
 
 // ---- MiddlewareChain --------------------------------------------------------
 
-// TestDefaultChain_OrderIsOutermostFirst verifies that StandardChain composes
-// the middlewares so that recover is outermost and auth is innermost (before route).
-// It does this by checking execution order via a recording handler.
+// TestDefaultChain_OrderIsOutermostFirst verifies that the real StandardChain
+// composes its middlewares in the documented order:
+//
+//	recover → request-id → request-log → security-headers → auth
+//
+// The test exercises the actual httpx.StandardChain return value (not stubs).
+// Observable effects of each layer prove the ordering:
+//
+//   - recover is outermost: a panicking route yields 500 with the panic logged.
+//   - request-id runs inside recover: Request-Id is present on the 500 response.
+//   - request-log runs inside request-id: it can read the request-id from context.
+//   - security-headers runs before auth: the header is set even on 401 responses.
+//   - auth is innermost (before route): an invalid token yields 401, not 200.
+//
+// If StandardChain ever reorders its elements, at least one assertion here will
+// fail without needing to inspect the slice positions by index.
 func TestDefaultChain_OrderIsOutermostFirst(t *testing.T) {
 	t.Parallel()
 
-	var order []string
-	mark := func(label string) httpx.Middleware {
-		return func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				order = append(order, label+":in")
-				next.ServeHTTP(w, r)
-				order = append(order, label+":out")
-			})
-		}
-	}
-
-	logger, _ := newTestLogger()
-	validator := &fakeValidator{expectedToken: "tok", principal: store.Principal{UserID: "u1", Role: "user"}}
+	wantPrincipal := store.Principal{UserID: "u_order", Role: "user"}
+	validator := &fakeValidator{expectedToken: "good-tok", principal: wantPrincipal}
 	isPublic := func(r *http.Request) bool { return r.URL.Path == "/healthz" }
 
-	// Replace each real middleware with a recording one to see ordering.
-	// We test the StandardChain via its ordering seam: the function must return
-	// middlewares in recover→request-id→request-log→security-headers→auth order.
-	mws := httpx.StandardChain(logger, validator, isPublic)
-	if len(mws) != 5 {
-		t.Fatalf("StandardChain returned %d middlewares, want 5", len(mws))
-	}
-	_ = mws
+	// Each subtest creates its own logger so parallel subtests never share a
+	// *bytes.Buffer and cannot race on it. StandardChain is called once per
+	// subtest so the logger injected into the real middleware is subtest-local.
 
-	// Build a chain from recording stubs in the declared order and verify.
-	chained := httpx.Chain(
-		http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-			order = append(order, "route")
-		}),
-		mark("recover"),
-		mark("request-id"),
-		mark("request-log"),
-		mark("security-headers"),
-		mark("auth"),
-	)
+	t.Run("recover_is_outermost", func(t *testing.T) {
+		t.Parallel()
 
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
-	r.Header.Set("Authorization", "Bearer tok")
-	chained.ServeHTTP(httptest.NewRecorder(), r)
-
-	want := []string{
-		"recover:in", "request-id:in", "request-log:in", "security-headers:in", "auth:in",
-		"route",
-		"auth:out", "security-headers:out", "request-log:out", "request-id:out", "recover:out",
-	}
-	if len(order) != len(want) {
-		t.Fatalf("order = %v, want %v", order, want)
-	}
-	for i, v := range want {
-		if order[i] != v {
-			t.Errorf("order[%d] = %q, want %q", i, order[i], v)
+		logger, _ := newTestLogger()
+		mws := httpx.StandardChain(logger, validator, isPublic)
+		if len(mws) != 5 {
+			t.Fatalf("StandardChain returned %d middlewares, want 5", len(mws))
 		}
-	}
+
+		// Behavioral proof that mws[0] is RecoverMiddleware, not any other middleware.
+		//
+		// Strategy: compose a panicking middleware as position 1 (directly inside
+		// mws[0]) and verify the response is a clean 500 problem+json.
+		//
+		//   Chain(route, mws[0], panicMW)
+		//   → mws[0]( panicMW( route ) )
+		//
+		// Only RecoverMiddleware can turn a panic into a 500 response. Any other
+		// middleware at position 0 (e.g. request-id in the M1 swap) lets the panic
+		// propagate uncaught and ServeHTTP re-panics — the response recorder ends up
+		// with code 200 (default, never set) and no problem+json body.
+		//
+		// This mutant-killing property holds because we drive the panic from panicMW,
+		// which is placed INSIDE mws[0] and OUTSIDE the rest of the chain. If the
+		// M1 mutation (request-id outermost, recover second) is applied, mws[0] is
+		// request-id, which does not recover panics, so the test panics and fails.
+		panicMW := func(_ http.Handler) http.Handler {
+			return http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+				panic("recover-outermost sentinel panic")
+			})
+		}
+		h := httpx.Chain(noopHandler(http.StatusOK, ""), mws[0], panicMW)
+
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, r)
+
+		if rr.Code != http.StatusInternalServerError {
+			t.Errorf("mws[0] did not recover a panic from the next layer: status = %d, want 500 — mws[0] must be RecoverMiddleware", rr.Code)
+		}
+		if ct := rr.Header().Get("Content-Type"); ct != "application/problem+json" {
+			t.Errorf("mws[0] panic recovery did not produce problem+json: Content-Type = %q, want application/problem+json", ct)
+		}
+	})
+
+	t.Run("request_id_sets_header_before_next", func(t *testing.T) {
+		t.Parallel()
+
+		logger, _ := newTestLogger()
+		mws := httpx.StandardChain(logger, validator, isPublic)
+
+		// Behavioral proof that mws[1] is RequestIDMiddleware.
+		//
+		// RequestIDMiddleware sets the Request-Id header on the ResponseWriter BEFORE
+		// calling next. We verify this by reading the header from WITHIN the inner
+		// handler — if it is already set when the handler runs, mws[1] must be
+		// RequestIDMiddleware (no other production middleware sets that header).
+		//
+		// Composing: Chain(inner, mws[0], mws[1])
+		// → mws[0]( mws[1]( inner ) )
+		// inner observes the ResponseWriter AFTER mws[1] has executed its pre-next code.
+		var headerSeenInsideNext string
+		inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			headerSeenInsideNext = w.Header().Get("Request-Id")
+		})
+		h := httpx.Chain(inner, mws[0], mws[1])
+
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, r)
+
+		if headerSeenInsideNext == "" {
+			t.Error("Request-Id header was not set before next was called — mws[1] must be RequestIDMiddleware")
+		}
+	})
+
+	t.Run("security_headers_before_auth_present_on_401", func(t *testing.T) {
+		t.Parallel()
+
+		logger, _ := newTestLogger()
+		mws := httpx.StandardChain(logger, validator, isPublic)
+
+		// security-headers runs before auth, so its headers must appear even on 401.
+		// If auth ran before security-headers, the 401 short-circuit would skip the header.
+		route := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		h := httpx.Chain(route, mws...)
+
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/protected", nil) // no token → 401
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, r)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("want 401 from auth, got %d", rr.Code)
+		}
+		if v := rr.Header().Get("X-Content-Type-Options"); v != "nosniff" {
+			t.Errorf("X-Content-Type-Options = %q on 401, want nosniff — security-headers must run before auth", v)
+		}
+	})
+
+	t.Run("auth_is_innermost_outer_layers_run_on_401", func(t *testing.T) {
+		t.Parallel()
+
+		// Behavioral proof that auth is the innermost middleware (last before route).
+		//
+		// Strategy: send a request that auth rejects (no token → 401) and assert that
+		// the layers that must be OUTSIDE auth all produced their observable effects:
+		//   - request-id set the Request-Id response header
+		//   - security-headers set X-Content-Type-Options: nosniff
+		//   - request-log emitted a "request" log line containing the request-id
+		//
+		// If any of these layers were INSIDE auth (i.e. between auth and the route),
+		// auth's 401 short-circuit would skip them — the corresponding assertion fails.
+		//
+		// The M2 mutation (request-log moved innermost, between auth and route) is
+		// caught by the log-line check: on a 401 the inner request-log never runs,
+		// so no "request" line is emitted.
+		logger, logBuf := newTestLogger()
+		mws := httpx.StandardChain(logger, validator, isPublic)
+
+		route := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		h := httpx.Chain(route, mws...)
+
+		// No Authorization header → auth rejects with 401.
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/protected", nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, r)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("want 401 from auth, got %d — prerequisite for this test", rr.Code)
+		}
+
+		// request-id must have run (outside auth): header is present on the 401 response.
+		if rr.Header().Get("Request-Id") == "" {
+			t.Error("Request-Id header missing on 401 — request-id must be outside (above) auth")
+		}
+
+		// security-headers must have run (outside auth): nosniff on the 401 response.
+		if v := rr.Header().Get("X-Content-Type-Options"); v != "nosniff" {
+			t.Errorf("X-Content-Type-Options = %q on 401 — security-headers must be outside (above) auth", v)
+		}
+
+		// request-log must have run (outside auth): a "request" log line must exist.
+		// If request-log were innermost (M2 mutation), the 401 short-circuit skips it.
+		logOutput := logBuf.String()
+		hasRequestLine := false
+		for line := range strings.SplitSeq(logOutput, "\n") {
+			if strings.Contains(line, `"msg":"request"`) {
+				hasRequestLine = true
+				break
+			}
+		}
+		if !hasRequestLine {
+			t.Errorf("no 'request' log line on 401 — request-log must be outside (above) auth; log: %s", logOutput)
+		}
+	})
+
+	t.Run("request_log_emits_line_with_request_id_from_context", func(t *testing.T) {
+		t.Parallel()
+
+		logger, logBuf := newTestLogger()
+		mws := httpx.StandardChain(logger, validator, isPublic)
+
+		// request-log runs inside request-id, so it can read the request-id from
+		// context. If order were reversed (log → request-id), the log line would have
+		// an empty or "unknown" requestId.
+		route := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		h := httpx.Chain(route, mws...)
+
+		const incomingID = "order-test-req-id"
+		r := httptest.NewRequest(http.MethodGet, "/healthz", nil) // public route
+		r.Header.Set("Request-Id", incomingID)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, r)
+
+		logOutput := logBuf.String()
+		if !strings.Contains(logOutput, incomingID) {
+			t.Errorf("log does not contain requestId %q — request-log must run inside request-id; log: %s",
+				incomingID, logOutput)
+		}
+	})
 }
 
 // ---- RecoverMiddleware ------------------------------------------------------
@@ -457,6 +611,72 @@ func TestRequestLogMiddleware_NoBodiesOrSecrets(t *testing.T) {
 	}
 	if strings.Contains(logOutput, "supersecret") {
 		t.Errorf("log output contains secret data: %s", logOutput)
+	}
+}
+
+// TestRequestLogMiddleware_5xxLogsError verifies that a handler that returns a
+// 5xx status WITHOUT panicking causes the request-log middleware to emit the log
+// line at ERROR level, and that a 2xx or 4xx response is logged at INFO level.
+//
+// This is the general status≥500 → ERROR mapping test. The panic path (which
+// also resolves to 500/ERROR) is covered by TestRequestLogMiddleware_EmitsOneLineOnPanic.
+func TestRequestLogMiddleware_5xxLogsError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		status    int
+		wantLevel string
+	}{
+		{http.StatusOK, "INFO"},
+		{http.StatusCreated, "INFO"},
+		{http.StatusBadRequest, "INFO"},
+		{http.StatusUnauthorized, "INFO"},
+		{http.StatusNotFound, "INFO"},
+		{http.StatusInternalServerError, "ERROR"},
+		{http.StatusBadGateway, "ERROR"},
+		{http.StatusServiceUnavailable, "ERROR"},
+	}
+
+	for _, tt := range tests {
+		t.Run(http.StatusText(tt.status), func(t *testing.T) {
+			t.Parallel()
+
+			logger, logBuf := newTestLogger()
+
+			// The handler writes the status code normally — no panic, just a plain
+			// return. This exercises the straight-line path through RequestLogMiddleware,
+			// not the panic re-panic path.
+			h := httpx.Chain(noopHandler(tt.status, ""), httpx.RequestLogMiddleware(logger))
+
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, r)
+
+			logOutput := logBuf.String()
+			// Parse the single "request" log line.
+			var entry map[string]any
+			for line := range strings.SplitSeq(logOutput, "\n") {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				if err := json.Unmarshal([]byte(line), &entry); err != nil {
+					t.Fatalf("log line is not valid JSON: %v (line: %s)", err, line)
+				}
+				if msg, _ := entry["msg"].(string); msg != "request" {
+					continue
+				}
+				break
+			}
+			if entry == nil {
+				t.Fatalf("no 'request' log line emitted; log: %s", logOutput)
+			}
+
+			gotLevel, _ := entry["level"].(string)
+			if gotLevel != tt.wantLevel {
+				t.Errorf("status %d: log level = %q, want %q — status→level mapping is wrong",
+					tt.status, gotLevel, tt.wantLevel)
+			}
+		})
 	}
 }
 
