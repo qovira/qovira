@@ -107,20 +107,20 @@ func (m *Module) LoginHandler() http.HandlerFunc {
 				return
 			}
 			// Infrastructure failure — do not leak detail to client; log server-side.
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "login_failed", err.Error()))
 			return
 		}
 
 		token, _, expiresAt, err := m.sessions.Mint(r.Context(), user.ID, m.now().UTC())
 		if err != nil {
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "session_mint_failed", err.Error()))
 			return
 		}
 
 		// Generate a fresh CSRF token: 32 bytes from crypto/rand encoded as base64url.
 		csrfToken, err := generateCSRFToken()
 		if err != nil {
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "csrf_token_failed", err.Error()))
 			return
 		}
 
@@ -128,28 +128,14 @@ func (m *Module) LoginHandler() http.HandlerFunc {
 
 		// __Host- prefix mandates: Secure=true, Path="/", no Domain attribute.
 		// HttpOnly prevents JavaScript from reading the session token.
-		http.SetCookie(w, &http.Cookie{
-			Name:     httpx.SessionCookieName,
-			Value:    token,
-			HttpOnly: true,
-			Secure:   true,
-			SameSite: http.SameSiteLaxMode,
-			Path:     "/",
-			MaxAge:   maxAge,
-		})
+		// authCookie bakes in Secure/SameSite=Strict/Path so both set and clear
+		// paths use identical attributes and the browser finds the same jar entry.
+		http.SetCookie(w, authCookie(httpx.SessionCookieName, token, true, maxAge))
 
 		// The CSRF cookie must be readable by JavaScript (no HttpOnly) so the
 		// SPA can echo it as the CSRF-Token request header on unsafe methods.
 		// G124: HttpOnly=false is intentional for the CSRF double-submit pattern.
-		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly=false intentional for CSRF double-submit
-			Name:     httpx.CSRFCookieName,
-			Value:    csrfToken,
-			HttpOnly: false,
-			Secure:   true,
-			SameSite: http.SameSiteLaxMode,
-			Path:     "/",
-			MaxAge:   maxAge,
-		})
+		http.SetCookie(w, authCookie(httpx.CSRFCookieName, csrfToken, false, maxAge)) //nolint:gosec // G124: HttpOnly=false intentional for CSRF double-submit
 
 		resp := loginResponseBody{
 			ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
@@ -201,14 +187,14 @@ func (m *Module) MeHandler() http.HandlerFunc {
 		if !ok {
 			// This route is never reached unauthenticated (middleware guarantees it),
 			// so a missing principal is an internal wiring error.
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", "principal missing from context on protected route"))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "get_me_principal_missing", "principal missing from context on protected route"))
 			return
 		}
 
 		u, err := m.svc.GetUserByID(r.Context(), principal.UserID)
 		if err != nil {
 			// ErrUserNotFound here means the row vanished mid-session — treat as 500.
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "get_me_user_failed", err.Error()))
 			return
 		}
 
@@ -227,7 +213,7 @@ func (m *Module) UpdateMeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := httpx.PrincipalFromContext(r.Context())
 		if !ok {
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", "principal missing from context on protected route"))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "update_me_principal_missing", "principal missing from context on protected route"))
 			return
 		}
 
@@ -246,7 +232,7 @@ func (m *Module) UpdateMeHandler() http.HandlerFunc {
 		// Load current values so omitted fields keep their stored content.
 		current, err := m.svc.GetUserByID(r.Context(), principal.UserID)
 		if err != nil {
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "update_me_user_readback_failed", err.Error()))
 			return
 		}
 
@@ -269,14 +255,14 @@ func (m *Module) UpdateMeHandler() http.HandlerFunc {
 		}
 
 		if err := m.svc.UpdateProfile(r.Context(), principal.UserID, displayName, timezone, locale, language); err != nil {
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "profile_update_failed", err.Error()))
 			return
 		}
 
 		// Re-fetch so updatedAt and any other server-side fields are accurate.
 		updated, err := m.svc.GetUserByID(r.Context(), principal.UserID)
 		if err != nil {
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "update_me_result_readback_failed", err.Error()))
 			return
 		}
 
@@ -294,7 +280,7 @@ func (m *Module) ChangePasswordHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := httpx.PrincipalFromContext(r.Context())
 		if !ok {
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", "principal missing from context on protected route"))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "change_password_principal_missing", "principal missing from context on protected route"))
 			return
 		}
 
@@ -310,29 +296,33 @@ func (m *Module) ChangePasswordHandler() http.HandlerFunc {
 		err := m.svc.ChangePassword(r.Context(), principal.UserID, body.CurrentPassword, body.NewPassword)
 		if err != nil {
 			if errors.Is(err, auth.ErrInvalidCredentials) {
+				// Finding 2: use "validation_error" for cross-endpoint consistency.
+				// Finding 4: problem-level detail is a general message; the specific
+				// "incorrect" detail lives only on the field error (mirrors the
+				// weak-new-password branch shape).
 				httpx.WriteProblem(w, r, httpx.ValidationProblem(
-					"validation_failed",
-					"The current password is incorrect.",
+					"validation_error",
+					"Request validation failed.",
 					httpx.FieldError{Pointer: "/currentPassword", Detail: "The current password is incorrect."},
 				))
 				return
 			}
 			if errors.Is(err, auth.ErrPasswordTooShort) || errors.Is(err, auth.ErrPasswordTooLong) {
 				httpx.WriteProblem(w, r, httpx.ValidationProblem(
-					"validation_failed",
+					"validation_error",
 					"The new password does not meet the password policy requirements.",
 					httpx.FieldError{Pointer: "/newPassword", Detail: err.Error()},
 				))
 				return
 			}
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "change_password_failed", err.Error()))
 			return
 		}
 
 		// Revoke every OTHER session, keeping the caller's current session alive.
 		token, _ := httpx.SessionTokenFromRequest(r)
 		if token == "" {
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", "session token missing from request after successful password change"))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "change_password_token_missing", "session token missing from request after successful password change"))
 			return
 		}
 		sess, err := m.sessions.Lookup(r.Context(), token)
@@ -340,13 +330,13 @@ func (m *Module) ChangePasswordHandler() http.HandlerFunc {
 			// The password is already changed here; without the current session ID we
 			// cannot scope the revocation, so other sessions may survive. Log it as a
 			// security-relevant event so an operator can react.
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", "password changed but current session lookup failed; other sessions were not revoked and may remain valid: "+err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "password_changed_session_lookup_failed", "password changed but current session lookup failed; other sessions were not revoked and may remain valid: "+err.Error()))
 			return
 		}
 		if err := m.sessions.DeleteAllOtherForUser(r.Context(), principal.UserID, sess.ID); err != nil {
 			// Same security-relevant state: the new hash is persisted but stale sessions
 			// may still resolve. Surface enough detail server-side to alert an operator.
-			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "internal_error", "password changed but revoking other sessions failed; stale sessions may remain valid: "+err.Error()))
+			httpx.WriteProblem(w, r, httpx.InternalProblem(m.logger, "password_changed_revocation_failed", "password changed but revoking other sessions failed; stale sessions may remain valid: "+err.Error()))
 			return
 		}
 
@@ -396,30 +386,38 @@ func userBody(u auth.User) userJSON {
 
 // ── Cookie helpers ────────────────────────────────────────────────────────────
 
+// authCookie builds a cookie for the auth layer, baking in the shared security
+// attributes (Secure, SameSite, Path) that must be identical on both the set
+// and clear paths. Using a single factory prevents the browser from treating a
+// mismatched clear cookie as a different jar entry, which would silently leave
+// the original cookie intact after logout.
+//
+// SameSite=Strict: Qovira is a single-user self-hosted SPA with no legitimate
+// cross-site top-level entry flow; Strict is a tighter default than Lax and
+// adds defense-in-depth on top of the existing double-submit CSRF check.
+func authCookie(name, value string, httpOnly bool, maxAge int) *http.Cookie {
+	return &http.Cookie{ //nolint:gosec // G124: HttpOnly is parameterised; callers that pass false (CSRF cookie) carry their own nolint at the call site
+		Name:     name,
+		Value:    value,
+		HttpOnly: httpOnly,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+		MaxAge:   maxAge,
+	}
+}
+
 // clearAuthCookies emits expired Set-Cookie headers for both the session and
 // CSRF cookies.  MaxAge=-1 causes Go's http package to render Max-Age=0 on the
 // wire, which instructs browsers to delete the cookie immediately.
+//
+// The attributes (Secure, SameSite, Path, HttpOnly) must mirror the login set
+// path exactly; authCookie enforces that single source of truth.
 func clearAuthCookies(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     httpx.SessionCookieName,
-		Value:    "",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-		Path:     "/",
-		MaxAge:   -1,
-	})
+	http.SetCookie(w, authCookie(httpx.SessionCookieName, "", true, -1))
 	// G124: HttpOnly=false intentional — mirrors the login cookie so the browser
 	// deletes the correct jar entry (HttpOnly and non-HttpOnly are separate entries).
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly=false intentional for CSRF double-submit pattern
-		Name:     httpx.CSRFCookieName,
-		Value:    "",
-		HttpOnly: false,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-		Path:     "/",
-		MaxAge:   -1,
-	})
+	http.SetCookie(w, authCookie(httpx.CSRFCookieName, "", false, -1)) //nolint:gosec // G124: HttpOnly=false intentional for CSRF double-submit pattern
 }
 
 // generateCSRFToken returns a 32-byte random value encoded as base64url (no

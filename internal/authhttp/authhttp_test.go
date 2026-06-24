@@ -214,6 +214,10 @@ func TestLogin_Success_200WithCookiesAndBody(t *testing.T) {
 	if sessionCookie.Path != "/" {
 		t.Errorf("__Host-qovira_session cookie: Path = %q, want /", sessionCookie.Path)
 	}
+	// Session cookie must be SameSite=Strict (finding 5: tightest default for self-hosted SPA).
+	if sessionCookie.SameSite != http.SameSiteStrictMode {
+		t.Errorf("__Host-qovira_session cookie: SameSite = %v, want Strict", sessionCookie.SameSite)
+	}
 	// Session cookie must have a non-empty value starting with "qov_".
 	if !strings.HasPrefix(sessionCookie.Value, "qov_") {
 		t.Errorf("__Host-qovira_session value = %q, must start with qov_", sessionCookie.Value)
@@ -222,6 +226,10 @@ func TestLogin_Success_200WithCookiesAndBody(t *testing.T) {
 	// CSRF cookie must NOT be HttpOnly (SPA must read it).
 	if csrfCookie.HttpOnly {
 		t.Error("qovira_csrf cookie: HttpOnly = true, want false")
+	}
+	// CSRF cookie must be SameSite=Strict (mirrors session cookie, authCookie helper enforces it).
+	if csrfCookie.SameSite != http.SameSiteStrictMode {
+		t.Errorf("qovira_csrf cookie: SameSite = %v, want Strict", csrfCookie.SameSite)
 	}
 	// CSRF cookie value must be non-empty.
 	if csrfCookie.Value == "" {
@@ -925,7 +933,7 @@ func TestChangePassword_HappyPath(t *testing.T) {
 }
 
 // TestChangePassword_WrongCurrentPassword_Returns422 verifies that a wrong
-// current password produces 422 with code "validation_failed" and the pointer
+// current password produces 422 with code "validation_error" and the pointer
 // "/currentPassword".
 func TestChangePassword_WrongCurrentPassword_Returns422(t *testing.T) {
 	t.Parallel()
@@ -961,8 +969,8 @@ func TestChangePassword_WrongCurrentPassword_Returns422(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &prob); err != nil {
 		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
 	}
-	if prob.Code != "validation_failed" {
-		t.Errorf("code = %q, want validation_failed", prob.Code)
+	if prob.Code != "validation_error" {
+		t.Errorf("code = %q, want validation_error", prob.Code)
 	}
 	if len(prob.Errors) == 0 {
 		t.Fatal("errors[] is empty, want at least one entry")
@@ -975,8 +983,65 @@ func TestChangePassword_WrongCurrentPassword_Returns422(t *testing.T) {
 	}
 }
 
+// TestChangePassword_WrongCurrentPassword_ProblemDetailIsGeneral verifies that
+// the problem-level "detail" field for a wrong-current-password 422 is a general
+// message ("Request validation failed."), while the specific "incorrect" message
+// lives only on the field error (finding 4: drop duplicated detail).
+func TestChangePassword_WrongCurrentPassword_ProblemDetailIsGeneral(t *testing.T) {
+	t.Parallel()
+
+	s := openStore(t)
+	const oldPW = "correct-horse"
+	u := createUser(t, s, "pw-detail-shape@example.com", oldPW)
+	mod := buildModule(t, s, nil)
+
+	sessions := auth.NewSessions(s, auth.DefaultSessionConfig)
+	callerToken, _, _, err := sessions.Mint(context.Background(), u.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("mint session: %v", err)
+	}
+
+	principal := store.Principal{UserID: u.ID, Role: string(u.Role)}
+	rr := serveChangePassword(t, mod, principal, callerToken, changePasswordBody{
+		CurrentPassword: "totally-wrong-password",
+		NewPassword:     "new-valid-horse-password",
+	})
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body = %s", rr.Code, rr.Body)
+	}
+
+	var prob struct {
+		Detail string `json:"detail"`
+		Errors []struct {
+			Pointer string `json:"pointer"`
+			Detail  string `json:"detail"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &prob); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
+	}
+
+	// Problem-level detail must be the general message, not the field-specific one.
+	const wantDetail = "Request validation failed."
+	if prob.Detail != wantDetail {
+		t.Errorf("problem.detail = %q, want %q", prob.Detail, wantDetail)
+	}
+
+	// The specific message must live on the field error, not be duplicated at the problem level.
+	if len(prob.Errors) == 0 {
+		t.Fatal("errors[] is empty")
+	}
+	if prob.Errors[0].Detail == "" {
+		t.Error("errors[0].detail is empty; want the field-specific message there")
+	}
+	if prob.Errors[0].Detail == prob.Detail {
+		t.Errorf("errors[0].detail == problem.detail (%q): field-specific message must differ from the general problem detail", prob.Detail)
+	}
+}
+
 // TestChangePassword_WeakNewPassword_Returns422 verifies that a policy-violating
-// new password produces 422 with code "validation_failed" and pointer "/newPassword",
+// new password produces 422 with code "validation_error" and pointer "/newPassword",
 // even when the current password is correct.
 func TestChangePassword_WeakNewPassword_Returns422(t *testing.T) {
 	t.Parallel()
@@ -1013,8 +1078,8 @@ func TestChangePassword_WeakNewPassword_Returns422(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &prob); err != nil {
 		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body)
 	}
-	if prob.Code != "validation_failed" {
-		t.Errorf("code = %q, want validation_failed", prob.Code)
+	if prob.Code != "validation_error" {
+		t.Errorf("code = %q, want validation_error", prob.Code)
 	}
 	if len(prob.Errors) == 0 {
 		t.Fatal("errors[] is empty, want at least one entry")

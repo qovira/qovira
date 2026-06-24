@@ -680,3 +680,146 @@ func TestLookup_NotFound(t *testing.T) {
 		t.Errorf("Lookup (absent) = %v, want ErrSessionNotFound", err)
 	}
 }
+
+// ── AC7: UTC timestamp enforcement (finding 6) ────────────────────────────────
+
+// TestLookup_NonUTCTimestamp_Errors verifies that a session row whose
+// created_at or last_used_at carries a non-zero UTC offset (e.g. "+02:00")
+// is rejected by Lookup with an error rather than silently accepted.
+//
+// Background: parseSessionTimes previously called .UTC() which normalised the
+// in-memory value for Valid/ExpiresAt math, but PurgeExpired compares raw
+// stored strings lexicographically in SQL. A row written with "+02:00" would
+// Resolve correctly yet sort wrong in the purge query. The guard makes the
+// contract (stored timestamps must be UTC "...Z") enforced at read time.
+func TestLookup_NonUTCTimestamp_Errors(t *testing.T) {
+	t.Parallel()
+
+	s, svc, sessions := openSessionsStore(t)
+	ctx := context.Background()
+	u := createTestUser(t, svc, "nonUTC-lookup@example.com")
+	now := time.Now().UTC()
+
+	// Mint a normal session so we have a valid token hash in the DB.
+	token, _, _, err := sessions.Mint(ctx, u.ID, now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+
+	// Corrupt the stored created_at to a non-UTC offset, simulating a row that
+	// was written by an external tool or a previous code path without the guard.
+	nonUTCTime := now.Truncate(time.Second).In(time.FixedZone("Europe/Berlin", 2*60*60))
+	nonUTCStr := nonUTCTime.Format(time.RFC3339) // produces "...+02:00"
+
+	_, err = s.Writer().ExecContext(ctx,
+		`UPDATE sessions SET created_at = ? WHERE user_id = ?`,
+		nonUTCStr, u.ID,
+	)
+	if err != nil {
+		t.Fatalf("corrupt created_at: %v", err)
+	}
+
+	// Lookup must now return an error (not ErrSessionNotFound, but a parse/UTC error).
+	_, lookupErr := sessions.Lookup(ctx, token)
+	if lookupErr == nil {
+		t.Fatal("Lookup with non-UTC created_at: want error, got nil")
+	}
+	if errors.Is(lookupErr, auth.ErrSessionNotFound) {
+		t.Errorf("Lookup with non-UTC created_at: got ErrSessionNotFound, want a UTC-enforcement error")
+	}
+}
+
+// TestLookup_NonUTCLastUsedAt_Errors verifies the same guard applies to
+// last_used_at.
+func TestLookup_NonUTCLastUsedAt_Errors(t *testing.T) {
+	t.Parallel()
+
+	s, svc, sessions := openSessionsStore(t)
+	ctx := context.Background()
+	u := createTestUser(t, svc, "nonUTC-lastused@example.com")
+	now := time.Now().UTC()
+
+	token, _, _, err := sessions.Mint(ctx, u.ID, now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+
+	nonUTCTime := now.Truncate(time.Second).In(time.FixedZone("UTC+5", 5*60*60))
+	nonUTCStr := nonUTCTime.Format(time.RFC3339) // produces "...+05:00"
+
+	_, err = s.Writer().ExecContext(ctx,
+		`UPDATE sessions SET last_used_at = ? WHERE user_id = ?`,
+		nonUTCStr, u.ID,
+	)
+	if err != nil {
+		t.Fatalf("corrupt last_used_at: %v", err)
+	}
+
+	_, lookupErr := sessions.Lookup(ctx, token)
+	if lookupErr == nil {
+		t.Fatal("Lookup with non-UTC last_used_at: want error, got nil")
+	}
+	if errors.Is(lookupErr, auth.ErrSessionNotFound) {
+		t.Errorf("Lookup with non-UTC last_used_at: got ErrSessionNotFound, want a UTC-enforcement error")
+	}
+}
+
+// TestLookup_UTCTimestamp_Succeeds verifies that a canonical UTC "Z" timestamp
+// continues to resolve normally after the guard is added.
+func TestLookup_UTCTimestamp_Succeeds(t *testing.T) {
+	t.Parallel()
+
+	_, svc, sessions := openSessionsStore(t)
+	ctx := context.Background()
+	u := createTestUser(t, svc, "UTC-ok@example.com")
+	now := time.Now().UTC()
+
+	token, _, _, err := sessions.Mint(ctx, u.ID, now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+
+	found, err := sessions.Lookup(ctx, token)
+	if err != nil {
+		t.Fatalf("Lookup with UTC timestamp: %v", err)
+	}
+	if found.UserID != u.ID {
+		t.Errorf("UserID = %q, want %q", found.UserID, u.ID)
+	}
+}
+
+// TestResolve_NonUTCTimestamp_Errors verifies the same UTC guard via the
+// Resolve path (which uses sessionFromJoinRow → parseSessionTimes).
+func TestResolve_NonUTCTimestamp_Errors(t *testing.T) {
+	t.Parallel()
+
+	s, svc, sessions := openSessionsStore(t)
+	ctx := context.Background()
+	u := createTestUser(t, svc, "nonUTC-resolve@example.com")
+	now := time.Now().UTC()
+
+	token, _, _, err := sessions.Mint(ctx, u.ID, now)
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+
+	nonUTCTime := now.Truncate(time.Second).In(time.FixedZone("UTC+2", 2*60*60))
+	nonUTCStr := nonUTCTime.Format(time.RFC3339)
+
+	_, err = s.Writer().ExecContext(ctx,
+		`UPDATE sessions SET created_at = ? WHERE user_id = ?`,
+		nonUTCStr, u.ID,
+	)
+	if err != nil {
+		t.Fatalf("corrupt created_at: %v", err)
+	}
+
+	_, resolveErr := sessions.Resolve(ctx, token, now)
+	if resolveErr == nil {
+		t.Fatal("Resolve with non-UTC created_at: want error, got nil")
+	}
+	// Must NOT silently return ErrSessionNotFound — should be a distinct infrastructure error.
+	if errors.Is(resolveErr, auth.ErrSessionNotFound) {
+		t.Errorf("Resolve with non-UTC created_at: got ErrSessionNotFound, want a UTC-enforcement error (not a not-found)")
+	}
+}

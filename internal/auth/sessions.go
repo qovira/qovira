@@ -118,14 +118,28 @@ func sessionFromJoinRow(row db.GetSessionWithUserByTokenHashRow) (Session, error
 // session row carries and returns them normalized to UTC. It is the single
 // parse site both row-conversion helpers delegate to so the timestamp contract
 // (RFC 3339, UTC, second precision) stays in lockstep across query shapes.
+//
+// UTC enforcement: both timestamps must carry a zero offset (i.e. the "Z"
+// suffix, or equivalently "+00:00"). Mint and Bump always write canonical UTC
+// strings, so a non-zero offset indicates a row written by external tooling or
+// a pre-guard code path. Rejecting such rows here ensures that the in-memory
+// Valid/ExpiresAt computation and the raw-string lexicographic comparison in
+// PurgeExpired (SQL) always agree — a "+02:00" row would otherwise Resolve
+// correctly yet sort wrong in the purge query.
 func parseSessionTimes(createdAt, lastUsedAt string) (time.Time, time.Time, error) {
 	created, err := time.Parse(time.RFC3339, createdAt)
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("auth: parse session created_at %q: %w", createdAt, err)
 	}
+	if _, offset := created.Zone(); offset != 0 {
+		return time.Time{}, time.Time{}, fmt.Errorf("auth: session created_at %q has non-UTC offset; only canonical UTC (Z) timestamps are accepted", createdAt)
+	}
 	lastUsed, err := time.Parse(time.RFC3339, lastUsedAt)
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("auth: parse session last_used_at %q: %w", lastUsedAt, err)
+	}
+	if _, offset := lastUsed.Zone(); offset != 0 {
+		return time.Time{}, time.Time{}, fmt.Errorf("auth: session last_used_at %q has non-UTC offset; only canonical UTC (Z) timestamps are accepted", lastUsedAt)
 	}
 	return created.UTC(), lastUsed.UTC(), nil
 }
