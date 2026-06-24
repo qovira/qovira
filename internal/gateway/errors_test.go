@@ -223,6 +223,35 @@ func TestClassifyResponse_RateLimited_RetryAfterHTTPDate(t *testing.T) {
 	}
 }
 
+// TestClassifyResponse_RateLimited_RetryAfterHTTPDatePast verifies the clamp
+// branch: when the HTTP-date in Retry-After is already in the past,
+// time.Until(t) is negative and the parser must clamp it to exactly 0 (not a
+// negative duration). This is the case the max(time.Until(t), 0) expression
+// exists to handle; a future-only test never exercises it.
+func TestClassifyResponse_RateLimited_RetryAfterHTTPDatePast(t *testing.T) {
+	t.Parallel()
+
+	// Use a date 60 s in the past so time.Until is always negative.
+	past := time.Now().Add(-60 * time.Second).UTC()
+	dateStr := past.Format(http.TimeFormat)
+
+	headers := http.Header{"Retry-After": []string{dateStr}}
+	err := gateway.ClassifyResponse(http.StatusTooManyRequests, headers, nil)
+
+	var rle *gateway.RateLimitedError
+	if !errors.As(err, &rle) {
+		t.Fatalf("expected *RateLimitedError; got %T", err)
+	}
+	// A parseable but already-past date must yield a non-nil RetryAfter clamped
+	// to exactly zero — not a negative duration.
+	if rle.RetryAfter == nil {
+		t.Fatal("RetryAfter should be non-nil for a parseable HTTP-date Retry-After (even if past)")
+	}
+	if *rle.RetryAfter != 0 {
+		t.Errorf("RetryAfter = %v; want 0 (clamped from negative time.Until)", *rle.RetryAfter)
+	}
+}
+
 func TestClassifyResponse_RateLimited_RetryAfterUnparseable(t *testing.T) {
 	t.Parallel()
 

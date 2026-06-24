@@ -500,6 +500,120 @@ func TestParseSSE_IndexCountCapExceeded(t *testing.T) {
 	}
 }
 
+// ── Finding 5: SSE no-space data form, empty-data tolerance, unknown fields ───
+
+// TestParseSSE_EmptyDataLine verifies that a bare "data:" line (no space, empty
+// payload) does NOT abort the stream. The SSE spec allows empty data lines;
+// the no-space fix introduced a regression where CutPrefix("data:") succeeds
+// with rest="" → payload="" → json.Unmarshal("") errors. The fix is to skip
+// the empty payload before attempting JSON decode.
+func TestParseSSE_EmptyDataLine(t *testing.T) {
+	t.Parallel()
+
+	// A stream with a bare "data:" line interspersed between normal data lines.
+	const ssePayload = "" +
+		"data:\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n" +
+		"data:\n\n" +
+		"data: [DONE]\n"
+
+	chunks, err := gateway.ParseSSE(strings.NewReader(ssePayload))
+	if err != nil {
+		t.Fatalf("ParseSSE: unexpected error for bare data: line: %v", err)
+	}
+
+	var text strings.Builder
+	var doneCount int
+	for _, c := range chunks {
+		text.WriteString(c.TextDelta)
+		if c.Done {
+			doneCount++
+		}
+	}
+	if got := text.String(); got != "ok" {
+		t.Errorf("accumulated text = %q, want %q", got, "ok")
+	}
+	if doneCount != 1 {
+		t.Errorf("done chunks = %d, want 1", doneCount)
+	}
+}
+
+// ── Finding 5: SSE no-space data form and unknown field tolerance ─────────────
+
+// TestParseSSE_DataNoSpace verifies that a "data:{...}" line (no space after
+// the colon) is parsed correctly. Per the SSE spec the single space after the
+// colon is optional, so silently dropping such chunks is a correctness bug.
+//
+// This test should FAIL against the current parser (which requires "data: "
+// with a space) and pass once stream.go is fixed.
+func TestParseSSE_DataNoSpace(t *testing.T) {
+	t.Parallel()
+
+	// A minimal SSE stream using the no-space form for the data line.
+	// Per the SSE spec "data:value" and "data: value" are both valid;
+	// the leading space is optional and must be stripped if present.
+	const ssePayload = "" +
+		"data:{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\n" +
+		"data:[DONE]\n"
+
+	chunks, err := gateway.ParseSSE(strings.NewReader(ssePayload))
+	if err != nil {
+		t.Fatalf("ParseSSE: unexpected error: %v", err)
+	}
+
+	var text strings.Builder
+	var doneCount int
+	for _, c := range chunks {
+		text.WriteString(c.TextDelta)
+		if c.Done {
+			doneCount++
+		}
+	}
+	if got := text.String(); got != "hello" {
+		t.Errorf("accumulated text = %q, want %q", got, "hello")
+	}
+	if doneCount != 1 {
+		t.Errorf("done chunks = %d, want 1", doneCount)
+	}
+}
+
+// TestParseSSE_UnknownFieldSkipped verifies that a stray unknown SSE field line
+// (e.g. "event: foo") is silently skipped rather than causing an error or
+// corrupting the output. This exercises the skip-don't-error tolerance for
+// non-data/non-comment lines already present in the parser.
+func TestParseSSE_UnknownFieldSkipped(t *testing.T) {
+	t.Parallel()
+
+	// A stream interspersed with "event:" and "id:" lines which are valid SSE
+	// fields but not used by the OpenAI-compatible protocol; they must be skipped.
+	const ssePayload = "" +
+		"event: ping\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n" +
+		"id: 42\n" +
+		"retry: 1000\n" +
+		"data: [DONE]\n"
+
+	chunks, err := gateway.ParseSSE(strings.NewReader(ssePayload))
+	if err != nil {
+		t.Fatalf("ParseSSE: unexpected error on stream with unknown fields: %v", err)
+	}
+
+	var text strings.Builder
+	var doneCount int
+	for _, c := range chunks {
+		text.WriteString(c.TextDelta)
+		if c.Done {
+			doneCount++
+		}
+	}
+	if got := text.String(); got != "hi" {
+		t.Errorf("accumulated text = %q, want %q", got, "hi")
+	}
+	if doneCount != 1 {
+		t.Errorf("done chunks = %d, want 1", doneCount)
+	}
+}
+
 // ── AC8: Table-driven fixture tests ──────────────────────────────────────────
 
 // TestParseSSE_Fixtures is the omnibus table-driven test that runs all eight

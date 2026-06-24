@@ -484,6 +484,12 @@ func TestChat_NonOK_Setup(t *testing.T) {
 // TestChat_MidStreamTransportBreak verifies that a broken connection after the
 // 2xx response header arrives surfaces as a per-yield error on the iterator,
 // never panics, and never re-emits (AC6).
+//
+// Headline invariants:
+//  1. The iterator yields the text chunk before the break ("hi").
+//  2. The iterator yields exactly one error after the text — yieldCount == 2.
+//  3. The error is non-nil and wraps ErrUpstreamProtocol.
+//  4. No additional yields occur after the error (no re-emit).
 func TestChat_MidStreamTransportBreak(t *testing.T) {
 	t.Parallel()
 
@@ -515,12 +521,13 @@ func TestChat_MidStreamTransportBreak(t *testing.T) {
 		t.Fatalf("Chat: unexpected setup error: %v", err)
 	}
 
-	// Drive the iterator — expect some chunks then an error (or just the
-	// stream ending without error, since the abrupt close may look like EOF
-	// to bufio.Scanner which we treat as normal termination).
+	// Drive the iterator, counting every yield so we can assert the
+	// no-re-emit invariant (yieldCount must be bounded).
 	var chunks []Chunk
 	var iterErr error
+	var yieldCount int
 	for c, e := range seq {
+		yieldCount++
 		if e != nil {
 			iterErr = e
 			break
@@ -528,7 +535,7 @@ func TestChat_MidStreamTransportBreak(t *testing.T) {
 		chunks = append(chunks, c)
 	}
 
-	// We must have received at least the one text chunk before any error.
+	// Invariant 1: the "hi" text chunk must have arrived before the break.
 	var hasText bool
 	for _, c := range chunks {
 		if c.TextDelta == "hi" {
@@ -539,18 +546,20 @@ func TestChat_MidStreamTransportBreak(t *testing.T) {
 		t.Errorf("expected to see 'hi' text chunk before break; got: %v", chunks)
 	}
 
-	// If an error occurred it must wrap ErrUpstreamProtocol (scanner read
-	// error) or the stream naturally ended — either is acceptable. The key
-	// invariant is: no panic and no re-emit after error.
-	if iterErr != nil && !errors.Is(iterErr, ErrUpstreamProtocol) {
-		t.Errorf("iterator error = %v; expected nil or ErrUpstreamProtocol", iterErr)
+	// Invariant 2: exactly two yields — the text chunk and then the error.
+	// A higher count would mean the iterator re-emitted after the error.
+	if yieldCount != 2 {
+		t.Errorf("yieldCount = %d, want 2 (one text chunk + one error yield); chunks = %v", yieldCount, chunks)
 	}
 
-	// Ensure the iterator is exhausted after the error — ranging again over
-	// a closed iterator should yield nothing. Since seq is a func, we simply
-	// verify the iterator does not yield more items after we broke.
-	// (This is tested by the fact that we called break — the seq function
-	// must not panic or call yield after the consumer has returned false.)
+	// Invariant 3: the error must be present and wrap ErrUpstreamProtocol.
+	// The abrupt TCP close surfaces as a scanner "unexpected EOF" which the
+	// stream layer maps to ErrMalformedStream → ErrUpstreamProtocol.
+	if iterErr == nil {
+		t.Error("expected a non-nil iterator error after mid-stream transport break")
+	} else if !errors.Is(iterErr, ErrUpstreamProtocol) {
+		t.Errorf("iterator error = %v; want wrapping ErrUpstreamProtocol", iterErr)
+	}
 }
 
 // TestChat_NoReemitAfterError verifies that once the iterator yields an error

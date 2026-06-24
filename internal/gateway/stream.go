@@ -153,11 +153,21 @@ func streamSSE(r io.Reader, emit func(Chunk) bool) error {
 			continue
 		}
 
-		// Only "data:" lines carry payload.
-		payload, ok := strings.CutPrefix(line, "data: ")
+		// Only "data:" lines carry payload. Per the SSE spec the single space
+		// after the colon is optional, so accept both "data: {…}" (space) and
+		// "data:{…}" (no space) by stripping "data:" then removing at most one
+		// leading space from the remainder.
+		rest, ok := strings.CutPrefix(line, "data:")
 		if !ok {
 			// Non-data, non-comment, non-empty — not part of the OpenAI SSE
 			// contract; skip rather than error so unknown fields don't break.
+			continue
+		}
+		payload := strings.TrimPrefix(rest, " ")
+
+		// A bare "data:" line (empty payload after optional space strip) is legal
+		// SSE and must be skipped, not passed to json.Unmarshal which would error.
+		if payload == "" {
 			continue
 		}
 

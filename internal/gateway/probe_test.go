@@ -13,6 +13,7 @@ package gateway
 // All tests run under -race.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -493,5 +496,65 @@ func TestChatEndpointURL_AfterRefactor(t *testing.T) {
 	const want = "https://api.example.com/v1/chat/completions"
 	if got != want {
 		t.Errorf("chatEndpointURL = %q, want %q", got, want)
+	}
+}
+
+// ── Concurrent-use safety ─────────────────────────────────────────────────────
+
+// TestGateway_ConcurrentUse locks in the package-doc claim that "each exported
+// type in this package is safe for concurrent use". It fires N concurrent
+// [Gateway.Chat] calls and N concurrent [Gateway.Probe] calls against a shared
+// Gateway and httptest.Server, fully drains every returned iterator, and relies
+// on -race to surface any data races.
+//
+// The Chat fan-out counts successful drains and asserts all N completed, so a
+// regression that makes every Chat setup silently fail cannot produce a false
+// green.
+//
+// Run with: go test -race ./internal/gateway/...
+func TestGateway_ConcurrentUse(t *testing.T) {
+	// Do NOT call t.Parallel() — this test's own goroutine fan-out already
+	// exercises concurrency and -race catches races within a single test.
+
+	const N = 8 // goroutines per method
+
+	srv := newProbeServer(t, "", modelsJSON("gpt-test"), toolCallSSE, nil)
+
+	gw := newProbeGateway(t, srv.URL, "sk-test", "gpt-test")
+
+	var wg sync.WaitGroup
+	var chatDrains atomic.Int32 // counts goroutines that obtained a seq and fully drained it
+
+	// N concurrent Chat calls — each fully drains its iterator.
+	for range N {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			seq, err := gw.Chat(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "hi"}},
+			})
+			if err != nil {
+				return // setup error — counted as not drained
+			}
+			for range seq {
+			}
+			chatDrains.Add(1)
+		}()
+	}
+
+	// N concurrent Probe calls.
+	for range N {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			gw.Probe(context.Background(), RoleChat)
+		}()
+	}
+
+	wg.Wait()
+
+	// Every Chat goroutine must have obtained a seq and drained it.
+	if got := chatDrains.Load(); got != N {
+		t.Errorf("Chat drains = %d, want %d; some goroutines failed to obtain an iterator", got, N)
 	}
 }

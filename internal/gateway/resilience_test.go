@@ -751,7 +751,6 @@ func TestResilience_CtxCancelDuringRetry(t *testing.T) {
 func TestResilience_CtxCancelDuringStream(t *testing.T) {
 	t.Parallel()
 
-	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -760,8 +759,8 @@ func TestResilience_CtxCancelDuringStream(t *testing.T) {
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		close(started)
-		// Hang until client cancels.
+		// Hang until client cancels. Chunk-based sync in the consumer loop
+		// (cancel on "x" TextDelta) is sufficient; no extra channel needed.
 		<-r.Context().Done()
 	}))
 	t.Cleanup(srv.Close)
