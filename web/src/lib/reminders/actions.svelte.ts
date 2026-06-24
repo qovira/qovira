@@ -206,8 +206,13 @@ export function makeReminderPatchBody(original: ReminderItem, next: EditFormValu
     body.title = next.title;
   }
 
-  // dueAt (already UTC RFC3339)
-  if (next.dueAt !== original.dueAt) {
+  // dueAt: compare by instant (getTime()), not raw string.
+  // The server stores second-truncated RFC3339 ("…:00Z") while buildNextDueAt
+  // produces full ISO ("…:00.000Z"). They are the same instant but differ as
+  // strings, causing a spurious patch on every save if we compare strings.
+  // Using getTime() avoids the false positive and prevents silently zeroing
+  // sub-minute seconds that dueAtToLocal drops from the input form value.
+  if (new Date(next.dueAt).getTime() !== new Date(original.dueAt).getTime()) {
     body.dueAt = next.dueAt;
   }
 

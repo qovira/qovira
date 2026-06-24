@@ -71,9 +71,20 @@
   } from "$lib/paraglide/messages.js";
 
   // ---------------------------------------------------------------------------
-  // "now" — seeded at component init. Correct for the initial render.
+  // "now" — refreshed on a coarse 30-second timer so bucket boundaries
+  // (overdue / today / this-week, midnight crossings) stay current while the
+  // route stays mounted. Minute granularity is sufficient; 30s is a safe
+  // midpoint between responsiveness and CPU cost.
+  // $effect is appropriate: syncing with a browser timer (external system).
   // ---------------------------------------------------------------------------
   let now = $state(new Date());
+
+  $effect(() => {
+    const id = setInterval(() => {
+      now = new Date();
+    }, 30_000);
+    return () => clearInterval(id);
+  });
 
   // ---------------------------------------------------------------------------
   // Bucketed views — derived from the live store, recompute on every mutation.

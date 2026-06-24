@@ -89,18 +89,26 @@
     loadError = false;
 
     try {
-      const { data } = await Api.GET("/conversations", {
+      const result = await Api.GET("/conversations", {
         params: { query: cursor !== undefined ? { cursor } : {} },
       });
 
-      if (data !== undefined) {
-        conversations = cursor === undefined ? data.data : [...conversations, ...data.data];
-        nextCursor = data.pagination.nextCursor;
-        hasMore = data.pagination.hasMore;
+      if (result.error !== undefined) {
+        // Server returned a problem+json error. The Api wrapper resolves with
+        // { error, data: undefined } rather than throwing, so catch never runs
+        // for 4xx/5xx. Set loadError explicitly to distinguish a genuine server
+        // error from a successful empty list (which would be a lie to show
+        // "No conversations yet" for).
+        loadError = true;
+      } else {
+        // Success — data is defined (non-error branch of the discriminated union).
+        conversations =
+          cursor === undefined ? result.data.data : [...conversations, ...result.data.data];
+        nextCursor = result.data.pagination.nextCursor;
+        hasMore = result.data.pagination.hasMore;
       }
     } catch {
-      // Network throw or unexpected error — flag it so the UI can distinguish
-      // a transient error from a genuine empty conversation list.
+      // Network throw (no connectivity, CORS, etc.) — same error treatment.
       loadError = true;
     } finally {
       loading = false;

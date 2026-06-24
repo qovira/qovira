@@ -31,7 +31,8 @@
     getActiveConversationId,
     getTurnError,
     clearTurnError,
-    appendMessage,
+    sendChatMessage,
+    type PostMessageFn,
   } from "$lib/stores/conversation.svelte.js";
   import { getToolCallsForMessage } from "$lib/stores/tool-calls.svelte.js";
   import { getConfirmationsForMessage } from "$lib/stores/confirmations.svelte.js";
@@ -84,9 +85,19 @@
   // Send message
   // ---------------------------------------------------------------------------
 
+  // Narrow postFn adapter — translates the full Api.POST signature for this
+  // endpoint to the PostMessageFn shape expected by sendChatMessage.
+  const postMessageFn: PostMessageFn = async (conversationId, text) =>
+    Api.POST("/conversations/{id}/messages", {
+      params: { path: { id: conversationId } },
+      body: { content: text },
+    });
+
   async function sendMessage(): Promise<void> {
     const text = composerText.trim();
-    if (text === "" || sending) return;
+    if (text === "" || sending) {
+      return;
+    }
 
     const conversationId = getActiveConversationId() ?? data.conversationId;
 
@@ -96,31 +107,14 @@
     sending = true;
     composerText = "";
 
-    try {
-      const { data: msgData } = await Api.POST("/conversations/{id}/messages", {
-        params: { path: { id: conversationId } },
-        body: { content: text },
-      });
-
-      // 202: append the persisted user message to the history.
-      // appendMessage() splices before any open streaming slot so the user bubble
-      // always precedes the assistant reply, even when a message.delta arrived
-      // over the SSE connection while the POST was still in-flight.
-      if (msgData !== undefined) {
-        appendMessage({
-          id: msgData.id,
-          role: msgData.role,
-          content: msgData.content,
-          createdAt: msgData.createdAt,
-          abandoned: false,
-        });
-      }
-    } catch {
-      // Network error — restore the text so the user can retry.
-      composerText = text;
-    } finally {
-      sending = false;
+    // sendChatMessage handles POST + success (append) + error (setTurnFailed).
+    // Returns the text to restore on any error path, null on success.
+    const restoreText = await sendChatMessage(postMessageFn, conversationId, text);
+    if (restoreText !== null) {
+      composerText = restoreText;
     }
+
+    sending = false;
   }
 
   function handleKeydown(event: KeyboardEvent): void {

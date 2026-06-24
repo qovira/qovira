@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveConversationId,
   getConversationHistory,
+  getTurnError,
   setActiveConversation,
   applyStreamingDelta,
   ensureStreamingSlot,
@@ -14,9 +15,11 @@ import {
   finalizeStreamingMessage,
   setConversationHistory,
   resetConversation,
+  sendChatMessage,
   STREAMING_SENTINEL_ID,
   type HistoryMessage,
   type StreamingHistoryMessage,
+  type PostMessageFn,
 } from "./conversation.svelte.js";
 
 /** Type guard: true if the entry is the in-flight streaming slot. */
@@ -467,5 +470,198 @@ describe("active-conversation persistence", () => {
     const mod = await import("./conversation.svelte.js");
     expect(mod.getActiveConversationId()).toBe("conv-restored");
     mod.resetConversation();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sendChatMessage — Fix #1 (M4): chat-send orchestration
+//
+// sendChatMessage(postFn, conversationId, text) encapsulates the POST /messages
+// flow so it is testable without rendering a route component:
+//   - On success (data defined): calls appendMessage and returns null (no restore).
+//   - On problem+json error (result.error defined, no throw): returns text so
+//     the caller can restore the composer, and records a turn failure.
+//   - On thrown network error (postFn throws): same as the returned-error path.
+//
+// The postFn parameter is a narrow async function that takes (conversationId,
+// text) and resolves to the Api.POST FetchResponse shape — injected so tests
+// provide a hand fake without vi.mock.
+//
+// These tests MUST fail if the `result.error` branch is removed from
+// sendChatMessage (the original bug: text was silently dropped on 4xx/5xx).
+// ---------------------------------------------------------------------------
+
+/** Minimal MessageResponse shape matching the server's 202 body. */
+interface MinimalMessageResponse {
+  id: string;
+  conversationId: string;
+  role: string;
+  content: string;
+  createdAt: string;
+}
+
+/** Build a successful postFn fake that resolves with the given message. */
+function makeSuccessPost(msg: MinimalMessageResponse): PostMessageFn {
+  // Params are required by the type but unused in the fake — satisfied positionally.
+  return () => Promise.resolve({ data: msg, response: new Response() });
+}
+
+/** Build a postFn fake that resolves with a problem+json error (does NOT throw). */
+function makeErrorPost(errorPayload: object): PostMessageFn {
+  // Params required by type but unused — satisfied positionally.
+  // Cast via unknown: the error branch shape has data?: never which conflicts
+  // with { data: undefined } literally; at runtime both mean "no data".
+  return () =>
+    Promise.resolve({ data: undefined, error: errorPayload, response: new Response() } as unknown as Awaited<
+      ReturnType<PostMessageFn>
+    >);
+}
+
+/** Build a postFn fake that throws a network error (no response). */
+function makeThrowingPost(err: Error): PostMessageFn {
+  // Params required by type but unused — rejected promise exercises the catch path.
+  return () => Promise.reject<Awaited<ReturnType<PostMessageFn>>>(err);
+}
+
+describe("sendChatMessage() — Fix #1 (M4): send-error handling", () => {
+  const CONV_ID = "conv-m4";
+
+  beforeEach(() => {
+    setActiveConversation(CONV_ID, []);
+    flushSync();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Success path
+  // ---------------------------------------------------------------------------
+
+  it("on success: appends the persisted user message to history and returns null", async () => {
+    const serverMsg: MinimalMessageResponse = {
+      id: "server-msg-1",
+      conversationId: CONV_ID,
+      role: "user",
+      content: "hello world",
+      createdAt: "2030-01-01T00:00:00Z",
+    };
+    const postFn = makeSuccessPost(serverMsg);
+
+    const restoreText = await sendChatMessage(postFn, CONV_ID, "hello world");
+    flushSync();
+
+    // No text to restore — success path returns null.
+    expect(restoreText).toBeNull();
+
+    // Message appended to history.
+    const history = getConversationHistory();
+    expect(history).toHaveLength(1);
+    expect(history[0]?.id).toBe("server-msg-1");
+    expect(history[0]?.content).toBe("hello world");
+  });
+
+  it("on success: does NOT set a turn error", async () => {
+    const serverMsg: MinimalMessageResponse = {
+      id: "server-msg-ok",
+      conversationId: CONV_ID,
+      role: "user",
+      content: "ping",
+      createdAt: "2030-01-01T00:00:00Z",
+    };
+    const postFn = makeSuccessPost(serverMsg);
+
+    await sendChatMessage(postFn, CONV_ID, "ping");
+    flushSync();
+
+    expect(getTurnError()).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Problem+json (returned error — the bug path, Fix #1 / M4)
+  //
+  // The Api wrapper resolves { data: undefined, error: ProblemError } for 4xx/5xx.
+  // It does NOT throw. Before the fix, the error was ignored: text was cleared,
+  // nothing was appended, no error was shown — the user's message vanished silently.
+  // ---------------------------------------------------------------------------
+
+  it("on returned problem+json error: returns the original text so the composer can be restored", async () => {
+    const postFn = makeErrorPost({ code: "internal_error", detail: "boom" });
+
+    const restoreText = await sendChatMessage(postFn, CONV_ID, "my typed message");
+    flushSync();
+
+    // MUST return the text — this is the fix. Without the result.error branch,
+    // this returns null and the test fails.
+    expect(restoreText).toBe("my typed message");
+  });
+
+  it("on returned problem+json error: does NOT append anything to history", async () => {
+    const postFn = makeErrorPost({ code: "rate_limited", detail: "slow down" });
+
+    await sendChatMessage(postFn, CONV_ID, "some text");
+    flushSync();
+
+    // Nothing must be appended — the POST failed.
+    expect(getConversationHistory()).toHaveLength(0);
+  });
+
+  it("on returned problem+json error: sets a turn failure via setTurnFailed", async () => {
+    const postFn = makeErrorPost({ code: "server_error", detail: "oops" });
+
+    await sendChatMessage(postFn, CONV_ID, "will fail");
+    flushSync();
+
+    // Turn error must be set — the error seam must be triggered.
+    expect(getTurnError()).not.toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Thrown network error (no response — CORS, offline, etc.)
+  // ---------------------------------------------------------------------------
+
+  it("on thrown network error: returns the original text so the composer can be restored", async () => {
+    const postFn = makeThrowingPost(new Error("Network failure"));
+
+    const restoreText = await sendChatMessage(postFn, CONV_ID, "offline message");
+    flushSync();
+
+    expect(restoreText).toBe("offline message");
+  });
+
+  it("on thrown network error: does NOT append anything to history", async () => {
+    const postFn = makeThrowingPost(new Error("CORS error"));
+
+    await sendChatMessage(postFn, CONV_ID, "lost text");
+    flushSync();
+
+    expect(getConversationHistory()).toHaveLength(0);
+  });
+
+  it("on thrown network error: sets a turn failure", async () => {
+    const postFn = makeThrowingPost(new Error("fetch failed"));
+
+    await sendChatMessage(postFn, CONV_ID, "offline");
+    flushSync();
+
+    expect(getTurnError()).not.toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Symmetry: returned-error and thrown-error behave identically
+  // ---------------------------------------------------------------------------
+
+  it("problem+json and network-throw paths are symmetric: both restore text", async () => {
+    const errorPost = makeErrorPost({ code: "x" });
+    const throwPost = makeThrowingPost(new Error("net"));
+
+    const r1 = await sendChatMessage(errorPost, CONV_ID, "text A");
+    flushSync();
+    resetConversation();
+    setActiveConversation(CONV_ID, []);
+    flushSync();
+
+    const r2 = await sendChatMessage(throwPost, CONV_ID, "text A");
+    flushSync();
+
+    expect(r1).toBe("text A");
+    expect(r2).toBe("text A");
   });
 });

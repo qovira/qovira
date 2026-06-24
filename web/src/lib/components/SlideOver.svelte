@@ -33,28 +33,49 @@
 
   // ---------------------------------------------------------------------------
   // Focus restore — capture the trigger element when the dialog opens, restore
-  // it on close so keyboard users land back where they started.
+  // it on every close path so keyboard users land back where they started.
   //
   // Native <dialog>.close() does not restore focus when the dialog was opened
   // programmatically via .showModal() triggered by a prop change (as opposed to
   // being opened by a user gesture directly on the <dialog>). We handle it
-  // manually so Escape, backdrop-click, and selection all restore correctly.
+  // manually so ALL close paths restore correctly:
+  //   - Esc / backdrop-click / close-button → handled by handleClose()
+  //   - Programmatic (parent sets open=false) → detected by the $effect edge
   //
   // The new-conversation path is safe: ConversationSwitcher calls focusComposer()
   // AFTER close(), so the composer focus wins over this restore (last writer wins).
+  //
+  // Double-restore prevention: restoreFocus() clears previouslyFocused after
+  // calling .focus(), so a second call on the same close cycle is a no-op.
   // ---------------------------------------------------------------------------
   let previouslyFocused = $state<Element | null>(null);
 
+  function restoreFocus(): void {
+    if (previouslyFocused instanceof HTMLElement) {
+      previouslyFocused.focus();
+    }
+    previouslyFocused = null;
+  }
+
   // Sync the `open` prop to the native dialog open/close calls.
   // $effect is appropriate here: syncing with a DOM element (outside Svelte).
+  // On the true→false edge (programmatic close), also restore focus so
+  // keyboard users land back on the trigger rather than on <body>.
   $effect(() => {
     if (dialogEl === null) return;
     if (open) {
       // Capture the currently-focused element before the dialog steals focus.
       previouslyFocused = document.activeElement;
-      if (!dialogEl.open) dialogEl.showModal();
+      if (!dialogEl.open) {
+        dialogEl.showModal();
+      }
     } else {
-      if (dialogEl.open) dialogEl.close();
+      if (dialogEl.open) {
+        dialogEl.close();
+        // Programmatic close (parent set open=false directly). Restore focus
+        // here because handleClose() was never called on this path.
+        restoreFocus();
+      }
     }
   });
 
@@ -68,10 +89,9 @@
     // onclose. This covers Escape, backdrop-click, and the close button.
     // focusComposer() (called by ConversationSwitcher after close) will
     // override this restore when the new-conversation path is taken.
-    if (previouslyFocused instanceof HTMLElement) {
-      previouslyFocused.focus();
-    }
-    previouslyFocused = null;
+    // restoreFocus() clears previouslyFocused so the $effect's else-branch
+    // does not double-restore on the same close cycle.
+    restoreFocus();
     onclose?.();
   }
 

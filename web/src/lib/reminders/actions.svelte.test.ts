@@ -455,4 +455,48 @@ describe("makeReminderPatchBody", () => {
     });
     expect(body).toHaveProperty("notes", "new note");
   });
+
+  // ---------------------------------------------------------------------------
+  // Fix #4: dueAt comparison must use instant equality (getTime()), not raw
+  // string equality. The server stores second-truncated RFC3339 ("...:00Z")
+  // while buildNextDueAt produces full ISO ("...:00.000Z"). These represent
+  // the same instant but differ as strings, causing a spurious patch on every
+  // save even when the user did not change the due date.
+  // ---------------------------------------------------------------------------
+
+  it("does NOT include dueAt when server RFC3339 and client ISO represent the same instant", () => {
+    // Server stores second-truncated RFC3339; client holds .toISOString() form.
+    // Both represent 2030-01-01 12:00:00 UTC but differ as strings.
+    const serverStored = "2030-01-01T12:00:00Z"; // e.g. what the server returns
+    const clientForm = "2030-01-01T12:00:00.000Z"; // what new Date(serverStored).toISOString() produces
+    const original = makeReminder({ id: "p-dueAt-same-instant", dueAt: serverStored });
+    const body = makeReminderPatchBody(original, {
+      title: original.title,
+      dueAt: clientForm,
+      rrulePreset: "none",
+    });
+    // Same instant — must NOT include dueAt in the patch body.
+    expect(body).not.toHaveProperty("dueAt");
+  });
+
+  it("DOES include dueAt when the user picks a genuinely different time", () => {
+    const original = makeReminder({ id: "p-dueAt-changed", dueAt: "2030-01-01T12:00:00Z" });
+    const body = makeReminderPatchBody(original, {
+      title: original.title,
+      dueAt: "2030-01-01T13:00:00.000Z", // one hour later
+      rrulePreset: "none",
+    });
+    expect(body).toHaveProperty("dueAt", "2030-01-01T13:00:00.000Z");
+  });
+
+  it("does NOT include dueAt when original has sub-second precision and client matches", () => {
+    // Guard: if original somehow has millis, they should still match by instant.
+    const original = makeReminder({ id: "p-dueAt-millis", dueAt: "2030-06-15T09:00:00.000Z" });
+    const body = makeReminderPatchBody(original, {
+      title: original.title,
+      dueAt: "2030-06-15T09:00:00Z",
+      rrulePreset: "none",
+    });
+    expect(body).not.toHaveProperty("dueAt");
+  });
 });

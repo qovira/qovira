@@ -288,3 +288,89 @@ export function resetConversation(): void {
   _turnError = null;
   persistConversationId(null);
 }
+
+// ---------------------------------------------------------------------------
+// sendChatMessage — chat-send orchestration (Fix #1 / M4)
+//
+// Extracted from +page.svelte's sendMessage() so the error-handling paths are
+// testable without rendering a route component.
+//
+// Contract:
+//   - POSTs text via postFn.
+//   - On success (data defined): appends the persisted message, returns null.
+//   - On returned problem+json error (result.error defined — Api wrapper does
+//     NOT throw): returns the original text so the caller can restore the
+//     composer, and records the turn failure via setTurnFailed.
+//   - On thrown network error (postFn throws): same as the returned-error path.
+//
+// The caller (page component) is responsible for clearing the composer before
+// calling this and for restoring it when the return value is non-null.
+// ---------------------------------------------------------------------------
+
+/** Minimal shape of the server's 202 MessageResponse body. */
+interface MessageResponseData {
+  id: string;
+  conversationId: string;
+  role: string;
+  content: string;
+  createdAt: string;
+}
+
+/**
+ * The POST function injected by callers. Matches the shape of
+ * `Api.POST("/conversations/{id}/messages", …)` — a function that takes the
+ * conversationId and text and resolves to the Api FetchResponse discriminated
+ * union. Injected (not imported) so it is testable without mocking the module.
+ */
+export type PostMessageFn = (
+  conversationId: string,
+  text: string,
+) => Promise<
+  | { data: MessageResponseData; error?: never; response: Response }
+  | { data?: never; error: unknown; response?: Response }
+>;
+
+/**
+ * Orchestrate a chat-message send.
+ *
+ * @param postFn         - Injected API call (see PostMessageFn).
+ * @param conversationId - The conversation to post into.
+ * @param text           - The trimmed message text (non-empty, pre-validated by caller).
+ * @returns `null` on success (nothing to restore); the original `text` on any
+ *          error (caller should put it back in the composer).
+ */
+export async function sendChatMessage(
+  postFn: PostMessageFn,
+  conversationId: string,
+  text: string,
+): Promise<string | null> {
+  try {
+    const result = await postFn(conversationId, text);
+
+    if (result.data !== undefined) {
+      // Success: append the persisted user message.
+      // appendMessage() splices before any open streaming slot so the user
+      // bubble always precedes the assistant reply even when a message.delta
+      // arrived over SSE while the POST was still in-flight.
+      appendMessage({
+        id: result.data.id,
+        role: result.data.role,
+        content: result.data.content,
+        createdAt: result.data.createdAt,
+        abandoned: false,
+      });
+      return null;
+    }
+
+    // result.data is undefined → server returned a problem+json error (4xx/5xx).
+    // The Api wrapper resolves with { error, data: undefined } instead of
+    // throwing. Without this branch the text is silently dropped — Fix #1 (M4).
+    setTurnFailed(conversationId, "send_error");
+    return text;
+  } catch {
+    // Network error (no connectivity, CORS, etc.) — same treatment as a
+    // returned error: restore text + signal the turn failure.
+    setTurnFailed(conversationId, "send_error");
+    return text;
+  }
+}
