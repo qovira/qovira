@@ -884,15 +884,11 @@ func TestFireHandler_DeletedReminder_Permanent(t *testing.T) {
 	_ = permErr
 }
 
-// isPermanentError checks that the error is a permanent error by checking if
-// wrapping it again with scheduler.Permanent still wraps it (i.e., the handler
-// returned a permanent error already). We check via a type assertion approach.
+// isPermanentError reports whether err is or wraps a permanent scheduler error.
+// It delegates to scheduler.IsPermanent so the check is structurally correct
+// and decoupled from the internal message string.
 func isPermanentError(err error) bool {
-	// scheduler.Permanent wraps the error in a permanentError type. The only
-	// way to detect it without importing the unexported type is to check if
-	// scheduler.Permanent(err) would produce a double-wrap — which means we
-	// need to inspect the error message prefix "scheduler: permanent:".
-	return strings.HasPrefix(err.Error(), "scheduler: permanent:")
+	return scheduler.IsPermanent(err)
 }
 
 // ── AC9: GET /api/v1/reminders/{id} ──────────────────────────────────────
@@ -1049,8 +1045,10 @@ func TestService_Get_NotFound(t *testing.T) {
 	}
 }
 
+// isNotFoundError reports whether err wraps ErrNotFound.
+// It uses errors.Is so the check works correctly regardless of wrapping depth.
 func isNotFoundError(err error) bool {
-	return strings.Contains(err.Error(), "not found")
+	return errors.Is(err, reminders.ErrNotFound)
 }
 
 // ── Module interface satisfaction ────────────────────────────────────────
@@ -1113,13 +1111,14 @@ func TestHTTP_Create_MalformedBody(t *testing.T) {
 // row (best-effort) and returns the original enqueue error.
 //
 // The stamp-failure compensation path (Cancel + delete after SetReminderFireJobID
-// fails) is structurally symmetric to this path and uses the same deleteReminder
-// helper; injecting a SetReminderFireJobID failure from the external test package
-// would require closing/replacing the write connection, which is impractical
-// without contorting the store's test surface. The enqueue-failure test below
-// therefore exercises the shared compensation helper (delete) and its slog
-// secondary-failure path via the existing fake infrastructure, giving high
-// confidence the stamp-failure branch behaves identically.
+// fails) requires injecting a failure into SetReminderFireJobID. From the
+// external test package this would require closing or replacing the write
+// connection, which would distort the production store's API surface. That
+// third path is therefore not covered by this test suite; the production code
+// carries a Cancel + deleteReminder sequence in that branch (reminders.go
+// ~419-432) that is compiler-verified by the existing build but not exercised
+// by a test. Any future refactor that moves SetReminderFireJobID behind an
+// injectable interface should add that coverage then.
 func TestService_Create_EnqueueFailure_CleansUpRow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -1130,42 +1129,30 @@ func TestService_Create_EnqueueFailure_CleansUpRow(t *testing.T) {
 	seedUser(t, st, userID, "UTC")
 	scope := newScopeFor(userID)
 
-	tests := []struct {
-		name string
-	}{
-		{name: "enqueue_error_row_deleted"},
+	prod := &fakeProducer{returnErr: fmt.Errorf("scheduler unavailable")}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	_, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Doomed",
+		DueAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err == nil {
+		t.Fatal("expected Create to return an error when Enqueue fails")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			prod := &fakeProducer{returnErr: fmt.Errorf("scheduler unavailable")}
-			m, _ := newTestModule(t, st, prod, bus)
-			svc := m.Service()
+	if !strings.Contains(err.Error(), "scheduler unavailable") {
+		t.Errorf("expected original enqueue error in returned err, got: %v", err)
+	}
 
-			_, err := svc.Create(ctx, scope, reminders.CreateInput{
-				Title: "Doomed",
-				DueAt: time.Now().UTC().Add(time.Hour),
-			})
-			if err == nil {
-				t.Fatal("expected Create to return an error when Enqueue fails")
-			}
-			if !strings.Contains(err.Error(), "scheduler unavailable") {
-				t.Errorf("expected original enqueue error in returned err, got: %v", err)
-			}
-
-			// The row must have been deleted; Get should return ErrNotFound.
-			// We can't know the reminder ID because Create failed, but we can
-			// verify that no reminder exists for this user by probing the DB directly.
-			var count int
-			row := st.Reader().QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM reminders WHERE user_id = ?`, userID)
-			if scanErr := row.Scan(&count); scanErr != nil {
-				t.Fatalf("count reminders: %v", scanErr)
-			}
-			if count != 0 {
-				t.Errorf("expected 0 reminder rows after enqueue failure (orphan cleanup), got %d", count)
-			}
-		})
+	// The row must have been deleted; we verify by counting rows for this user.
+	var count int
+	row := st.Reader().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM reminders WHERE user_id = ?`, userID)
+	if scanErr := row.Scan(&count); scanErr != nil {
+		t.Fatalf("count reminders: %v", scanErr)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 reminder rows after enqueue failure (orphan cleanup), got %d", count)
 	}
 }
 
@@ -2099,7 +2086,19 @@ func TestService_Complete_CancelsJob(t *testing.T) {
 }
 
 // TestService_Complete_Idempotent verifies that calling Complete on an already-
-// completed reminder does not error and does not double-cancel a nil job.
+// completed reminder does not error and does not cancel any additional job.
+//
+// Production-code contract pinned here:
+//   - The first Complete: cancels the original fire-job and publishes
+//     reminder.completed once.
+//   - The second Complete: the fire_job_id is already cleared (NULL) so the
+//     cancel guard (`row.FireJobID.Valid && row.FireJobID.String != ""`) is
+//     false; no additional Cancel is issued. Another UpdateReminder write and
+//     a second reminder.completed publish do occur (the production code runs
+//     both unconditionally on every Complete call). This test pins that
+//     contract: the cancelled-job slice must contain the original job id
+//     exactly once, and reminder.completed must be published exactly twice
+//     (once per Complete call).
 func TestService_Complete_Idempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2120,14 +2119,52 @@ func TestService_Complete_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	origJobID := r.FireJobID
 
 	// Complete once.
 	if _, err := svc.Complete(ctx, scope, r.ID); err != nil {
 		t.Fatalf("Complete (1st): %v", err)
 	}
+
+	// Snapshot the cancelled list after the first Complete.
+	cancelledAfterFirst := prod.allCancelled()
+
 	// Complete again — must not error.
 	if _, err := svc.Complete(ctx, scope, r.ID); err != nil {
 		t.Fatalf("Complete (2nd, idempotent): %v", err)
+	}
+
+	// The cancelled list must still contain the original job id exactly once.
+	// No additional Cancel must have been issued by the second Complete (the
+	// fire_job_id was cleared after the first Complete; the cancel guard skips).
+	cancelledAfterSecond := prod.allCancelled()
+	if len(cancelledAfterSecond) != len(cancelledAfterFirst) {
+		t.Errorf("second Complete must not Cancel any additional job: cancelled before=%v, after=%v",
+			cancelledAfterFirst, cancelledAfterSecond)
+	}
+
+	// The original job id must appear exactly once in the cancelled list.
+	var count int
+	for _, jid := range cancelledAfterSecond {
+		if jid == origJobID {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("original job %q must appear exactly once in cancelled list; appeared %d time(s): %v",
+			origJobID, count, cancelledAfterSecond)
+	}
+
+	// reminder.completed must be published exactly twice (once per Complete call).
+	// The production code runs the publish unconditionally on every Complete.
+	var completedCount int
+	for _, e := range bus.allEvents() {
+		if e.userID == userID && e.event.Type == "reminder.completed" {
+			completedCount++
+		}
+	}
+	if completedCount != 2 {
+		t.Errorf("expected exactly 2 reminder.completed events (one per Complete call), got %d", completedCount)
 	}
 }
 
@@ -4868,4 +4905,155 @@ func TestFireHandler_DeletedBeforeStatusGate_NoFiredEvent(t *testing.T) {
 		}
 	}
 	_ = svc
+}
+
+// ── R2 new test: dueAt shift on active RECURRING reminder ─────────────────────
+
+// TestUpdate_DueAt_RecurringReminder_CancelsAndReenqueues verifies that changing
+// dueAt on an active recurring reminder (rrule is set) takes the
+// syncFireJobForRecurrenceChange path — Cancel the old job, Enqueue a fresh
+// recurring one with the same RRULE/TZ — rather than the Reschedule path.
+//
+// A dueAt shift on a recurring reminder changes the RRULE anchor, so the old
+// recurring job must be replaced with a new one that has Recurrence set.
+// Reschedule must NOT be called.
+func TestUpdate_DueAt_RecurringReminder_CancelsAndReenqueues(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-rec-due-001"}
+	bus := &fakePublisher{}
+	m, _ := newTestModule(t, st, prod, bus)
+	svc := m.Service()
+
+	const userID = "user-rec-due-01"
+	const tz = "America/New_York"
+	seedUser(t, st, userID, tz)
+	scope := newScopeFor(userID)
+
+	const rrule = "FREQ=WEEKLY"
+	origDue := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+
+	// Create a recurring reminder.
+	r, err := svc.Create(ctx, scope, reminders.CreateInput{
+		Title: "Weekly recurring dueAt shift",
+		DueAt: origDue,
+		Tz:    tz,
+		Rrule: rrule,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	origJobID := r.FireJobID
+
+	// Give the re-enqueue a distinct job ID so we can verify the stamp.
+	prod.mu.Lock()
+	prod.returnID = "job-rec-due-002"
+	prod.mu.Unlock()
+
+	// Shift dueAt only — rrule is unchanged.
+	newDue := origDue.Add(4 * time.Hour)
+	updated, err := svc.Update(ctx, scope, r.ID, reminders.UpdateInput{
+		DueAt: &newDue,
+	})
+	if err != nil {
+		t.Fatalf("Update (shift dueAt on recurring): %v", err)
+	}
+
+	// 1. Old job must have been Cancelled.
+	cancelled := prod.allCancelled()
+	if !slices.Contains(cancelled, origJobID) {
+		t.Errorf("old job %q was not Cancelled; cancelled: %v", origJobID, cancelled)
+	}
+
+	// 2. A new recurring Enqueue must have been issued with the same RRULE and TZ.
+	enqueued := prod.allEnqueued()
+	var newReq *scheduler.EnqueueRequest
+	for i := range enqueued {
+		if enqueued[i].Key == "reminder:"+r.ID && enqueued[i].Recurrence != nil {
+			// Pick the enqueue after Create's initial one (Create also used the same key
+			// and a recurring Recurrence; we want the one from the Update).
+			if enqueued[i].Recurrence.RRULE == rrule {
+				req := enqueued[i]
+				newReq = &req
+				// Keep iterating — we want the last match (the Update's enqueue).
+			}
+		}
+	}
+	if newReq == nil {
+		t.Fatalf("no recurring Enqueue with RRULE=%q found after dueAt shift; enqueued: %+v", rrule, enqueued)
+	}
+	if newReq.Recurrence.TZ != tz {
+		t.Errorf("new Enqueue Recurrence.TZ=%q, want %q", newReq.Recurrence.TZ, tz)
+	}
+	if newReq.Recurrence.RRULE != rrule {
+		t.Errorf("new Enqueue Recurrence.RRULE=%q, want %q", newReq.Recurrence.RRULE, rrule)
+	}
+
+	// 3. Reschedule must NOT have been called — a dueAt shift on a recurring
+	// reminder is handled by Cancel+Enqueue, not Reschedule.
+	if rescheduled := prod.allRescheduled(); len(rescheduled) > 0 {
+		t.Errorf("Reschedule must NOT be called for dueAt shift on a recurring reminder; got: %v", rescheduled)
+	}
+
+	// 4. The new fire_job_id must be stored on the row (different from original).
+	if updated.FireJobID == origJobID || updated.FireJobID == "" {
+		t.Errorf("fire_job_id: got %q, want a new non-empty id (not the original %q)", updated.FireJobID, origJobID)
+	}
+
+	// 5. due_at must reflect the shifted value.
+	wantDueStr := newDue.UTC().Truncate(time.Second).Format(time.RFC3339)
+	if updated.DueAt != wantDueStr {
+		t.Errorf("DueAt: got %q, want %q", updated.DueAt, wantDueStr)
+	}
+}
+
+// ── R2 new test: invalid fire payload → scheduler.Permanent ──────────────────
+
+// TestFireHandler_InvalidPayload_ReturnsPermanent verifies that handleFire
+// returns a scheduler.Permanent error and publishes NO reminder.fired event
+// when the job payload cannot be decoded.
+//
+// An undecodable payload means the reminder id can never be resolved; the job
+// must be dead-lettered immediately without retrying.
+func TestFireHandler_InvalidPayload_ReturnsPermanent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openMigratedStore(t)
+	prod := &fakeProducer{returnID: "job-badpay-001"}
+	bus := &fakePublisher{}
+	_, reg := newTestModule(t, st, prod, bus)
+
+	const userID = "user-badpay-01"
+	seedUser(t, st, userID, "UTC")
+	scope := newScopeFor(userID)
+
+	// Build a job with a payload that is not valid JSON.
+	job := scheduler.Job{
+		ID:      "job-badpay-001",
+		Kind:    "reminder.fire",
+		Payload: json.RawMessage("not-json"),
+		Attempt: 1,
+		Scope:   scope,
+	}
+
+	handlerErr := reg.dispatch(ctx, "reminder.fire", job)
+
+	// The handler must return an error.
+	if handlerErr == nil {
+		t.Fatal("expected error from fire handler for invalid payload, got nil")
+	}
+
+	// The error must be a permanent error so the scheduler dead-letters it
+	// without any retry.
+	if !scheduler.IsPermanent(handlerErr) {
+		t.Errorf("expected scheduler.Permanent error for invalid payload, got: %v", handlerErr)
+	}
+
+	// No reminder.fired event must have been published.
+	for _, e := range bus.allEvents() {
+		if e.event.Type == "reminder.fired" {
+			t.Errorf("reminder.fired must not be published for an invalid payload; got event: %+v", e)
+		}
+	}
 }
