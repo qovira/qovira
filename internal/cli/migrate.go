@@ -69,6 +69,8 @@ func newMigrateUpCmd() *cobra.Command {
 			if err := runner.Up(cmd.Context(), s.Writer()); err != nil {
 				return fmt.Errorf("migrate up: %w", err)
 			}
+			// Refresh planner statistics for any indexes the migrations just created.
+			store.RunPostMigrateOptimize(cmd.Context(), s.Writer())
 			return nil
 		},
 	}

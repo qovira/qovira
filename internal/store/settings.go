@@ -144,20 +144,48 @@ func (ns *SettingsNamespace) Delete(ctx context.Context, logicalKey string) erro
 }
 
 // ByPrefix returns all settings within this namespace whose logical key starts with subPrefix.  An empty subPrefix
-// returns all settings in the namespace.
+// returns all settings in the namespace, including any value stored under the empty logical key itself.
 //
 // The returned SettingEntry.Key values are the logical (non-namespaced) key names; the namespace prefix is stripped.
+//
+// Convention for the empty logical key: fullKey("") returns the bare namespace prefix (no trailing dot), so a value
+// written via Set(ctx, "", v) is stored under the storage key "<prefix>".  ByPrefix("") therefore queries with
+// storagePrefix = "<prefix>" (matching both "<prefix>" itself and any "<prefix>.child" keys), which is consistent with
+// how fullKey resolves the empty key.
+//
+// Because the underlying query matches on a raw string prefix, the bare-prefix query for the empty subPrefix can also
+// match a SIBLING namespace whose name shares that string prefix (e.g. prefix "model" matching "model_gateway.*").
+// Returned rows are therefore filtered to a proper namespace boundary — a key is kept only if it is exactly "<prefix>"
+// (the empty logical key) or begins with "<prefix>." — so sibling namespaces never leak across.
 func (ns *SettingsNamespace) ByPrefix(ctx context.Context, subPrefix string) ([]SettingEntry, error) {
-	storagePrefix := ns.prefix + "." + subPrefix
+	var storagePrefix string
+	if subPrefix == "" {
+		// Empty subPrefix: match the bare namespace prefix so the empty-logical-key entry ("<prefix>")
+		// is included alongside all "<prefix>.child" entries.
+		storagePrefix = ns.prefix
+	} else {
+		storagePrefix = ns.prefix + "." + subPrefix
+	}
 	rows, err := ns.parent.ByPrefix(ctx, storagePrefix)
 	if err != nil {
 		return nil, err
 	}
-	// Strip the namespace prefix from the returned keys so callers see only the logical key name (the part after
-	// "<prefix>.").
-	strip := ns.prefix + "."
-	for i := range rows {
-		rows[i].Key = strings.TrimPrefix(rows[i].Key, strip)
+	// Strip the namespace prefix from returned keys so callers see only the logical key name, and drop any sibling
+	// namespace that merely shares the string prefix. The empty logical key is stored as exactly "<prefix>"; every
+	// other in-namespace key begins with "<prefix>.".
+	dot := ns.prefix + "."
+	filtered := rows[:0]
+	for _, r := range rows {
+		switch {
+		case r.Key == ns.prefix:
+			r.Key = ""
+			filtered = append(filtered, r)
+		case strings.HasPrefix(r.Key, dot):
+			r.Key = strings.TrimPrefix(r.Key, dot)
+			filtered = append(filtered, r)
+		default:
+			// Sibling namespace sharing the string prefix (e.g. "model_gateway" for prefix "model") — exclude.
+		}
 	}
-	return rows, nil
+	return filtered, nil
 }

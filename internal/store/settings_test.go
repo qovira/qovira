@@ -354,6 +354,137 @@ func TestSettingsStore_ByPrefixEscapesWildcards(t *testing.T) {
 	}
 }
 
+// TestSettingsNamespace_EmptyKey_SetGet verifies that Set and Get agree on the
+// storage key when the logical key is empty. Set("", v) must be visible via
+// Get("", …) — the empty key maps to the bare namespace prefix, not a
+// "<prefix>." variant (finding 4).
+func TestSettingsNamespace_EmptyKey_SetGet(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	ns := s.Settings().Namespace("nsp")
+	ctx := context.Background()
+
+	if err := ns.Set(ctx, "", "root-value"); err != nil {
+		t.Fatalf("Set empty key: %v", err)
+	}
+	val, found, err := ns.Get(ctx, "")
+	if err != nil {
+		t.Fatalf("Get empty key: %v", err)
+	}
+	if !found {
+		t.Fatal("Get empty key: expected found=true after Set, got false")
+	}
+	if val != "root-value" {
+		t.Errorf("Get empty key = %q, want %q", val, "root-value")
+	}
+}
+
+// TestSettingsNamespace_EmptyKey_ByPrefix verifies that ByPrefix("") within a
+// namespace returns a value that was stored under the empty logical key (finding 4).
+// The fix must make fullKey("") and ByPrefix("") agree: both must use the bare
+// namespace prefix as the storage prefix so a Set("", v) value appears in
+// ByPrefix("").
+func TestSettingsNamespace_EmptyKey_ByPrefix(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	ns := s.Settings().Namespace("ns2")
+	ctx := context.Background()
+
+	if err := ns.Set(ctx, "", "root"); err != nil {
+		t.Fatalf("Set empty key: %v", err)
+	}
+	if err := ns.Set(ctx, "child", "leaf"); err != nil {
+		t.Fatalf("Set child: %v", err)
+	}
+
+	entries, err := ns.ByPrefix(ctx, "")
+	if err != nil {
+		t.Fatalf("ByPrefix empty: %v", err)
+	}
+
+	found := false
+	for _, e := range entries {
+		if e.Key == "" && e.Value == "root" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ByPrefix(\"\") did not return the empty-key entry; got: %v", entries)
+	}
+}
+
+// TestSettingsNamespace_EmptyKey_Delete verifies that Delete routes through the
+// same empty-key convention as Set/Get: Delete("") must remove the value stored
+// under the bare namespace prefix (finding 4 — all of Set/Get/Delete/ByPrefix
+// must agree on the empty logical key).
+func TestSettingsNamespace_EmptyKey_Delete(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	ns := s.Settings().Namespace("ns3")
+	ctx := context.Background()
+
+	if err := ns.Set(ctx, "", "root"); err != nil {
+		t.Fatalf("Set empty key: %v", err)
+	}
+	if err := ns.Delete(ctx, ""); err != nil {
+		t.Fatalf("Delete empty key: %v", err)
+	}
+	_, found, err := ns.Get(ctx, "")
+	if err != nil {
+		t.Fatalf("Get empty key after delete: %v", err)
+	}
+	if found {
+		t.Error("Get empty key after Delete: expected found=false, got true")
+	}
+}
+
+// TestSettingsNamespace_ByPrefix_SiblingIsolation verifies that ByPrefix("") on a
+// namespace does not leak entries from a sibling namespace whose name merely
+// shares the same string prefix (e.g. "model" vs "model_gateway"). The bare-prefix
+// query matches "model_gateway.*" at the storage layer, so ByPrefix must filter to
+// a proper namespace boundary ("<prefix>" or "<prefix>.").
+func TestSettingsNamespace_ByPrefix_SiblingIsolation(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+	ctx := context.Background()
+
+	model := s.Settings().Namespace("model")
+	sibling := s.Settings().Namespace("model_gateway")
+
+	if err := model.Set(ctx, "", "root"); err != nil {
+		t.Fatalf("Set model empty key: %v", err)
+	}
+	if err := model.Set(ctx, "endpoint", "https://m"); err != nil {
+		t.Fatalf("Set model.endpoint: %v", err)
+	}
+	if err := sibling.Set(ctx, "token", "secret"); err != nil {
+		t.Fatalf("Set model_gateway.token: %v", err)
+	}
+
+	entries, err := model.ByPrefix(ctx, "")
+	if err != nil {
+		t.Fatalf("ByPrefix empty: %v", err)
+	}
+
+	got := make(map[string]string, len(entries))
+	for _, e := range entries {
+		got[e.Key] = e.Value
+		if e.Value == "secret" {
+			t.Errorf("ByPrefix(\"\") on \"model\" leaked the sibling \"model_gateway\" entry (key %q); got: %v", e.Key, entries)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("ByPrefix(\"\") on \"model\" returned %d entries, want 2 (empty key + endpoint); got: %v", len(got), entries)
+	}
+	if got[""] != "root" || got["endpoint"] != "https://m" {
+		t.Errorf("ByPrefix(\"\") on \"model\" = %v, want {\"\":\"root\", \"endpoint\":\"https://m\"}", got)
+	}
+}
+
 // TestSettingsStore_ScopeGuardExempt verifies that the settings table queries
 // produce no scope-guard violations.  The guard must recognise settings as a
 // system-owned table and exempt all four queries from the user_id predicate

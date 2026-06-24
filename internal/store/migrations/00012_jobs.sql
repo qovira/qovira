@@ -44,11 +44,25 @@ CREATE UNIQUE INDEX jobs_key_unique ON jobs (key) WHERE key IS NOT NULL;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Covering index on (status, run_at): the claim query drives this index to find due pending jobs.
+-- Index on (status, run_at): the claim query drives this index to find due pending jobs
+-- (WHERE status='pending' AND run_at <= @now ORDER BY run_at LIMIT @batch).
+-- Note: this index does NOT cover the reclaim path — see jobs_running_locked_at below.
 CREATE INDEX jobs_status_run_at ON jobs (status, run_at);
 -- +goose StatementEnd
 
+-- +goose StatementBegin
+-- Partial index on locked_at for the reclaim sweep: ReclaimStaleJobs runs on every poll tick
+-- (WHERE status='running' AND locked_at IS NOT NULL AND locked_at < @threshold).
+-- Without this index the threshold comparison is a per-row scan of all running rows.
+-- The partial predicate (WHERE status = 'running') keeps the index small and focused.
+CREATE INDEX jobs_running_locked_at ON jobs (locked_at) WHERE status = 'running';
+-- +goose StatementEnd
+
 -- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS jobs_running_locked_at;
+-- +goose StatementEnd
+
 -- +goose StatementBegin
 DROP INDEX IF EXISTS jobs_status_run_at;
 -- +goose StatementEnd

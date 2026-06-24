@@ -205,6 +205,8 @@ func New(
 		if err = runner.Up(ctx, s.Writer()); err != nil {
 			return nil, fmt.Errorf("app: auto-migrate: %w", err)
 		}
+		// Refresh planner statistics for any indexes the migrations just created.
+		store.RunPostMigrateOptimize(ctx, s.Writer())
 	}
 
 	// Step 4b: first-run admin seeding. Runs after migrations so the users

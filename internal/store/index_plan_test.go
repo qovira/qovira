@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -153,6 +154,77 @@ ORDER BY created_at, id`
 	assertUsesIndex(t, "ListMessages", "messages_conv_user_created", plans)
 	assertNoTempBTree(t, "ListMessages", plans)
 	assertNoFullScan(t, "ListMessages", "messages", plans)
+}
+
+// TestReclaimStaleJobs_IndexPlan verifies via EXPLAIN QUERY PLAN that the
+// ReclaimStaleJobs UPDATE uses the jobs_running_locked_at partial index
+// (finding 5) and does not fall back to an unindexed scan of the jobs table.
+//
+// A realistic mix of running rows (with varied locked_at) and pending rows is
+// seeded so the query planner has enough statistics to prefer the targeted
+// partial index over the broader jobs_status_run_at index.  PRAGMA optimize is
+// run after seeding to refresh the planner's row estimates before EQP.
+func TestReclaimStaleJobs_IndexPlan(t *testing.T) {
+	t.Parallel()
+	s := openMigratedStore(t)
+	ctx := context.Background()
+
+	// Seed 50 running rows with a locked_at in the past.  The planner needs a
+	// realistic dataset to prefer jobs_running_locked_at (locked_at range scan)
+	// over jobs_status_run_at (status point lookup + full running-rows scan).
+	for i := range 50 {
+		id := fmt.Sprintf("01JRECLAIM%016d", i)
+		if _, err := s.Writer().ExecContext(ctx,
+			`INSERT INTO jobs (id, kind, status, run_at, locked_at, created_at, updated_at)
+             VALUES (?, 'test', 'running',
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour'),
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+			id,
+		); err != nil {
+			t.Fatalf("seed running job %d: %v", i, err)
+		}
+	}
+	// Also seed pending rows so the planner can distinguish the status
+	// distribution: a large pending set makes the running subset more selective.
+	for i := range 100 {
+		id := fmt.Sprintf("01JPENDING0%015d", i)
+		if _, err := s.Writer().ExecContext(ctx,
+			`INSERT INTO jobs (id, kind, status, run_at, created_at, updated_at)
+             VALUES (?, 'test', 'pending',
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now','+1 hour'),
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                     strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+			id,
+		); err != nil {
+			t.Fatalf("seed pending job %d: %v", i, err)
+		}
+	}
+
+	// Refresh planner statistics so EQP reflects the seeded distribution.
+	if _, err := s.Writer().ExecContext(ctx, "PRAGMA optimize;"); err != nil {
+		t.Logf("optimize warn: %v", err)
+	}
+
+	// The SQL emitted by sqlc for ReclaimStaleJobs (named params → positional).
+	// Keep in sync with the generated reclaimStaleJobs constant in db/jobs.sql.go.
+	const reclaimSQL = `UPDATE jobs SET status = 'pending', locked_at = NULL, updated_at = ?1
+WHERE status = 'running' AND locked_at IS NOT NULL AND locked_at < ?2`
+
+	plans := eqpRows(t, s.Writer(), reclaimSQL,
+		"2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z")
+
+	t.Logf("EXPLAIN QUERY PLAN [ReclaimStaleJobs]:")
+	for _, p := range plans {
+		t.Logf("  %s", p)
+	}
+	if len(plans) == 0 {
+		t.Fatal("[ReclaimStaleJobs] EXPLAIN QUERY PLAN returned no rows")
+	}
+
+	assertUsesIndex(t, "ReclaimStaleJobs", "jobs_running_locked_at", plans)
+	assertNoFullScan(t, "ReclaimStaleJobs", "jobs", plans)
 }
 
 // TestListConversations_MessagesIndexPlan verifies via EXPLAIN QUERY PLAN that

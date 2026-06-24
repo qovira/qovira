@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -155,7 +156,63 @@ func TestPragmasApplied(t *testing.T) {
 			// temp_store → 2 (MEMORY); SQLite default is 0 (DEFAULT/FILE), so this
 			// proves the hook ran even if busy_timeout coincidentally matches the default.
 			assertPragmaInt(t, tc.db, "temp_store", 2)
+			// cache_size → -20000 (~20 MiB page cache); SQLite default is -2000, so
+			// this proves the hook set the performance PRAGMA (finding 1).
+			assertPragmaInt(t, tc.db, "cache_size", -20000)
+			// mmap_size → 134217728 (128 MiB); SQLite default is 0, so any non-zero
+			// value proves the hook ran (finding 1).
+			assertPragmaInt(t, tc.db, "mmap_size", 134217728)
+			// journal_size_limit → 67108864 (64 MiB); SQLite default is -1, so this
+			// proves the hook set it (finding 1).
+			assertPragmaInt(t, tc.db, "journal_size_limit", 67108864)
 		})
+	}
+}
+
+// TestOptimizeTimerStopsOnClose verifies that the PRAGMA optimize goroutine
+// started by Open exits cleanly when Close is called, leaving no goroutine leak
+// detectable under -race. The test opens a store, immediately closes it, and
+// relies on the race detector to flag any concurrent access that outlives Close.
+func TestOptimizeTimerStopsOnClose(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	s, err := store.Open(store.Config{
+		Path:         filepath.Join(dir, "optimize-close.db"),
+		Key:          "a-sufficiently-long-passphrase-for-sqlcipher",
+		ReadPoolSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	// Close must succeed and the background goroutine must not outlive it.
+	if err := s.Close(); err != nil {
+		t.Errorf("Close: unexpected error: %v", err)
+	}
+	// A second Close must be idempotent (not panic or return a real error).
+	// database/sql.DB.Close is idempotent so this exercises the channel-guard.
+	if err := s.Close(); err != nil {
+		// database/sql.DB.Close() returns nil on a double-close, so a non-nil
+		// error here indicates the store itself is not idempotent.
+		t.Errorf("second Close returned error: %v", err)
+	}
+}
+
+// TestWritePoolDSN_HasTxlockImmediate verifies that the write-pool DSN contains
+// "_txlock=immediate" and the read-pool DSN does not, so that every BeginTx on
+// the write pool uses BEGIN IMMEDIATE and avoids the DEFERRED read→write
+// lock-upgrade that busy_timeout cannot catch (finding 3).
+func TestWritePoolDSN_HasTxlockImmediate(t *testing.T) {
+	t.Parallel()
+	writeDSN, readDSN := store.TestOnlyDSNs(
+		"/var/lib/qovira/qovira.db",
+		"test-passphrase",
+	)
+	if !strings.Contains(writeDSN, "_txlock=immediate") {
+		t.Errorf("write-pool DSN does not contain _txlock=immediate; got: %s", writeDSN)
+	}
+	if strings.Contains(readDSN, "_txlock") {
+		t.Errorf("read-pool DSN must not contain _txlock; got: %s", readDSN)
 	}
 }
 
