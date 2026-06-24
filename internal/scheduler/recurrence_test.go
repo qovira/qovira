@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1106,5 +1107,152 @@ func TestRecurring_PermanentErrorEndsSeries(t *testing.T) {
 	lastErr := jobLastError(t, s.Writer(), jobID)
 	if !lastErr.Valid || lastErr.String == "" {
 		t.Error("last_error is NULL/empty after Permanent dead-letter; want error text")
+	}
+}
+
+// ── Re-execution positive coverage ───────────────────────────────────────────
+
+// TestReexecution_FailThenSucceed verifies the full claim→fail→re-claim→re-run path:
+// a one-shot job whose handler fails on attempt 1 and succeeds on attempt 2 must be
+// invoked exactly twice total, and the row must be deleted after the second (successful)
+// run. This is the "positive re-execution" path that is not exercised by any other test:
+// existing retry tests either freeze the clock so the row is never re-claimed, or only
+// verify the row re-arms as pending after one failure without confirming re-execution.
+//
+// Clock strategy: the advanceable clock starts frozen. BackoffBase=BackoffCap=10m ensures
+// the re-armed run_at is now+jitter where jitter ∈ [0,10m] — strictly in the future
+// under the frozen clock, so the row is NOT immediately re-claimable. Only after
+// clk.Advance(11m) does run_at <= now become true and the poller re-claims on the next
+// tick. This makes the clock advance genuinely load-bearing: if the advance were removed
+// the second invocation could never occur, proving the re-claim is clock-driven.
+// MaxAttempts=5 ensures the job is not dead-lettered before the second attempt.
+//
+// Note: BackoffBase=1ms would be tempting for speed but is wrong here. RFC3339 stores
+// at second granularity; jitter ∈ [0,1ms) truncates to the same second as now, so
+// run_at <= now is immediately true and the row is re-claimed before clk.Advance fires —
+// passing the test via immediate re-claim rather than clock-driven re-execution, which
+// defeats the purpose of the advanceable clock.
+func TestReexecution_FailThenSucceed(t *testing.T) {
+	t.Parallel()
+
+	s := openMigratedStore(t)
+
+	// Start the clock well in the past so the job is immediately due.
+	clk := &advanceable{now: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)}
+
+	cfg := defaultTestConfig()
+	cfg.PollInterval = 5 * time.Millisecond
+	cfg.MaxAttempts = 5
+	// BackoffBase=BackoffCap=10m: the re-armed run_at = now + jitter where
+	// jitter ∈ [0,10m]. Under the frozen advanceable clock, run_at is always
+	// strictly > now (even jitter=0 stores as now+0ns = now exactly, which is
+	// NOT < now — the claim predicate is run_at <= now). A clock advance of 11m
+	// makes any jitter value due on the next poll tick, so the advance is the
+	// causal trigger for re-execution (not a timing race).
+	cfg.BackoffBase = 10 * time.Minute
+	cfg.BackoffCap = 10 * time.Minute
+
+	var callCount atomic.Int32
+	// firstFailed is closed when the handler returns its first error.
+	firstFailed := make(chan struct{})
+	var firstFailedOnce sync.Once
+	// secondSucceeded is closed when the handler returns nil on the second call.
+	secondSucceeded := make(chan struct{})
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, clk.Now)
+	sched.Register("reexec.test", func(_ context.Context, _ scheduler.Job) error {
+		n := callCount.Add(1)
+		switch n {
+		case 1:
+			// First call: fail. Signal as the handler unwinds (defer), before the
+			// scheduler's post-return retry write (handleFailure / RetryJob DB update).
+			defer firstFailedOnce.Do(func() { close(firstFailed) })
+			return errors.New("transient: first attempt fails")
+		case 2:
+			// Second call: succeed.
+			close(secondSucceeded)
+			return nil
+		default:
+			// Should not reach here — extra calls are a test failure.
+			return errors.New("unexpected extra call")
+		}
+	})
+
+	jobID, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+		Kind:    "reexec.test",
+		Payload: json.RawMessage(`{}`),
+		Scope:   store.SystemScope(),
+		// RunAt zero → immediately due.
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Wait for the first handler invocation (the failure) to complete.
+	select {
+	case <-firstFailed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first handler invocation did not occur within timeout")
+	}
+
+	// Wait for the RetryJob DB write to commit before advancing the clock. The scheduler
+	// calls handleFailure after h() returns, so firstFailed fires while the row may still
+	// be 'running'. With BackoffBase=10m the re-armed run_at is strictly future under the
+	// frozen clock, so the row will NOT be re-claimed until after clk.Advance fires — the
+	// row stays present and transitions to 'pending'; it cannot be deleted here.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var st string
+		if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&st); err != nil {
+			// Row not yet visible or transient error; retry.
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		if st == "pending" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// Confirm the row is re-armed (not deleted or still running) before we advance.
+	var preAdvanceStatus string
+	if err := s.Writer().QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&preAdvanceStatus); err != nil {
+		t.Fatalf("job row missing before clock advance: %v (want pending)", err)
+	}
+	if preAdvanceStatus != "pending" {
+		t.Fatalf("job status = %q before clock advance; want 'pending' (large backoff must prevent immediate re-claim)", preAdvanceStatus)
+	}
+
+	// Advance the clock by 11 minutes — past the 10m BackoffCap — so any re-armed
+	// row with backoff in [0,10m] is now due on the next poll tick. This advance is
+	// the causal trigger for re-execution; without it the row would never be re-claimed.
+	clk.Advance(11 * time.Minute)
+
+	// Wait for the second (successful) handler invocation.
+	select {
+	case <-secondSucceeded:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("second handler invocation did not occur within timeout (call count = %d)", callCount.Load())
+	}
+
+	// Give the scheduler a moment to delete the row (one-shot success path).
+	time.Sleep(50 * time.Millisecond)
+
+	// Assert the handler was invoked exactly twice.
+	if n := callCount.Load(); n != 2 {
+		t.Errorf("handler call count = %d; want exactly 2 (fail once, succeed once)", n)
+	}
+
+	// Assert the row is deleted (one-shot success).
+	if jobExists(t, s.Writer(), jobID) {
+		t.Error("job row still exists after successful second run; expected deletion (one-shot success)")
 	}
 }

@@ -483,12 +483,117 @@ func TestPoller_WorkerBoundAndNonBlocking(t *testing.T) {
 		_ = sched.Stop(stopCtx)
 	})
 
-	// The fast job should complete even though 2 slow jobs are running (Workers=2).
+	// The fast job should complete even though 2 slow jobs are running (Workers=4).
 	// This verifies the poller doesn't block on slow handlers.
 	select {
 	case <-fastDone:
 	case <-time.After(3 * time.Second):
 		t.Fatal("fast job was not executed despite slow jobs occupying workers; poller must be non-blocking")
+	}
+}
+
+// TestPoller_WorkerCapIsEnforced verifies that the peak concurrency of simultaneously
+// running handlers never exceeds cfg.Workers even when more jobs are due simultaneously.
+// It enqueues Workers+2 jobs, each of which:
+//  1. Atomically increments a live-concurrency counter.
+//  2. Blocks on a barrier until all workers have been observed at peak.
+//  3. Atomically decrements the counter on exit.
+//
+// The observed peak counter must be <= Workers AND >= Workers (the barrier guarantees
+// all first-batch handlers block before any decrement, so peak must equal Workers).
+// The poller implements the cap via "free := Workers - len(s.sem)" then claims exactly
+// that many rows per tick, so the buffered semaphore physically bounds concurrent
+// handlers. Under -race, the atomic counter catches any unsynchronised access.
+func TestPoller_WorkerCapIsEnforced(t *testing.T) {
+	t.Parallel()
+
+	const workers = 3
+	const totalJobs = workers + 2 // 5 jobs, only 3 can run simultaneously
+
+	s := openMigratedStore(t)
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	cfg := defaultTestConfig()
+	cfg.Workers = workers
+	cfg.PollInterval = 5 * time.Millisecond
+	// Large backoff so a failed claim never results in a retry during this test.
+	cfg.BackoffBase = 1 * time.Hour
+	cfg.BackoffCap = 1 * time.Hour
+
+	var (
+		liveConcurrency atomic.Int32
+		peakObserved    atomic.Int32
+	)
+
+	// barrier is used to keep all workers running simultaneously so the peak is observable.
+	// It is released once we have confirmed the cap holds.
+	barrier := make(chan struct{})
+
+	var doneCount atomic.Int32
+	allDone := make(chan struct{})
+
+	sched := scheduler.NewWithClock(s, fakeBus{}, cfg, fixedClock(now))
+	sched.Register("cap.test", func(_ context.Context, _ scheduler.Job) error {
+		// Increment live counter and record peak.
+		cur := liveConcurrency.Add(1)
+		for {
+			old := peakObserved.Load()
+			if cur <= old || peakObserved.CompareAndSwap(old, cur) {
+				break
+			}
+		}
+		// Wait at the barrier so multiple goroutines are live simultaneously.
+		<-barrier
+		liveConcurrency.Add(-1)
+		if doneCount.Add(1) == totalJobs {
+			close(allDone)
+		}
+		return nil
+	})
+
+	for i := range totalJobs {
+		_, err := sched.Enqueue(context.Background(), scheduler.EnqueueRequest{
+			Kind:    "cap.test",
+			Payload: json.RawMessage(`{}`),
+			Scope:   store.SystemScope(),
+			Key:     fmt.Sprintf("cap-job-%d", i),
+		})
+		if err != nil {
+			t.Fatalf("Enqueue job %d: %v", i, err)
+		}
+	}
+
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(stopCtx)
+	})
+
+	// Give workers time to fill up to the cap and stabilise before we release.
+	// With Workers=3 and PollInterval=5ms, within 100ms at least the first batch of
+	// Workers handlers should be blocked at the barrier.
+	time.Sleep(200 * time.Millisecond)
+
+	// Release the barrier and wait for all jobs to complete.
+	close(barrier)
+	select {
+	case <-allDone:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("not all jobs completed within timeout (done=%d want=%d)", doneCount.Load(), totalJobs)
+	}
+
+	peak := peakObserved.Load()
+	// The barrier guarantees all Workers first-batch handlers are simultaneously running
+	// before any of them exit, so the observed peak must equal Workers exactly — not just
+	// be <= Workers (which would pass a serialising regression) or > Workers (cap breach).
+	if int(peak) > workers {
+		t.Errorf("peak concurrent handlers = %d; want <= Workers (%d): cap exceeded", peak, workers)
+	}
+	if int(peak) < workers {
+		t.Errorf("peak concurrent handlers = %d; want >= Workers (%d): barrier must hold all first-batch handlers simultaneously — a serialising regression or premature barrier release", peak, workers)
 	}
 }
 
@@ -826,6 +931,15 @@ func TestHandler_PanicDoesNotCrash(t *testing.T) {
 	// Set MaxAttempts high enough that the panicking job isn't dead-lettered during
 	// the short observation window — we want to assert it gets re-armed as pending.
 	cfg.MaxAttempts = 100
+	// Large backoff so the re-armed run_at is strictly in the future under the frozen
+	// clock: with a frozen clock at 12:00:00.000 and BackoffBase=1s, the full-jitter
+	// backoff samples in [0,1s) and RFC3339 truncates to the same second — run_at <= now
+	// remains true so the poller re-claims on the very next tick and can catch the row
+	// transiently 'running' during our status check. 1h backoff guarantees the re-armed
+	// run_at is now+jitter > now for any jitter > 0, and the frozen clock never advances
+	// past it, making the post-panic status deterministically 'pending'.
+	cfg.BackoffBase = 1 * time.Hour
+	cfg.BackoffCap = 1 * time.Hour
 
 	// panicDone is closed once the panicking handler has been invoked (the panic
 	// itself immediately follows). We use a sync.Once so the close is idempotent
@@ -885,15 +999,17 @@ func TestHandler_PanicDoesNotCrash(t *testing.T) {
 	// (b) The panicking job's row must still be present. After a panic the failure path
 	// re-arms it as 'pending' (transient failure with backoff) rather than leaving it
 	// in 'running'. Give the scheduler a moment to process the post-panic update.
+	// MaxAttempts=100 is chosen specifically so the job is nowhere near dead-lettering
+	// during this short window; the only expected outcome is 'pending' (re-armed).
+	// A regression that mis-routes the panic to dead-letter (status='failed') would also
+	// be caught here, distinguishing the two valid alternatives from this expected path.
 	time.Sleep(100 * time.Millisecond)
 	if !jobExists(t, s.Writer(), panicJobID) {
 		t.Error("panicking job row was deleted; expected it to remain (re-armed as pending)")
 	}
 	status, _, _, _ := jobRow(t, s.Writer(), panicJobID)
-	// After a panic, the row should be 'pending' (re-armed) or 'failed' (dead-lettered),
-	// but never 'running' (which would mean it was stuck in running state, the old behavior).
-	if status == "running" {
-		t.Errorf("panicking job status = %q; want 'pending' or 'failed' (panic flows through retry/dead-letter path)", status)
+	if status != "pending" {
+		t.Errorf("panicking job status = %q; want 'pending' (panic flows through transient-failure path with MaxAttempts=100, must be re-armed not dead-lettered)", status)
 	}
 
 	// (c) The well-behaved job must complete and have its row deleted.
@@ -903,9 +1019,9 @@ func TestHandler_PanicDoesNotCrash(t *testing.T) {
 		t.Fatal("well-behaved job did not complete within timeout")
 	}
 	time.Sleep(50 * time.Millisecond)
-	// The good job row was deleted; the panic job row remains (re-armed or dead-lettered).
+	// The good job row was deleted; the panic job row remains (re-armed as pending).
 	if !jobExists(t, s.Writer(), panicJobID) {
-		t.Error("panic job row deleted; expected it to remain in pending/failed state")
+		t.Error("panic job row deleted; expected it to remain in pending state")
 	}
 }
 
@@ -1347,6 +1463,14 @@ func TestDeadLetter_AtMaxAttempts(t *testing.T) {
 
 	if finalStatus != "failed" {
 		t.Errorf("job status = %q after MaxAttempts=%d; want %q", finalStatus, cfg.MaxAttempts, "failed")
+	}
+
+	// The handler must have been called exactly MaxAttempts times: fail attempt 1 →
+	// retry with backoff → fail attempt 2 → dead-letter. A regression that dead-letters
+	// on the first failure (skipping the retry loop) would call it only once and pass all
+	// the DB assertions above; this assertion catches that regression.
+	if n := callCount.Load(); int(n) != cfg.MaxAttempts {
+		t.Errorf("handler call count = %d; want %d (== MaxAttempts: fail each attempt then dead-letter)", n, cfg.MaxAttempts)
 	}
 
 	// Row must be kept (not deleted).
