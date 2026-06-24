@@ -54,10 +54,16 @@ func spaHandler() http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Serving static files and the SPA shell is read-only; reject anything that is not a safe, idempotent read so
-		// non-GET requests to unknown paths never receive the SPA HTML.
+		// non-GET requests to unknown paths never receive the SPA HTML. Respond with problem+json (not plain text) so
+		// the error shape is consistent with the rest of the API.
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			WriteProblem(w, r, Problem{
+				Title:  "Method not allowed",
+				Status: http.StatusMethodNotAllowed,
+				Detail: "The SPA only serves GET and HEAD requests.",
+				Code:   "method_not_allowed",
+			})
 			return
 		}
 

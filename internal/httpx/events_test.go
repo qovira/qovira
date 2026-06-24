@@ -180,8 +180,8 @@ func TestEventsHandler_401WithoutPrincipal(t *testing.T) {
 	if ct != "application/problem+json" {
 		t.Errorf("Content-Type = %q, want application/problem+json", ct)
 	}
-	if !strings.Contains(w.Body.String(), "unauthorized") {
-		t.Errorf("body missing 'unauthorized' code; got: %q", w.Body.String())
+	if !strings.Contains(w.Body.String(), "unauthenticated") {
+		t.Errorf("body missing 'unauthenticated' code; got: %q", w.Body.String())
 	}
 }
 

@@ -314,3 +314,51 @@ func TestInternalProblem_StatusCode(t *testing.T) {
 		t.Errorf("HTTP status = %d, want 500", rr.Code)
 	}
 }
+
+// TestWriteProblem_ZeroStatusDefaultsTo500 verifies that WriteProblem guards
+// against a zero/unset Status field: a caller that constructs a Problem without
+// setting Status must not emit a 200 with a problem body. The guard defaults to
+// 500 Internal Server Error.
+func TestWriteProblem_ZeroStatusDefaultsTo500(t *testing.T) {
+	t.Parallel()
+
+	p := httpx.Problem{
+		Title:  "Something went wrong",
+		Detail: "no status was set",
+		Code:   "internal_error",
+		// Status: 0  ← intentionally omitted
+	}
+
+	r := newGET(t)
+	rr, body := writeProblem(t, r, p)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("HTTP status = %d, want 500 (zero Status must default to 500)", rr.Code)
+	}
+	if body.Status != http.StatusInternalServerError {
+		t.Errorf("body.status = %d, want 500", body.Status)
+	}
+}
+
+// TestWriteProblem_NonZeroStatusUnchanged verifies that an explicitly set
+// non-zero Status is not clobbered by the zero-Status guard.
+func TestWriteProblem_NonZeroStatusUnchanged(t *testing.T) {
+	t.Parallel()
+
+	p := httpx.Problem{
+		Title:  "Resource not found",
+		Status: http.StatusNotFound,
+		Detail: "no item",
+		Code:   "not_found",
+	}
+
+	r := newGET(t)
+	rr, body := writeProblem(t, r, p)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("HTTP status = %d, want 404", rr.Code)
+	}
+	if body.Status != http.StatusNotFound {
+		t.Errorf("body.status = %d, want 404", body.Status)
+	}
+}

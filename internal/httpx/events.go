@@ -52,10 +52,10 @@ func eventsHandler(bus events.Bus) http.HandlerFunc {
 		principal, ok := PrincipalFromContext(r.Context())
 		if !ok || principal.UserID == "" {
 			WriteProblem(w, r, Problem{
-				Title:  "Unauthorized",
+				Title:  "Authentication required",
 				Status: http.StatusUnauthorized,
 				Detail: "A valid authenticated session is required to subscribe to the event stream.",
-				Code:   "unauthorized",
+				Code:   "unauthenticated",
 			})
 			return
 		}

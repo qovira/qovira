@@ -365,3 +365,79 @@ func TestCSRFHeaderName_IsExported(t *testing.T) {
 		t.Errorf("CSRFHeaderName = %q, want CSRF-Token", httpx.CSRFHeaderName)
 	}
 }
+
+// TestAuthMiddleware_CSRF_PUT_RequiresCSRF verifies that PUT — an unsafe,
+// state-changing method — requires CSRF validation when the request is
+// authenticated via a session cookie. Previously PUT was absent from
+// isUnsafeMethod so it slipped through without a CSRF check.
+func TestAuthMiddleware_CSRF_PUT_RequiresCSRF(t *testing.T) {
+	t.Parallel()
+
+	const token = "qov_putcsrf000000000000000000000000000000" //nolint:gosec // G101 false positive: test fixture
+	const csrfValue = "csrf-put-value"
+	validator := &fakeValidator{
+		expectedToken: token,
+		principal:     store.Principal{UserID: "u_put", Role: "member"},
+	}
+	isPublic := func(*http.Request) bool { return false }
+
+	h := httpx.Chain(noopHandler(200, "ok"), httpx.AuthMiddleware(validator, isPublic))
+
+	// PUT without CSRF header → must be 403 (not 200).
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/resource/1", nil)
+	r.AddCookie(&http.Cookie{Name: httpx.SessionCookieName, Value: token, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})  //nolint:gosec // G124: test-only
+	r.AddCookie(&http.Cookie{Name: httpx.CSRFCookieName, Value: csrfValue, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode}) //nolint:gosec // G124: test-only
+	// No CSRF-Token header.
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, r)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("PUT without CSRF header: status = %d, want 403", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/problem+json" {
+		t.Errorf("Content-Type = %q, want application/problem+json", ct)
+	}
+
+	// PUT with matching CSRF header → must pass (200).
+	r2 := httptest.NewRequest(http.MethodPut, "/api/v1/resource/1", nil)
+	r2.AddCookie(&http.Cookie{Name: httpx.SessionCookieName, Value: token, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	r2.AddCookie(&http.Cookie{Name: httpx.CSRFCookieName, Value: csrfValue, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	r2.Header.Set(httpx.CSRFHeaderName, csrfValue)
+	rr2 := httptest.NewRecorder()
+	h.ServeHTTP(rr2, r2)
+
+	if rr2.Code != http.StatusOK {
+		t.Errorf("PUT with matching CSRF header: status = %d, want 200", rr2.Code)
+	}
+}
+
+// TestAuthMiddleware_CSRF_SafeMethods_ExemptFromCSRF verifies that GET, HEAD,
+// and OPTIONS remain exempt from CSRF even when authenticated via cookie.
+func TestAuthMiddleware_CSRF_SafeMethods_ExemptFromCSRF(t *testing.T) {
+	t.Parallel()
+
+	const token = "qov_safemethods000000000000000000000000000" //nolint:gosec // G101 false positive: test fixture
+	validator := &fakeValidator{
+		expectedToken: token,
+		principal:     store.Principal{UserID: "u_safe", Role: "member"},
+	}
+	isPublic := func(*http.Request) bool { return false }
+
+	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodOptions} {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+
+			h := httpx.Chain(noopHandler(200, "ok"), httpx.AuthMiddleware(validator, isPublic))
+
+			r := httptest.NewRequest(method, "/api/v1/resource", nil)
+			r.AddCookie(&http.Cookie{Name: httpx.SessionCookieName, Value: token, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode}) //nolint:gosec // G124: test-only
+			// No CSRF cookie or header — safe methods must be exempt.
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, r)
+
+			if rr.Code == http.StatusForbidden {
+				t.Errorf("%s: got 403, safe methods must be CSRF-exempt", method)
+			}
+		})
+	}
+}

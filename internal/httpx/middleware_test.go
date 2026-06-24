@@ -816,3 +816,79 @@ func TestFullChain_PublicRouteNoAuth(t *testing.T) {
 		t.Errorf("status = %d, want 200 for public /healthz", rr.Code)
 	}
 }
+
+// TestRequestLogMiddleware_EmitsOneLineOnPanic verifies that the request-log
+// middleware emits exactly one "request" log line even when the inner handler
+// panics, AND that the log line records status=500 and level=ERROR.
+//
+// Chain: recover (outermost) → request-id → request-log → panic handler.
+// The deferred log in RequestLogMiddleware must observe status=500 — the value
+// RecoverMiddleware will write — rather than the 0→200 default from the
+// statusRecorder when WriteHeader has not yet been called.
+func TestRequestLogMiddleware_EmitsOneLineOnPanic(t *testing.T) {
+	t.Parallel()
+
+	logger, logBuf := newTestLogger()
+
+	panicHandler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		panic("handler panicked")
+	})
+
+	// Compose: recover (outermost) → request-id → request-log → panic handler.
+	// This mirrors the production StandardChain ordering.
+	h := httpx.Chain(
+		panicHandler,
+		httpx.RecoverMiddleware(logger),
+		httpx.RequestIDMiddleware(),
+		httpx.RequestLogMiddleware(logger),
+	)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/boom", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, r)
+
+	// The recover middleware writes a 500 to the client.
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("client response status = %d, want 500", rr.Code)
+	}
+
+	// Parse log lines — there must be exactly one "request" access-log line.
+	logOutput := logBuf.String()
+	lines := strings.Split(strings.TrimSpace(logOutput), "\n")
+	var requestLines []map[string]any
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if msg, _ := entry["msg"].(string); msg == "request" {
+			requestLines = append(requestLines, entry)
+		}
+	}
+
+	if len(requestLines) == 0 {
+		t.Fatalf("no access-log 'request' line emitted after a panic; log: %s", logOutput)
+	}
+	if len(requestLines) > 1 {
+		t.Errorf("access-log emitted %d 'request' lines after panic, want exactly 1; log: %s", len(requestLines), logOutput)
+	}
+
+	entry := requestLines[0]
+
+	// The access-log MUST record status=500 so SLO dashboards see the real outcome.
+	// A value of 0 or 200 means the log captured the pre-panic state, not the
+	// 500 RecoverMiddleware writes.
+	gotStatus, _ := entry["status"].(float64)
+	if int(gotStatus) != http.StatusInternalServerError {
+		t.Errorf("access-log status = %v, want 500; the log must reflect the 500 RecoverMiddleware writes, not the unwritten 0→200 default", gotStatus)
+	}
+
+	// Level MUST be ERROR for 5xx (not INFO).
+	gotLevel, _ := entry["level"].(string)
+	if gotLevel != "ERROR" {
+		t.Errorf("access-log level = %q, want ERROR for a 5xx status", gotLevel)
+	}
+}

@@ -128,12 +128,7 @@ func RecoverMiddleware(logger *slog.Logger) Middleware {
 						)
 						return
 					}
-					WriteProblem(guard, r, Problem{
-						Title:  "Internal server error",
-						Status: http.StatusInternalServerError,
-						Detail: "An unexpected error occurred. Quote the requestId when contacting support.",
-						Code:   "internal_error",
-					})
+					WriteProblem(guard, r, internalServerProblem())
 				}
 			}()
 			next.ServeHTTP(guard, r)
@@ -275,24 +270,51 @@ func RequestLogMiddleware(logger *slog.Logger) Middleware {
 			start := time.Now()
 			rec := &statusRecorder{ResponseWriter: w}
 
+			// Emit the access-log line in a defer so it fires even when next
+			// panics. RecoverMiddleware (outermost) catches the panic after this
+			// defer runs, so the log line is always recorded once per request.
+			//
+			// On the panic path, rec.statusCode() returns 0→200 because
+			// RecoverMiddleware (which is OUTER) hasn't had a chance to call
+			// WriteHeader(500) yet — that happens after this defer. We detect the
+			// panic by calling recover(); if non-nil we know a 500 is coming, so
+			// we record status=500 in the log, then re-panic so RecoverMiddleware
+			// still catches it and writes the actual 500 problem+json body. This
+			// preserves the full panic-recovery chain while recording the right
+			// status and level.
+			defer func() {
+				// Detect whether a panic is in flight. If so, forcibly record
+				// 500 in the log entry and re-panic after logging.
+				v := recover()
+
+				status := rec.statusCode()
+				if v != nil {
+					// A panic is in flight — RecoverMiddleware will write 500.
+					status = http.StatusInternalServerError
+				}
+
+				duration := time.Since(start).Milliseconds()
+				reqID := RequestIDFromContext(r.Context())
+
+				level := slog.LevelInfo
+				if status >= http.StatusInternalServerError {
+					level = slog.LevelError
+				}
+
+				logger.LogAttrs(r.Context(), level, "request",
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.Int("status", status),
+					slog.Int64("duration", duration),
+					slog.String("requestId", reqID),
+				)
+
+				if v != nil {
+					panic(v) // re-panic so RecoverMiddleware (outer) handles it
+				}
+			}()
+
 			next.ServeHTTP(rec, r)
-
-			duration := time.Since(start).Milliseconds()
-			status := rec.statusCode()
-			reqID := RequestIDFromContext(r.Context())
-
-			level := slog.LevelInfo
-			if status >= http.StatusInternalServerError {
-				level = slog.LevelError
-			}
-
-			logger.LogAttrs(r.Context(), level, "request",
-				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
-				slog.Int("status", status),
-				slog.Int64("duration", duration),
-				slog.String("requestId", reqID),
-			)
 		})
 	}
 }
@@ -346,7 +368,7 @@ func SessionTokenFromRequest(r *http.Request) (token string, viaCookie bool) {
 //
 // CSRF double-submit (cookie-authenticated requests only):
 // When the token was extracted via cookie AND the HTTP method is unsafe
-// (POST, PATCH, or DELETE), the [CSRFHeaderName] request header must be
+// (POST, PUT, PATCH, or DELETE), the [CSRFHeaderName] request header must be
 // present and must equal the [CSRFCookieName] cookie value (compared via
 // [crypto/subtle.ConstantTimeCompare]).  A missing or mismatched CSRF header
 // results in a 403 problem+json response with code "csrf_failed".  GET
@@ -419,13 +441,13 @@ func sessionCookie(r *http.Request) string {
 	return c.Value
 }
 
-// isUnsafeMethod reports whether method requires CSRF protection. Only POST,
-// PATCH, and DELETE are considered unsafe for this check (GET and HEAD are
-// safe; PUT is uncommon in Qovira's PATCH-first API but would be unsafe too —
-// extend if needed).
+// isUnsafeMethod reports whether method requires CSRF protection. POST, PUT,
+// PATCH, and DELETE are state-changing (unsafe) per RFC 9110 §9.2.1 and
+// require the CSRF double-submit check for cookie-authenticated requests. GET,
+// HEAD, and OPTIONS are safe/idempotent and are exempt.
 func isUnsafeMethod(method string) bool {
 	switch method {
-	case http.MethodPost, http.MethodPatch, http.MethodDelete:
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 		return true
 	default:
 		return false

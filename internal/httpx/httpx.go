@@ -104,6 +104,13 @@ type Problem struct {
 // The response sets Content-Type: application/problem+json and the status code p.Status. JSON encoding and write errors
 // are logged to the default slog logger; they cannot be surfaced to the client at that point.
 func WriteProblem(w http.ResponseWriter, r *http.Request, p Problem) {
+	// 0. Guard against a zero/unset Status: a caller that forgets to set Status
+	//    must not emit a 200 with a problem body. Default to 500 so the response
+	//    is at least semantically correct.
+	if p.Status == 0 {
+		p.Status = http.StatusInternalServerError
+	}
+
 	// 1. Fill requestId from context if not already set.
 	if p.RequestID == "" {
 		p.RequestID = RequestIDFromContext(r.Context())
@@ -132,6 +139,18 @@ func WriteProblem(w http.ResponseWriter, r *http.Request, p Problem) {
 
 	if _, err = w.Write(body); err != nil {
 		slog.Error("httpx: failed to write problem body", "err", err)
+	}
+}
+
+// internalServerProblem returns the canonical 500 problem+json body used whenever the server encounters an
+// unexpected internal error. The generic detail and static code mean neither a stack trace nor internal context
+// leaks to the client. Use InternalProblem (which calls this) when you also want to log the internal error.
+func internalServerProblem() Problem {
+	return Problem{
+		Title:  "Internal server error",
+		Status: http.StatusInternalServerError,
+		Detail: "An unexpected error occurred. Quote the requestId when contacting support.",
+		Code:   "internal_error",
 	}
 }
 
@@ -170,10 +189,7 @@ func InternalProblem(logger *slog.Logger, code string, internalErr string) Probl
 		logger = slog.Default()
 	}
 	logger.Error("internal error", "code", code, "err", internalErr)
-	return Problem{
-		Title:  "Internal server error",
-		Status: http.StatusInternalServerError,
-		Detail: "An unexpected error occurred. Quote the requestId when contacting support.",
-		Code:   code,
-	}
+	p := internalServerProblem()
+	p.Code = code // callers may supply a more specific slug
+	return p
 }

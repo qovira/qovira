@@ -53,6 +53,11 @@ func mountFixedRoutes(router *Router, version string, bus events.Bus) {
 
 	// 2. API catch-all — unknown /api/v1/... paths return a JSON 404 problem.
 	// Module routes registered before this call take priority due to specificity.
+	// The bare "/api/v1" route is registered explicitly because the {path...}
+	// wildcard requires at least one path segment; without it Go's ServeMux
+	// redirects GET /api/v1 → /api/v1/ (307), which returns HTML via the SPA
+	// fallback. Registering "/api/v1" directly prevents that redirect.
+	router.mux.HandleFunc("/api/v1", apiNotFoundHandler)
 	router.mux.HandleFunc("/api/v1/{path...}", apiNotFoundHandler)
 
 	// 3. SSE stream — bare all-methods pattern (no "GET " prefix) so the mux always matches /events before the SPA

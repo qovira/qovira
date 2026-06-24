@@ -376,3 +376,46 @@ func TestIntegration_ServerBindsAndAnswersHealthz(t *testing.T) {
 		t.Errorf("version = %q, want %q", body.Version, version)
 	}
 }
+
+// TestBareAPIBase_ReturnsProblemJSON verifies that a request to the bare
+// /api/v1 path (with no sub-route) returns a problem+json 404 response,
+// not the SPA index.html fallback. The mux pattern "/api/v1/{path...}" does
+// not match the bare "/api/v1" because {path...} requires at least one segment,
+// so without an explicit "/api/v1" route the SPA fallback claimed it.
+func TestBareAPIBase_ReturnsProblemJSON(t *testing.T) {
+	t.Parallel()
+
+	h := newServerHandler(t, "dev")
+
+	for _, path := range []string{"/api/v1", "/api/v1/"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			r := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, r)
+
+			if rr.Code != http.StatusNotFound {
+				t.Errorf("path %s: status = %d, want 404", path, rr.Code)
+			}
+
+			ct := rr.Header().Get("Content-Type")
+			if ct != "application/problem+json" {
+				t.Errorf("path %s: Content-Type = %q, want application/problem+json", path, ct)
+			}
+
+			rawBody := rr.Body.String()
+			if strings.Contains(rawBody, "<!doctype html") || strings.Contains(rawBody, "<html") {
+				t.Errorf("path %s: returned HTML body instead of problem+json: %s", path, rawBody)
+			}
+
+			var p problemBody
+			if err := json.NewDecoder(strings.NewReader(rawBody)).Decode(&p); err != nil {
+				t.Fatalf("path %s: decode problem body: %v", path, err)
+			}
+			if p.Status != http.StatusNotFound {
+				t.Errorf("path %s: problem.status = %d, want 404", path, p.Status)
+			}
+		})
+	}
+}
