@@ -12,6 +12,10 @@ import { onUnauthorized, callUnauthorizedHandler } from "$lib/api/index.js";
 // Svelte $state rune support.
 // ---------------------------------------------------------------------------
 
+// vi.hoisted runs before any import so the value is available inside vi.mock
+// factories, which are also hoisted above normal imports.
+const { STREAMING_SENTINEL_ID } = vi.hoisted(() => ({ STREAMING_SENTINEL_ID: "__streaming__" as const }));
+
 vi.mock("$lib/stores/reminders.svelte.js", () => ({
   setReminders: vi.fn(),
   upsertReminder: vi.fn(),
@@ -25,7 +29,7 @@ vi.mock("$lib/stores/conversation.svelte.js", () => ({
   getActiveConversationId: vi.fn(() => null),
   setConversationHistory: vi.fn(),
   setTurnFailed: vi.fn(),
-  STREAMING_SENTINEL_ID: "__streaming__",
+  STREAMING_SENTINEL_ID,
 }));
 
 vi.mock("$lib/stores/tool-calls.svelte.js", () => ({

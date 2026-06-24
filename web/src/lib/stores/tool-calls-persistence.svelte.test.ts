@@ -20,8 +20,9 @@ import {
   type CompletedToolCall,
   type FailedToolCall,
 } from "./tool-calls.svelte.js";
+import { STREAMING_SENTINEL_ID } from "./conversation.svelte.js";
 
-const SENTINEL = "__streaming__";
+const SENTINEL = STREAMING_SENTINEL_ID;
 
 afterEach(() => {
   resetToolCalls();

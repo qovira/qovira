@@ -256,13 +256,16 @@ function wrapMethod<M extends (...args: [unknown, ...unknown[]]) => Promise<unkn
  *
  * Do NOT use the internal `_client` directly — always import `Api`.
  */
-export const Api: Client<paths> = {
-  ..._client,
+// Only the HTTP verbs the API actually uses are exposed (GET/POST/PATCH/DELETE).
+// The type is narrowed to that subset — not the full Client<paths> — so a typo or a
+// call to an unimplemented verb (PUT/HEAD/OPTIONS/TRACE) is a compile error rather
+// than a runtime `undefined`. The raw _client (which carries every verb plus use/
+// eject) is deliberately not spread in.
+export const Api: Pick<Client<paths>, "GET" | "POST" | "PATCH" | "DELETE"> = {
   GET: wrapMethod(_client.GET as (...args: [unknown, ...unknown[]]) => Promise<unknown>) as Client<paths>["GET"],
   POST: wrapMethod(_client.POST as (...args: [unknown, ...unknown[]]) => Promise<unknown>) as Client<paths>["POST"],
   PATCH: wrapMethod(_client.PATCH as (...args: [unknown, ...unknown[]]) => Promise<unknown>) as Client<paths>["PATCH"],
   DELETE: wrapMethod(
     _client.DELETE as (...args: [unknown, ...unknown[]]) => Promise<unknown>,
   ) as Client<paths>["DELETE"],
-  PUT: wrapMethod(_client.PUT as (...args: [unknown, ...unknown[]]) => Promise<unknown>) as Client<paths>["PUT"],
 };

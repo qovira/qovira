@@ -27,11 +27,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // them above the import. We mock the Api and the peer stores.
 // ---------------------------------------------------------------------------
 
-vi.mock("$lib/api/index.js", () => ({
-  Api: {
-    GET: vi.fn(),
-  },
-}));
+vi.mock("$lib/api/index.js", async (importActual) => {
+  const actual = await importActual<typeof import("$lib/api/index.js")>();
+  return {
+    ...actual,
+    Api: {
+      GET: vi.fn(),
+    },
+  };
+});
 
 vi.mock("ulid", () => ({
   ulid: vi.fn(() => "01FAKE-ULID-FOR-TEST"),
@@ -48,6 +52,7 @@ import {
   resetConversation,
   applyStreamingDelta,
 } from "./conversation.svelte.js";
+import { ProblemError } from "$lib/api/index.js";
 import { getToolCalls, resetToolCalls, toolCallStarted } from "./tool-calls.svelte.js";
 import { confirmationRequired, getConfirmations, resetConfirmations } from "./confirmations.svelte.js";
 import { switchConversation, startNewConversation } from "./switch-conversation.js";
@@ -276,7 +281,14 @@ describe("switchConversation() — real (non-404) API error surfaces a calm turn
     const { Api } = await import("$lib/api/index.js");
     (Api.GET as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: undefined,
-      error: { status: 500, title: "Internal Server Error", detail: "database unavailable" },
+      error: new ProblemError({
+        type: "about:blank",
+        title: "Internal Server Error",
+        status: 500,
+        detail: "database unavailable",
+        code: "internal_server_error",
+        requestId: "req-1",
+      }),
     });
 
     await switchConversation("conv-new");
@@ -290,7 +302,14 @@ describe("switchConversation() — real (non-404) API error surfaces a calm turn
     const { Api } = await import("$lib/api/index.js");
     (Api.GET as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: undefined,
-      error: { status: 503, title: "Service Unavailable", detail: "overloaded" },
+      error: new ProblemError({
+        type: "about:blank",
+        title: "Service Unavailable",
+        status: 503,
+        detail: "overloaded",
+        code: "service_unavailable",
+        requestId: "req-2",
+      }),
     });
 
     await switchConversation("conv-new");
@@ -304,7 +323,14 @@ describe("switchConversation() — real (non-404) API error surfaces a calm turn
     const { Api } = await import("$lib/api/index.js");
     (Api.GET as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: undefined,
-      error: { status: 404, title: "Not Found", detail: "conversation not found" },
+      error: new ProblemError({
+        type: "about:blank",
+        title: "Not Found",
+        status: 404,
+        detail: "conversation not found",
+        code: "not_found",
+        requestId: "req-3",
+      }),
     });
 
     await switchConversation("conv-new");

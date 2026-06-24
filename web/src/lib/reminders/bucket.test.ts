@@ -1,7 +1,7 @@
 // Tests for the pure reminder-bucketing logic.
 //
-// Rune environment: node + Svelte compiler (vitest project "runes").
-// No DOM, no fetch, no Svelte rendering — purely tests bucketReminders().
+// Plain unit test (vitest project "browser", happy-dom env) — the file uses no
+// runes, no fetch, no Svelte rendering; it purely tests bucketReminders().
 //
 // Bucket boundary choice (documented here and in bucket.ts):
 //   - Overdue:    dueAt < now

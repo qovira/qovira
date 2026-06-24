@@ -16,6 +16,7 @@
   import { defineMeta } from "@storybook/addon-svelte-csf";
   import { expect } from "storybook/test";
   import ToolCallChip from "./ToolCallChip.svelte";
+  import { STREAMING_SENTINEL_ID } from "$lib/stores/conversation.svelte.js";
   import type { ToolCallEntry } from "$lib/stores/tool-calls.svelte.js";
 
   // Per-story a11y override: the .tool-chip__args span uses opacity: 0.7 for
@@ -49,7 +50,7 @@
       state: "started",
       callId: "call-1",
       conversationId: "conv-1",
-      assistantMessageId: "__streaming__",
+      assistantMessageId: STREAMING_SENTINEL_ID,
       name: "create_reminder",
       risk: "write",
       argsSummary: "Buy oat milk · tomorrow 9 am",

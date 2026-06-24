@@ -36,17 +36,14 @@ describe("formatDueAt()", () => {
     expect(result).toBe(bad);
   });
 
-  it("never throws for any string input", () => {
-    const inputs = [
-      "garbage",
-      "2030-01-15T09:00:00Z",
-      "2030-13-99T99:99:99Z", // invalid date fields
-      "",
-      "null",
-      "undefined",
-    ];
-    for (const input of inputs) {
-      expect(() => formatDueAt(input)).not.toThrow();
-    }
+  it.each([
+    ["garbage"],
+    ["2030-01-15T09:00:00Z"],
+    ["2030-13-99T99:99:99Z"], // invalid date fields
+    [""],
+    ["null"],
+    ["undefined"],
+  ])("never throws for string input %s", (input) => {
+    expect(() => formatDueAt(input)).not.toThrow();
   });
 });

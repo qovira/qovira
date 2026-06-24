@@ -19,14 +19,12 @@
 // Safe as a module-level singleton: ssr=false in +layout.ts, browser-only.
 // The layout resets on logout / 401.
 
+import { STREAMING_SENTINEL_ID } from "$lib/stores/conversation.svelte.js";
 import type { ToolStartedPayload } from "$lib/sse/router.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/** The sentinel assistant-message id used while a turn is streaming. */
-export const STREAMING_SENTINEL_ID = "__streaming__";
 
 /** A tool call in the "started" state — chip shows argsSummary. */
 export interface StartedToolCall {

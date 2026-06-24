@@ -24,7 +24,7 @@
 //      conversation implicitly on the first POST /conversations/{id}/messages.
 
 import { ulid } from "ulid";
-import { Api } from "$lib/api/index.js";
+import { Api, ProblemError } from "$lib/api/index.js";
 import { setActiveConversation, setConversationHistory, setTurnFailed } from "$lib/stores/conversation.svelte.js";
 import { resetToolCalls } from "$lib/stores/tool-calls.svelte.js";
 import { resetConfirmations } from "$lib/stores/confirmations.svelte.js";
@@ -79,7 +79,7 @@ export async function switchConversation(id: string): Promise<void> {
     // Success — seed history without re-pivoting (active id is already correct).
     setConversationHistory(data.messages);
   } else {
-    const errStatus = (error as { status?: number } | undefined)?.status;
+    const errStatus = error instanceof ProblemError ? error.status : undefined;
     if (errStatus !== undefined && errStatus !== 404) {
       // Real server error on an existing conversation — surface a calm error state
       // rather than silently leaving history empty (which looks like a new thread).
