@@ -6,14 +6,21 @@
 // Pipeline: Markdown source → marked (HTML string) → DOMPurify (sanitized HTML)
 //
 // DOMPurify configuration:
-//   - Strips all <script> elements and event-handler attributes (onerror, onclick, …)
+//   - ALLOWED_TAGS: strict allowlist of tags that marked actually emits —
+//     p, h1–h6, ul, ol, li, pre, code, blockquote, a, img, table, thead,
+//     tbody, tr, th, td, strong, em, del, hr, br, span.
+//     Anything not on this list (form, input, button, textarea, select, …) is
+//     dropped. This is the correct direction — allowlist the safe set rather
+//     than FORBID_TAGS over a default-allow base.
+//   - ALLOWED_ATTR: strict allowlist of attributes that markdown legitimately
+//     needs — href, src, alt, title, colspan, rowspan. The `style` attribute
+//     is intentionally absent; inline styles can paint full-viewport overlays
+//     (CSP sets style-src 'unsafe-inline' so DOMPurify is the only defense).
 //   - Strips dangerous URI schemes (javascript:, data:, vbscript:) via two layers:
 //       1. ALLOWED_URI_REGEXP — the primary config-level allowlist; permits only
 //          http:, https:, mailto:, tel:, relative paths, and anchor-only fragments.
 //       2. uponSanitizeAttribute hook — secondary belt-and-suspenders defense;
 //          explicitly rejects the same dangerous schemes on href/src/action attrs.
-//   - Allows the standard set of "safe" HTML tags (paragraphs, headings, lists,
-//     code, blockquotes, links, images, tables, …) that marked can produce
 //
 // Security boundary: the ALLOWED_URI_REGEXP allowlist is the primary URI control.
 // It operates through DOMPurify's native attribute-check path, which requires a
@@ -43,16 +50,82 @@ marked.setOptions({ async: false });
 
 /**
  * Allowlist of URI schemes and forms that are safe to include in href/src/action attrs.
- * Permits: http:, https:, mailto:, tel:, relative paths (/foo, ../bar), and anchor
- * fragments (#section). Blocks everything else — javascript:, data:, vbscript:, etc.
+ *
+ * Accepts exactly:
+ *   - https:, http:, mailto:, tel:    — named safe schemes (no ftp/sms/etc.)
+ *   - /path                            — absolute-relative paths (start with /)
+ *   - ./path, ../path                  — relative paths (start with ./ or ../)
+ *   - #fragment                        — anchor-only fragments (start with #)
+ *
+ * Rejects everything else, including:
+ *   - javascript:, data:, vbscript:    — dangerous execution / data schemes
+ *   - java\tscript:, java\nscript:     — whitespace-obfuscated variants
+ *   - ' javascript:'                   — leading-space obfuscated variants
+ *   - ftp:, sms:, and any other scheme not in the explicit allowlist above
  *
  * This is the PRIMARY config-level URI control passed to DOMPurify's ALLOWED_URI_REGEXP.
- * The uponSanitizeAttribute hook below is secondary defense-in-depth.
+ * The uponSanitizeAttribute hook below is secondary defense-in-depth (belt-and-suspenders).
+ *
+ * Design note: the previous pattern used a loose `[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$)` tail
+ * that delegated obfuscated-scheme rejection entirely to DOMPurify's pre-normalisation step.
+ * This anchored pattern rejects obfuscated schemes at the regexp level itself, so the
+ * two defenses are genuinely independent rather than one being a fallback of the other.
  */
-const ALLOWED_URI_REGEXP = /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
+const ALLOWED_URI_REGEXP = /^(?:(?:https?|mailto|tel):|[/.#]|\.\.\/)/;
 
 /** URI schemes that must never appear in href/src/action attributes. */
 const DANGEROUS_SCHEME = /^(?:javascript|data|vbscript)\s*:/i;
+
+/**
+ * Tags that marked.js can legitimately emit when rendering standard Markdown.
+ * This is a strict allowlist — any tag not in this list is stripped.
+ *
+ * Tags verified against marked ^18 output for: headings, paragraphs, lists,
+ * code blocks, blockquotes, links, images, tables, emphasis, strikethrough, hr, br.
+ * `span` is included because marked emits it for some inline constructs.
+ *
+ * Intentionally excluded: form, input, button, textarea, select, script, style,
+ * iframe, object, embed, and all other interactive / embedding elements.
+ */
+const ALLOWED_TAGS = [
+  "p",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "ul",
+  "ol",
+  "li",
+  "pre",
+  "code",
+  "blockquote",
+  "a",
+  "img",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+  "strong",
+  "em",
+  "del",
+  "hr",
+  "br",
+  "span",
+];
+
+/**
+ * Attributes that marked.js can legitimately emit for the tags above.
+ * This is a strict allowlist — any attribute not listed is stripped.
+ *
+ * Intentionally excluded: style (can paint full-viewport overlays; CSP has
+ * style-src 'unsafe-inline' so the browser would not block it), class, id,
+ * data-*, on* event handlers, action, method, and all other non-content attrs.
+ */
+const ALLOWED_ATTR = ["href", "src", "alt", "title", "colspan", "rowspan"];
 
 /**
  * DOMPurify hook name used to strip dangerous URI schemes.
@@ -65,17 +138,19 @@ const HOOK_NAME = "uponSanitizeAttribute" as const;
  * Convert Markdown text to sanitized HTML.
  *
  * Safe to pass to Svelte's {@html} directive. Strips all script injection
- * vectors: <script>, inline event handlers, javascript:/data:/vbscript: URIs.
+ * vectors: <script>, inline event handlers, javascript:/data:/vbscript: URIs,
+ * credential-phishing form elements, and CSS overlay style attributes.
  *
- * URI sanitization operates at two levels:
- *   1. ALLOWED_URI_REGEXP (primary): DOMPurify config-level allowlist that permits
- *      only safe schemes (http, https, mailto, tel) and relative/anchor URLs.
- *      Requires a faithful DOM — effective in real browsers and jsdom.
- *   2. uponSanitizeAttribute hook (secondary, belt-and-suspenders): unconditionally
- *      rejects dangerous URI schemes on href/src/action attrs. Note: this hook
- *      is NOT a cross-environment guarantee — happy-dom has a known fidelity bug
- *      where it may not fire for block-context anchors. Test XSS cases in jsdom
- *      (*.jsdom.test.ts), not happy-dom.
+ * Sanitization operates at three levels:
+ *   1. ALLOWED_TAGS (primary tag control): strict allowlist scoped to tags
+ *      that marked actually emits. Drops form/input/button/textarea/select and
+ *      all other non-markdown elements.
+ *   2. ALLOWED_ATTR (primary attribute control): strict allowlist scoped to
+ *      attributes that markdown legitimately needs. Drops style (CSS overlay
+ *      vector), class, id, data-*, and all event handler attributes.
+ *   3. ALLOWED_URI_REGEXP + uponSanitizeAttribute (URI control): two-layer
+ *      defense that strips dangerous URI schemes from href/src. Primary layer
+ *      is the regexp allowlist; the hook is belt-and-suspenders.
  *
  * @param markdown - Raw model-produced Markdown. May contain adversarial HTML.
  * @returns        - Sanitized HTML string, safe for {@html}.
@@ -97,12 +172,17 @@ export function renderSafeMarkdown(markdown: string): string {
 
   try {
     return DOMPurify.sanitize(raw, {
-      // ALLOWED_URI_REGEXP is the primary config-level URI control. Only href/src/action
-      // values matching this pattern pass through DOMPurify's attribute check. Dangerous
-      // schemes (javascript:, data:, vbscript:) do not match and are stripped.
+      // ALLOWED_TAGS: strict tag allowlist. Only tags that marked legitimately emits
+      // for standard Markdown are permitted. Form, input, button, textarea, select,
+      // script, style, and all other non-content tags are dropped.
+      ALLOWED_TAGS,
+      // ALLOWED_ATTR: strict attribute allowlist. The style attribute is intentionally
+      // absent — inline styles can paint full-viewport overlays (CSP allows them).
+      ALLOWED_ATTR,
+      // ALLOWED_URI_REGEXP: primary config-level URI control. Only href/src/action
+      // values matching this pattern pass through DOMPurify's attribute check.
+      // Dangerous schemes (javascript:, data:, vbscript:) do not match and are stripped.
       ALLOWED_URI_REGEXP,
-      // Disallow <script> and <style> tags explicitly (defense-in-depth).
-      FORBID_TAGS: ["script", "style"],
     });
   } finally {
     // Always remove the hook to avoid accumulation on the DOMPurify singleton.
