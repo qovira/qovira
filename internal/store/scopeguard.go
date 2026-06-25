@@ -189,8 +189,10 @@ func extractTargetTable(block, stmt string) string {
 
 		switch stmt {
 		case "SELECT":
-			// Match "FROM <table>" whether at start of line or inline.
-			if idx := strings.Index(upper, "FROM "); idx >= 0 {
+			// Match "FROM <table>" whether at start of line or inline. Search the original-case line under ASCII folding
+			// rather than indexing strings.ToUpper(trimmed): ToUpper can change the byte length of non-ASCII /
+			// invalid-UTF-8 input, which would desynchronize an uppercased index from trimmed and slice out of range.
+			if idx := indexFoldASCII(trimmed, "FROM "); idx >= 0 {
 				return firstWord(trimmed[idx+5:])
 			}
 		case "UPDATE":
@@ -329,8 +331,11 @@ func verifyUserIDScoping(block, target string) (string, bool) {
 		return "no WHERE clause; user_id predicate required for target " + target, false
 	}
 
-	// Rule 6: examine the WHERE clause portion (literals already stripped).
-	whereClause := stripped[whereIdx:]
+	// Rule 6: examine the WHERE clause portion. Slice upperStripped — the same string findWhereClause indexed — not the
+	// original stripped: strings.ToUpper can change byte length on non-ASCII / invalid-UTF-8 input, so a whereIdx
+	// computed against upperStripped must not index stripped (it can overrun, or silently slice at the wrong offset).
+	// checkUserIDInWhere matches case-insensitively, so the uppercased clause is equivalent.
+	whereClause := upperStripped[whereIdx:]
 	return checkUserIDInWhere(whereClause, target)
 }
 
@@ -529,6 +534,41 @@ func firstWord(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimRight(s, ",;)")
+}
+
+// indexFoldASCII returns the byte index in s of the first occurrence of kw under ASCII case-insensitive matching, or -1
+// if absent. Unlike strings.Index(strings.ToUpper(s), kw), the returned offset is always valid in s itself:
+// strings.ToUpper can change the byte length of non-ASCII or invalid-UTF-8 input, which would desynchronize an
+// uppercased-string index from s. kw must be an ASCII string.
+func indexFoldASCII(s, kw string) int {
+	for i := 0; i+len(kw) <= len(s); i++ {
+		if equalFoldASCII(s[i:i+len(kw)], kw) {
+			return i
+		}
+	}
+	return -1
+}
+
+// equalFoldASCII reports whether a and b are equal under ASCII-only case folding (A–Z ↔ a–z). It deliberately avoids
+// unicode folding (cf. strings.EqualFold) so that a non-ASCII rune which folds to an ASCII letter (e.g. the Kelvin sign
+// U+212A → 'k') cannot spuriously match an ASCII keyword.
+func equalFoldASCII(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		ca, cb := a[i], b[i]
+		if 'a' <= ca && ca <= 'z' {
+			ca -= 'a' - 'A'
+		}
+		if 'a' <= cb && cb <= 'z' {
+			cb -= 'a' - 'A'
+		}
+		if ca != cb {
+			return false
+		}
+	}
+	return true
 }
 
 // hasCommaJoin reports whether the uppercased stripped query text contains an old-style comma cross-join — a top-level
