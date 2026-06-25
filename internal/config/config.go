@@ -3,9 +3,10 @@
 //
 // Precedence: env > optional TOML file > built-in defaults.
 //
-// Secrets (MasterKey, AdminPassword) are env-only — they are never read from the TOML file. Both support _FILE
-// indirection: set QOVIRA_MASTER_KEY_FILE (or QOVIRA_ADMIN_PASSWORD_FILE) to a path whose contents are used as the
-// secret. Setting both the direct env var and its _FILE counterpart is an error.
+// Secrets (MasterKey, AdminPassword, GatewayAPIKey) are env-only — they are never read from the TOML file. Each
+// supports _FILE indirection: set QOVIRA_MASTER_KEY_FILE (or QOVIRA_ADMIN_PASSWORD_FILE, QOVIRA_GATEWAY_API_KEY_FILE)
+// to a path whose contents are used as the secret. Setting both the direct env var and its _FILE counterpart is an
+// error.
 //
 // Master-key minimum length: 16 bytes.
 package config
@@ -83,6 +84,14 @@ type Config struct {
 
 	// AdminPassword is the initial admin account password. Env-only.
 	AdminPassword Secret
+
+	// GatewayBaseURL, GatewayAPIKey, and GatewayModel, when set, seed the model gateway's primary endpoint into the
+	// settings store on boot (see internal/app seeding). They are the only configuration surface for the gateway in
+	// v0.1. All three must be set together or not at all. GatewayAPIKey is a secret: env-only (never from TOML) and
+	// supporting _FILE indirection like the master key.
+	GatewayBaseURL string
+	GatewayAPIKey  Secret
+	GatewayModel   string
 
 	// rawAutoMigrate captures the literal QOVIRA_AUTO_MIGRATE env value so validate can produce an aggregated error for
 	// unrecognized values.
@@ -188,6 +197,22 @@ func loadEnv(cfg *Config) error {
 		cfg.AdminPassword = Secret(adminPwdDirect)
 	}
 
+	// GatewayAPIKey: same _FILE indirection logic as the other secrets.
+	gatewayKeyDirect := os.Getenv("QOVIRA_GATEWAY_API_KEY")
+	gatewayKeyFile := os.Getenv("QOVIRA_GATEWAY_API_KEY_FILE")
+	switch {
+	case gatewayKeyDirect != "" && gatewayKeyFile != "":
+		return errors.New("QOVIRA_GATEWAY_API_KEY and QOVIRA_GATEWAY_API_KEY_FILE are both set; use exactly one")
+	case gatewayKeyFile != "":
+		val, err := readSecretFile(gatewayKeyFile)
+		if err != nil {
+			return fmt.Errorf("QOVIRA_GATEWAY_API_KEY_FILE: %w", err)
+		}
+		cfg.GatewayAPIKey = Secret(val)
+	case gatewayKeyDirect != "":
+		cfg.GatewayAPIKey = Secret(gatewayKeyDirect)
+	}
+
 	// --- Non-secret env overrides ---
 	if v := os.Getenv("QOVIRA_DATA_DIR"); v != "" {
 		cfg.DataDir = v
@@ -215,6 +240,12 @@ func loadEnv(cfg *Config) error {
 	}
 	if v := os.Getenv("QOVIRA_ADMIN_EMAIL"); v != "" {
 		cfg.AdminEmail = v
+	}
+	if v := os.Getenv("QOVIRA_GATEWAY_BASE_URL"); v != "" {
+		cfg.GatewayBaseURL = v
+	}
+	if v := os.Getenv("QOVIRA_GATEWAY_MODEL"); v != "" {
+		cfg.GatewayModel = v
 	}
 
 	return nil
@@ -303,6 +334,27 @@ func validate(cfg *Config) error {
 	}
 	if hasPassword && !hasEmail {
 		errs = append(errs, errors.New("admin_email: required when QOVIRA_ADMIN_PASSWORD is set"))
+	}
+
+	// Model gateway seed: base URL, API key, and model must be set together or not at all. With no other configuration
+	// surface in v0.1, a partial set would silently leave the gateway unconfigured, so it is rejected loudly — naming
+	// every missing field, mirroring the admin-credential rule above.
+	hasGwBase := cfg.GatewayBaseURL != ""
+	hasGwKey := len(cfg.GatewayAPIKey) > 0
+	hasGwModel := cfg.GatewayModel != ""
+	if hasGwBase || hasGwKey || hasGwModel {
+		if !hasGwBase {
+			errs = append(errs, errors.New(
+				"gateway_base_url: required when any QOVIRA_GATEWAY_* var is set (set QOVIRA_GATEWAY_BASE_URL)"))
+		}
+		if !hasGwKey {
+			errs = append(errs, errors.New(
+				"gateway_api_key: required when any QOVIRA_GATEWAY_* var is set (set QOVIRA_GATEWAY_API_KEY or QOVIRA_GATEWAY_API_KEY_FILE)"))
+		}
+		if !hasGwModel {
+			errs = append(errs, errors.New(
+				"gateway_model: required when any QOVIRA_GATEWAY_* var is set (set QOVIRA_GATEWAY_MODEL)"))
+		}
 	}
 
 	return errors.Join(errs...)

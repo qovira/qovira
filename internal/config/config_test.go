@@ -598,3 +598,113 @@ func TestLoad_Validation_AutoMigrateAggregated(t *testing.T) {
 		t.Errorf("aggregated error missing auto_migrate; got: %s", msg)
 	}
 }
+
+// --- Model gateway seeding configuration (QOVIRA_GATEWAY_*) ---
+
+// TestLoad_GatewayConfig_AllThree verifies that the three QOVIRA_GATEWAY_* variables load into the corresponding Config
+// fields and that the API key is redacted across fmt verbs.
+func TestLoad_GatewayConfig_AllThree(t *testing.T) {
+	t.Setenv("QOVIRA_MASTER_KEY", "a-sufficiently-long-passphrase")
+	t.Setenv("QOVIRA_MASTER_KEY_FILE", "")
+	t.Setenv("QOVIRA_ADMIN_EMAIL", "")
+	t.Setenv("QOVIRA_ADMIN_PASSWORD", "")
+	t.Setenv("QOVIRA_ADMIN_PASSWORD_FILE", "")
+	t.Setenv("QOVIRA_GATEWAY_BASE_URL", "https://api.example.com/v1")
+	t.Setenv("QOVIRA_GATEWAY_API_KEY", "sk-secret-123")
+	t.Setenv("QOVIRA_GATEWAY_API_KEY_FILE", "")
+	t.Setenv("QOVIRA_GATEWAY_MODEL", "qwen2.5")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.GatewayBaseURL != "https://api.example.com/v1" {
+		t.Errorf("GatewayBaseURL = %q", cfg.GatewayBaseURL)
+	}
+	if cfg.GatewayModel != "qwen2.5" {
+		t.Errorf("GatewayModel = %q", cfg.GatewayModel)
+	}
+	if string(cfg.GatewayAPIKey) != "sk-secret-123" {
+		t.Errorf("GatewayAPIKey raw = %q, want the secret value", string(cfg.GatewayAPIKey))
+	}
+	// The Secret type must redact the API key across fmt verbs.
+	for _, verb := range []string{"%v", "%s", "%#v"} {
+		if got := fmt.Sprintf(verb, cfg.GatewayAPIKey); strings.Contains(got, "sk-secret-123") {
+			t.Errorf("fmt %s leaked GatewayAPIKey value: %s", verb, got)
+		}
+	}
+}
+
+// TestLoad_FileSuffix_GatewayAPIKey verifies that QOVIRA_GATEWAY_API_KEY_FILE reads the secret from the referenced path
+// (with a single trailing newline trimmed).
+func TestLoad_FileSuffix_GatewayAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "gateway_api_key")
+	if err := os.WriteFile(keyPath, []byte("sk-from-file\n"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	t.Setenv("QOVIRA_MASTER_KEY", "a-sufficiently-long-passphrase")
+	t.Setenv("QOVIRA_MASTER_KEY_FILE", "")
+	t.Setenv("QOVIRA_ADMIN_EMAIL", "")
+	t.Setenv("QOVIRA_ADMIN_PASSWORD", "")
+	t.Setenv("QOVIRA_GATEWAY_BASE_URL", "https://api.example.com/v1")
+	t.Setenv("QOVIRA_GATEWAY_API_KEY", "")
+	t.Setenv("QOVIRA_GATEWAY_API_KEY_FILE", keyPath)
+	t.Setenv("QOVIRA_GATEWAY_MODEL", "qwen2.5")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if string(cfg.GatewayAPIKey) != "sk-from-file" {
+		t.Errorf("GatewayAPIKey = %q (raw), want %q", string(cfg.GatewayAPIKey), "sk-from-file")
+	}
+}
+
+// TestLoad_GatewayAPIKey_FileConflict verifies that setting both QOVIRA_GATEWAY_API_KEY and its _FILE counterpart is an
+// error.
+func TestLoad_GatewayAPIKey_FileConflict(t *testing.T) {
+	t.Setenv("QOVIRA_MASTER_KEY", "a-sufficiently-long-passphrase")
+	t.Setenv("QOVIRA_MASTER_KEY_FILE", "")
+	t.Setenv("QOVIRA_GATEWAY_BASE_URL", "https://api.example.com/v1")
+	t.Setenv("QOVIRA_GATEWAY_API_KEY", "sk-direct")
+	t.Setenv("QOVIRA_GATEWAY_API_KEY_FILE", "/some/path")
+	t.Setenv("QOVIRA_GATEWAY_MODEL", "qwen2.5")
+
+	_, err := config.Load("")
+	if err == nil {
+		t.Fatal("expected conflict error when both GATEWAY_API_KEY and GATEWAY_API_KEY_FILE are set, got nil")
+	}
+	if !strings.Contains(err.Error(), "GATEWAY_API_KEY") {
+		t.Errorf("conflict error %q should mention GATEWAY_API_KEY", err.Error())
+	}
+}
+
+// TestLoad_Validation_GatewayPartial verifies that setting only some of the QOVIRA_GATEWAY_* variables yields an
+// aggregated error naming each missing field — they must be set together or not at all.
+func TestLoad_Validation_GatewayPartial(t *testing.T) {
+	t.Setenv("QOVIRA_MASTER_KEY", "a-sufficiently-long-passphrase")
+	t.Setenv("QOVIRA_MASTER_KEY_FILE", "")
+	t.Setenv("QOVIRA_ADMIN_EMAIL", "")
+	t.Setenv("QOVIRA_ADMIN_PASSWORD", "")
+	t.Setenv("QOVIRA_GATEWAY_BASE_URL", "https://api.example.com/v1")
+	t.Setenv("QOVIRA_GATEWAY_API_KEY", "")
+	t.Setenv("QOVIRA_GATEWAY_API_KEY_FILE", "")
+	t.Setenv("QOVIRA_GATEWAY_MODEL", "")
+
+	_, err := config.Load("")
+	if err == nil {
+		t.Fatal("expected aggregated validation error for partial gateway config, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"gateway_api_key", "gateway_model"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("aggregated error missing field %q\ngot: %s", want, msg)
+		}
+	}
+	// base URL is present, so it must NOT be reported as missing.
+	if strings.Contains(msg, "gateway_base_url") {
+		t.Errorf("gateway_base_url should not be reported when set; got: %s", msg)
+	}
+}

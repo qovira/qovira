@@ -31,7 +31,7 @@ type Gateway struct {
 // [ResilienceConfig] values set here.
 func New(ss *store.SettingsStore) *Gateway {
 	return &Gateway{
-		settings:      ss.Namespace("model_gateway"),
+		settings:      ss.Namespace(NamespaceModelGateway),
 		httpClient:    newHTTPClient(),
 		resilienceCfg: defaultResilienceConfig(),
 	}

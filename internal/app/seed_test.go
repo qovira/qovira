@@ -9,6 +9,7 @@ import (
 	"github.com/qovira/qovira/internal/app"
 	"github.com/qovira/qovira/internal/auth"
 	"github.com/qovira/qovira/internal/config"
+	"github.com/qovira/qovira/internal/gateway"
 	"github.com/qovira/qovira/internal/harness"
 	"github.com/qovira/qovira/internal/store"
 )
@@ -199,4 +200,114 @@ func TestNew_NoSeedWhenCredsEmpty(t *testing.T) {
 			}
 		})
 	}
+}
+
+// newGatewaySeedCfg builds a Config with the model gateway primary endpoint set (no admin credentials), pointing at dir.
+func newGatewaySeedCfg(t *testing.T, dir, baseURL, apiKey, model string) *config.Config {
+	t.Helper()
+	return &config.Config{
+		MasterKey:      config.Secret(seedTestKey),
+		DataDir:        dir,
+		HTTPAddr:       "127.0.0.1:0",
+		LogLevel:       "error",
+		LogFormat:      "json",
+		AutoMigrate:    true,
+		GatewayBaseURL: baseURL,
+		GatewayAPIKey:  config.Secret(apiKey),
+		GatewayModel:   model,
+	}
+}
+
+// assertGatewaySetting reads a model_gateway setting back from a freshly-opened store and asserts its value.
+func assertGatewaySetting(t *testing.T, dir, key, want string) {
+	t.Helper()
+	s := openTestStore(t, dir)
+	got, found, err := s.Settings().Namespace(gateway.NamespaceModelGateway).Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("Get %q: %v", key, err)
+	}
+	if !found || got != want {
+		t.Errorf("setting %q = %q (found=%v), want %q", key, got, found, want)
+	}
+}
+
+// TestNew_SeedsGatewayConfigFromEnv verifies that when the gateway config fields are set, app.New writes the primary
+// endpoint coordinates into the model_gateway settings namespace — the same keys the gateway reads.
+func TestNew_SeedsGatewayConfigFromEnv(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := newGatewaySeedCfg(t, dir, "https://api.example.com/v1", "sk-secret-xyz", "qwen2.5")
+
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{}, seedAuthCtor())
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	cleanupApp(t, a)
+
+	assertGatewaySetting(t, dir, gateway.KeyPrimaryBaseURL, "https://api.example.com/v1")
+	assertGatewaySetting(t, dir, gateway.KeyPrimaryAPIKey, "sk-secret-xyz")
+	assertGatewaySetting(t, dir, gateway.KeyPrimaryModel, "qwen2.5")
+}
+
+// TestNew_NoGatewaySeedWhenUnset verifies that when no gateway config is provided, app.New leaves the model_gateway
+// namespace empty.
+func TestNew_NoGatewaySeedWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := newSeedCfg(t, dir, "", "") // no admin, no gateway
+
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{}, seedAuthCtor())
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	cleanupApp(t, a)
+
+	s := openTestStore(t, dir)
+	_, found, err := s.Settings().Namespace(gateway.NamespaceModelGateway).Get(context.Background(), gateway.KeyPrimaryBaseURL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if found {
+		t.Error("expected no gateway baseURL setting when unset, but one was written")
+	}
+}
+
+// TestNew_GatewaySeedOverwritesExisting verifies the upsert-every-boot semantic: a boot with gateway config overwrites
+// stale values left by a prior boot, because the environment is the source of truth in v0.1.
+func TestNew_GatewaySeedOverwritesExisting(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Simulate a prior boot: migrate, then write stale gateway settings directly, then close the handle.
+	pre := openTestStore(t, dir)
+	if err := store.NewRunner().Up(context.Background(), pre.Writer()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	preNS := pre.Settings().Namespace(gateway.NamespaceModelGateway)
+	stale := map[string]string{
+		gateway.KeyPrimaryBaseURL: "https://stale.example.com/v1",
+		gateway.KeyPrimaryAPIKey:  "sk-stale",
+		gateway.KeyPrimaryModel:   "model-stale",
+	}
+	for k, v := range stale {
+		if err := preNS.Set(context.Background(), k, v); err != nil {
+			t.Fatalf("pre-seed %q: %v", k, err)
+		}
+	}
+	_ = pre.Close()
+
+	// Boot with fresh config — it must overwrite every stale value.
+	cfg := newGatewaySeedCfg(t, dir, "https://fresh.example.com/v1", "sk-fresh", "model-fresh")
+	a, err := app.New(context.Background(), cfg, discardLogger(), denyAllCtor, "test", harness.Config{}, seedAuthCtor())
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	cleanupApp(t, a)
+
+	assertGatewaySetting(t, dir, gateway.KeyPrimaryBaseURL, "https://fresh.example.com/v1")
+	assertGatewaySetting(t, dir, gateway.KeyPrimaryAPIKey, "sk-fresh")
+	assertGatewaySetting(t, dir, gateway.KeyPrimaryModel, "model-fresh")
 }

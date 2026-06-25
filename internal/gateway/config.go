@@ -11,6 +11,19 @@ import (
 // should surface this as a user-actionable configuration error rather than an infrastructure failure.
 var ErrGatewayNotConfigured = errors.New("gateway: no primary endpoint configured")
 
+const (
+	// NamespaceModelGateway is the settings namespace that holds all model-gateway configuration. The gateway owns it;
+	// the only other writer is boot-time environment seeding (internal/app), which writes the primary keys below.
+	NamespaceModelGateway = "model_gateway"
+
+	// KeyPrimaryBaseURL, KeyPrimaryAPIKey, and KeyPrimaryModel are the logical setting keys (within
+	// NamespaceModelGateway) for the primary endpoint coordinates. [Gateway.readPrimary] reads them; boot-time env
+	// seeding writes them. Exported so the seeding path uses the same keys the gateway reads, with no string drift.
+	KeyPrimaryBaseURL = "primary.baseURL"
+	KeyPrimaryAPIKey  = "primary.apiKey"
+	KeyPrimaryModel   = "primary.model"
+)
+
 // Role identifies a model capability.  Only [RoleChat] is active in v0.1; the remaining roles are reserved for future
 // slices.
 type Role string
@@ -82,15 +95,15 @@ func (g *Gateway) resolve(ctx context.Context, role Role) (Resolved, error) {
 // readPrimary reads the three primary-endpoint keys and returns them.  If any of the three required fields (baseURL,
 // apiKey, model) is absent or empty, [ErrGatewayNotConfigured] is returned.
 func (g *Gateway) readPrimary(ctx context.Context) (Resolved, error) {
-	baseURL, err := g.getString(ctx, "primary.baseURL")
+	baseURL, err := g.getString(ctx, KeyPrimaryBaseURL)
 	if err != nil {
 		return Resolved{}, err
 	}
-	apiKey, err := g.getString(ctx, "primary.apiKey")
+	apiKey, err := g.getString(ctx, KeyPrimaryAPIKey)
 	if err != nil {
 		return Resolved{}, err
 	}
-	model, err := g.getString(ctx, "primary.model")
+	model, err := g.getString(ctx, KeyPrimaryModel)
 	if err != nil {
 		return Resolved{}, err
 	}

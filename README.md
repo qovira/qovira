@@ -55,6 +55,8 @@ The server reads its configuration from environment variables (and an optional `
 
 To create the first admin user on a fresh installation, set `QOVIRA_ADMIN_EMAIL` and `QOVIRA_ADMIN_PASSWORD` before the first `qovira serve`. When no users exist and both variables are set, the server creates the admin account at startup and logs the email. The seeding is a no-op on every subsequent start (any existing user suppresses it). Both variables support `_FILE` indirection; see config reference below.
 
+To point Qovira at a model, configure the gateway's primary endpoint with `QOVIRA_GATEWAY_BASE_URL`, `QOVIRA_GATEWAY_API_KEY`, and `QOVIRA_GATEWAY_MODEL` — an OpenAI-compatible endpoint that supports streaming and native tool-calling. All three must be set together or not at all. The API key is a secret: it is env-only and supports `_FILE` indirection (`QOVIRA_GATEWAY_API_KEY_FILE`), exactly like the master key. The values are written into the encrypted settings store on boot, and re-applied on every start while set — so you change the model endpoint by changing the environment and restarting.
+
 ## Development
 
 ```sh

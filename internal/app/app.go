@@ -217,6 +217,13 @@ func New(
 		return nil, fmt.Errorf("app: first-run seed: %w", err)
 	}
 
+	// Step 4c: seed the model gateway configuration from the environment when provided. Runs after migrations so the
+	// settings table exists. Idempotent upsert on every boot when the QOVIRA_GATEWAY_* vars are set — the environment is
+	// the gateway's only configuration surface in v0.1, so it must be able to change the endpoint, not just seed it once.
+	if err = seedGatewayConfig(ctx, cfg, s, logger); err != nil {
+		return nil, fmt.Errorf("app: seed gateway config: %w", err)
+	}
+
 	// Step 5: in-memory event bus.
 	bus := events.NewBus()
 
