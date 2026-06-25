@@ -25,7 +25,7 @@ WEBDIST := internal/httpx/webdist
 E2E_BINARY   := qovira-e2e
 E2E_DATA_DIR := /tmp/qovira-e2e-data
 
-.PHONY: build build-go web sync-web generate test race lint clean docker-build docker-run e2e-server
+.PHONY: build build-go web sync-web generate test race lint fuzz clean docker-build docker-run e2e-server
 
 # build: full pipeline — build the SvelteKit SPA, sync its output into webdist/,
 # then compile the Go binary with -tags embed_spa so the real SPA is embedded.
@@ -60,6 +60,28 @@ test:
 
 race:
 	CGO_ENABLED=$(CGO_ENABLED) go test -race ./...
+
+# fuzz: run each native fuzz target for a bounded time (default 30s each). `go test -fuzz` mutates one target per
+# invocation, so we iterate explicitly. Override the per-target budget with `make fuzz FUZZTIME=2m`. The seed-corpus
+# regression (every Fuzz* executed once, without mutation) already runs as part of `make test`; this target is for the
+# active, mutation-driven pass — wire it into a nightly CI job, not the per-PR gate.
+FUZZTIME ?= 30s
+FUZZ_TARGETS := \
+	internal/harness:FuzzDecodeConvCursor \
+	internal/harness:FuzzConvCursorRoundTrip \
+	internal/reminders:FuzzDecodeCursor \
+	internal/reminders:FuzzCursorRoundTrip \
+	internal/auth:FuzzParsePHC \
+	internal/auth:FuzzParsePHCRoundTrip \
+	internal/store:FuzzScanQueryViolations \
+	internal/store:FuzzScopeGuardNoUserIDMustFlag
+
+fuzz:
+	@for target in $(FUZZ_TARGETS); do \
+		pkg=$${target%%:*}; fn=$${target##*:}; \
+		echo "== fuzzing $$fn in ./$$pkg ($(FUZZTIME)) =="; \
+		CGO_ENABLED=$(CGO_ENABLED) go test ./$$pkg -run '^$$' -fuzz "^$$fn$$" -fuzztime $(FUZZTIME) || exit 1; \
+	done
 
 lint:
 	golangci-lint run ./...
