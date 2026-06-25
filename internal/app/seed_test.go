@@ -202,6 +202,18 @@ func TestNew_NoSeedWhenCredsEmpty(t *testing.T) {
 	}
 }
 
+// TestAdminPasswordMinLen_MatchesAuthPolicy guards against drift between the config-level admin-password minimum (an
+// early, friendly check at config load) and the authoritative runtime password policy: the seeded admin must be held
+// to the same minimum as a user created via the API. config cannot import auth (CGO), so the constant is duplicated
+// there and pinned here.
+func TestAdminPasswordMinLen_MatchesAuthPolicy(t *testing.T) {
+	t.Parallel()
+	if config.AdminPasswordMinLen != auth.DefaultPolicy.MinLen {
+		t.Errorf("config.AdminPasswordMinLen = %d, auth.DefaultPolicy.MinLen = %d; keep them in sync",
+			config.AdminPasswordMinLen, auth.DefaultPolicy.MinLen)
+	}
+}
+
 // newGatewaySeedCfg builds a Config with the model gateway primary endpoint set (no admin credentials), pointing at dir.
 func newGatewaySeedCfg(t *testing.T, dir, baseURL, apiKey, model string) *config.Config {
 	t.Helper()

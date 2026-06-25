@@ -708,3 +708,46 @@ func TestLoad_Validation_GatewayPartial(t *testing.T) {
 		t.Errorf("gateway_base_url should not be reported when set; got: %s", msg)
 	}
 }
+
+// TestLoad_Validation_AdminPasswordLength verifies that a too-short admin password is rejected at config-load time with
+// a clean field error — consistent with the master-key length check — rather than failing deep in app.New boot. A
+// password at or above the minimum passes the length check.
+func TestLoad_Validation_AdminPasswordLength(t *testing.T) {
+	cases := []struct {
+		name    string
+		pw      string
+		wantErr bool
+	}{
+		{"too short (5 runes)", "short", true},
+		{"one under min (11 runes)", "eleven-char", true},
+		{"exactly min (12 runes)", "twelve-chars", false},
+		{"well above min", "a-perfectly-fine-admin-password", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("QOVIRA_MASTER_KEY", "a-sufficiently-long-passphrase")
+			t.Setenv("QOVIRA_MASTER_KEY_FILE", "")
+			t.Setenv("QOVIRA_HTTP_ADDR", "")
+			t.Setenv("QOVIRA_LOG_LEVEL", "")
+			t.Setenv("QOVIRA_LOG_FORMAT", "")
+			t.Setenv("QOVIRA_DATA_DIR", "")
+			t.Setenv("QOVIRA_AUTO_MIGRATE", "")
+			t.Setenv("QOVIRA_ADMIN_EMAIL", "admin@example.com")
+			t.Setenv("QOVIRA_ADMIN_PASSWORD", tc.pw)
+			t.Setenv("QOVIRA_ADMIN_PASSWORD_FILE", "")
+			t.Setenv("QOVIRA_GATEWAY_BASE_URL", "")
+			t.Setenv("QOVIRA_GATEWAY_API_KEY", "")
+			t.Setenv("QOVIRA_GATEWAY_API_KEY_FILE", "")
+			t.Setenv("QOVIRA_GATEWAY_MODEL", "")
+
+			_, err := config.Load("")
+			mentionsAdminPwd := err != nil && strings.Contains(err.Error(), "admin_password")
+			if tc.wantErr && !mentionsAdminPwd {
+				t.Errorf("expected an admin_password length error for %q; got: %v", tc.pw, err)
+			}
+			if !tc.wantErr && mentionsAdminPwd {
+				t.Errorf("did not expect an admin_password length error for %q; got: %v", tc.pw, err)
+			}
+		})
+	}
+}

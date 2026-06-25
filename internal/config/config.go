@@ -19,6 +19,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 )
@@ -26,6 +27,13 @@ import (
 // masterKeyMinLen is the minimum acceptable length for the master key passphrase. 16 bytes is the floor; operators are
 // encouraged to use longer passphrases.
 const masterKeyMinLen = 16
+
+// AdminPasswordMinLen is the minimum length (in UTF-8 runes) for the seeded admin password. It mirrors the runtime
+// password policy (auth.DefaultPolicy.MinLen) so the bootstrapped admin is never weaker than a user created through
+// the API, and is checked here at config-load time so a too-short value surfaces as a clean aggregated error rather
+// than failing deep in app.New boot. A guard test (internal/app) asserts it stays equal to the auth policy minimum;
+// config does not import auth (which carries CGO), so the constant is duplicated and guarded rather than referenced.
+const AdminPasswordMinLen = 12
 
 // Secret is a string type that structurally prevents its value from leaking via fmt verbs or slog. All fmt.Stringer,
 // fmt.GoStringer, and slog.LogValuer methods return a redacted placeholder, so the actual value never appears in log
@@ -334,6 +342,12 @@ func validate(cfg *Config) error {
 	}
 	if hasPassword && !hasEmail {
 		errs = append(errs, errors.New("admin_email: required when QOVIRA_ADMIN_PASSWORD is set"))
+	}
+	// Admin password length: checked here so a too-short seed password fails with a clean field error at config load,
+	// the same way the master key does, rather than failing deep in app.New's seeding step. Rune count (not bytes) to
+	// match the runtime auth policy.
+	if hasPassword && utf8.RuneCountInString(string(cfg.AdminPassword)) < AdminPasswordMinLen {
+		errs = append(errs, fmt.Errorf("admin_password: must be at least %d characters", AdminPasswordMinLen))
 	}
 
 	// Model gateway seed: base URL, API key, and model must be set together or not at all. With no other configuration
