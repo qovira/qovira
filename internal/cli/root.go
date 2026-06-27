@@ -60,6 +60,7 @@ It serves a JSON/SSE API and an embedded web client backed by an encrypted SQLit
 	root.PersistentFlags().StringVar(&logFormat, "log-format", "", "log format: json, text (default: json, env: QOVIRA_LOG_FORMAT)")
 
 	root.AddCommand(newServeCmd(&logLevel, &logFormat, root))
+	root.AddCommand(newHealthcheckCmd())
 
 	return root
 }
