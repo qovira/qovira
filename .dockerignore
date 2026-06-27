@@ -1,0 +1,54 @@
+# Version control
+.git/
+
+# Docker build files — changes here don't affect the build output and would
+# otherwise bust every layer's cache unnecessarily.
+Dockerfile*
+.dockerignore
+compose*.yaml
+.github/
+
+# Documentation and licence files — not COPYed into any build stage.
+*.md
+LICENSE
+NOTICE
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+
+# Environment files — never bake secrets into the build context
+.env
+.env.*
+!.env.example
+
+# Host build artifacts — the Docker image builds these fresh from source
+/qovira
+internal/httpx/webdist/
+
+# Node / SvelteKit intermediates
+web/node_modules/
+web/.svelte-kit/
+web/build/
+web/coverage/
+
+# Go test / profiling output
+*.test
+*.out
+coverage.out
+coverage.html
+*.prof
+
+# Editor / OS artefacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# golangci-lint cache
+.golangci-lint/
+
+# CI / tooling scratch
+.claude/
+.playwright-mcp/

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := build
 
-.PHONY: build build-web build-go lint test clean
+.PHONY: build build-web build-go docker lint test clean
 
 ## build-web: install web dependencies and compile the SvelteKit SPA into
 ##            internal/httpx/webdist/ via adapter-static.
@@ -18,6 +18,10 @@ build-go:
 ##        //go:embed directive compiles.
 build: build-web
 	go build -tags embed_spa -o ./qovira ./cmd/qovira
+
+## docker: build the multi-stage Docker image (tags qovira:dev).
+docker:
+	docker build -t qovira:dev .
 
 ## lint: run golangci-lint over Go sources and the web linter over the SPA.
 lint:
