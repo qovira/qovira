@@ -7,7 +7,7 @@
   "scripts": {
     "build": "vite build",
     "format": "prettier --write .",
-    "lint": "eslint . && svelte-check --tsconfig ./tsconfig.json && prettier --check .",
+    "lint": "svelte-kit sync && eslint . && svelte-check --tsconfig ./tsconfig.json && prettier --check .",
     "test": "vitest run --coverage --typecheck",
     "dev": "vite dev"
   },
