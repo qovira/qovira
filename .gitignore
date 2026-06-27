@@ -1,0 +1,54 @@
+# Build output
+/qovira
+/qovira-e2e
+/dist/
+
+# Go workspace / module cache artefacts
+/vendor/
+*.test
+*.out
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Agent tooling — transient git worktrees created for isolated subagent runs
+.claude/worktrees/
+
+# Editor / OS artefacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Test / profiling output
+coverage.out
+coverage.html
+*.prof
+cpu.out
+mem.out
+
+# golangci-lint cache
+.golangci-lint/
+
+# Local SQLCipher / SQLite database files (and WAL sidecars)
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# SvelteKit build output synced into webdist/ by `make sync-web` / Docker.
+# The directory is a pure build artifact — nothing in it is ever committed.
+# The SPA is embedded in the binary only when -tags embed_spa is passed
+# (i.e. `make build` and the Docker image). A bare `go build ./...` or
+# `make build-go` uses the in-code stub from spa_noembed.go instead.
+internal/httpx/webdist/
+
+# Playwright MCP browser scratch (console logs, page snapshots)
+.playwright-mcp/
