@@ -12,8 +12,8 @@ import (
 // `go build ./...` and `go test ./...` functional without a populated webdist/
 // directory.
 //
-// The real embed is provided by spa_embed.go (//go:build embed_spa) in a later
-// issue — do not add that file here.
+// The real embed is provided by spa_embed.go (//go:build embed_spa), selected
+// when building with -tags embed_spa (i.e. via `make build`).
 func Assets() (fs.FS, error) {
 	return fstest.MapFS{
 		"index.html": {
