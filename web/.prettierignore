@@ -1,0 +1,9 @@
+# Build output and dependencies
+node_modules
+.svelte-kit
+
+# Coverage report output
+coverage
+
+# Lockfile — not formatted by Prettier
+pnpm-lock.yaml

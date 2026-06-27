@@ -1,0 +1,32 @@
+{
+  "name": "qovira-web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.3.0",
+  "scripts": {
+    "build": "vite build",
+    "format": "prettier --write .",
+    "lint": "eslint . && svelte-check --tsconfig ./tsconfig.json && prettier --check .",
+    "test": "vitest run --coverage --typecheck",
+    "dev": "vite dev"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "@sveltejs/adapter-static": "^3.0.8",
+    "@sveltejs/kit": "^2.21.5",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@vitest/coverage-v8": "^4.1.7",
+    "eslint": "^9.28.0",
+    "eslint-plugin-svelte": "^2.46.1",
+    "globals": "^16.2.0",
+    "prettier": "^3.5.3",
+    "prettier-plugin-svelte": "^3.4.0",
+    "svelte": "^5.33.16",
+    "svelte-check": "^4.1.6",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.34.1",
+    "vite": "^6.3.5",
+    "vitest": "^4.1.7"
+  }
+}
