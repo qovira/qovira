@@ -12,15 +12,15 @@ This repository is the Qovira application — the Go server and its embedded web
 
 ## Getting set up
 
-Clone the repository and install a recent Go toolchain (a C toolchain and OpenSSL headers are also needed, since the encrypted store builds via CGO). Build tooling is still being established; until the `Makefile` lands, the standard `go build ./...` and `go test ./...` are the baseline. The repo [CLAUDE.md](./CLAUDE.md) is the authority for the current build/test/run commands — keep it as your reference.
+Clone the repository and install a recent Go toolchain; for the web client you also need Node and pnpm. (A C toolchain and OpenSSL headers will additionally be needed once the encrypted store lands — the build is already CGO-enabled in anticipation, but nothing links C yet.) `make build` builds the embedded binary, `make build-go` is a fast backend-only compile, `make lint` and `make test` run both stacks, and `make docker` builds the container image. The repo [CLAUDE.md](./CLAUDE.md) is the authority for the full command set — keep it as your reference.
 
 ## How the codebase is organized
 
-The planned shape is a `cmd/qovira` entrypoint wired from `internal/*` packages through one composition root, with the SvelteKit SPA built and embedded into the binary. See [CLAUDE.md](./CLAUDE.md) for the layout and the load-bearing concepts.
+A `cmd/qovira` entrypoint hands off to a cobra command tree in `internal/cli`, wired through the `internal/app` composition root, with the SvelteKit SPA (in `web/`) built and embedded into the binary via `internal/httpx`. See [CLAUDE.md](./CLAUDE.md) for the full layout and the load-bearing concepts.
 
 ## Testing
 
-Run `go test ./...`. New behavior is written test-first, and a change is expected to land with its tests; the build, lint, and full test suite must be green before it is merged.
+Run `make test` (the Go race suite plus the web tests), or `go test ./...` for the Go side alone. New behavior is written test-first, and a change is expected to land with its tests; the build, lint, and full test suite must be green before it is merged.
 
 ## Opening a pull request
 
