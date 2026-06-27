@@ -46,6 +46,10 @@ func TestBuildLogger_JSONEmitsJSON(t *testing.T) {
 	if obj["key"] != "value" {
 		t.Errorf("key: want value, got %v", obj["key"])
 	}
+
+	if obj["level"] != "INFO" {
+		t.Errorf("level: want INFO, got %v", obj["level"])
+	}
 }
 
 func TestBuildLogger_TextEmitsText(t *testing.T) {
@@ -80,17 +84,29 @@ func TestBuildLogger_RespectsLevel(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	logger.Debug("should be suppressed")
-	logger.Info("should be suppressed")
-	logger.Warn("should appear")
+	logger.Debug("debug msg")
+	logger.Info("info msg")
+	logger.Warn("warn msg")
 
-	out := buf.String()
-	if strings.Contains(out, "should be suppressed") {
-		t.Errorf("debug/info messages should be suppressed at warn level, got: %q", out)
+	// At warn level only the warn line is emitted; assert on the structured
+	// level/msg fields rather than a raw substring so the check can't pass on
+	// mangled output.
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("want exactly 1 line emitted at warn level, got %d: %q", len(lines), buf.String())
 	}
 
-	if !strings.Contains(out, "should appear") {
-		t.Errorf("warn message should appear, got: %q", out)
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &obj); err != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, lines[0])
+	}
+
+	if obj["level"] != "WARN" {
+		t.Errorf("level: want WARN, got %v", obj["level"])
+	}
+
+	if obj["msg"] != "warn msg" {
+		t.Errorf("msg: want 'warn msg', got %v", obj["msg"])
 	}
 }
 
@@ -141,9 +157,11 @@ func freePort(t *testing.T) string {
 	return addr
 }
 
-// waitReady polls url until it responds without error or the attempt budget is
-// exhausted. Returns the last response (may be nil).
-func waitReady(client *http.Client, url string) *http.Response {
+// waitReady polls url until it responds without error or the attempt budget is exhausted. Returns the last
+// response (may be nil).
+func waitReady(t *testing.T, client *http.Client, url string) *http.Response {
+	t.Helper()
+
 	for range 50 {
 		resp, err := client.Get(url) //nolint:noctx // test-only polling loop
 		if err == nil {
@@ -176,7 +194,7 @@ func TestRun_HealthzReturns200(t *testing.T) {
 	client := &http.Client{Timeout: time.Second}
 	url := fmt.Sprintf("http://%s/healthz", addr)
 
-	resp := waitReady(client, url)
+	resp := waitReady(t, client, url)
 	if resp == nil {
 		t.Fatalf("server did not become ready at %s", url)
 	}
@@ -264,7 +282,7 @@ func TestRun_SLOGIsSetAsDefault(t *testing.T) {
 	client := &http.Client{Timeout: time.Second}
 	url := fmt.Sprintf("http://%s/healthz", addr)
 
-	resp := waitReady(client, url)
+	resp := waitReady(t, client, url)
 	if resp != nil {
 		if err := resp.Body.Close(); err != nil {
 			t.Errorf("close response body: %v", err)

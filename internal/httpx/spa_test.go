@@ -77,6 +77,33 @@ func TestSPAHandler_UnknownPathFallsBackToIndex(t *testing.T) {
 	}
 }
 
+func TestSPAHandler_TraversalIsContained(t *testing.T) {
+	t.Parallel()
+
+	h := httpx.NewSPAHandler(testFS())
+
+	const indexBody = `<!doctype html><html><body>placeholder</body></html>`
+
+	// Traversal attempts must never escape the asset FS: fs.ValidPath rejects any ".." element and net/http
+	// rejects dot-dot request paths, so each of these is either refused outright or falls back to index.html —
+	// never a leaked sibling file. (Behind a ServeMux the path is also cleaned first; this pins the handler's
+	// own contract directly.)
+	for _, path := range []string{"/../spa.go", "/../../etc/passwd", "/_app/../../go.mod"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+
+			body, _ := io.ReadAll(rr.Body)
+			if rr.Code == http.StatusOK && string(body) != indexBody {
+				t.Errorf("%s: traversal leaked non-index content (status %d): %q", path, rr.Code, string(body))
+			}
+		})
+	}
+}
+
 func TestSPAHandler_IndexHTML_ContentType(t *testing.T) {
 	t.Parallel()
 

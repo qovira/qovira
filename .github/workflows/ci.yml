@@ -95,6 +95,10 @@ jobs:
         run: pnpm -C web build
 
   # ── Image: native Docker build + smoke-test on both arches ────────────────
+  # TODO(release): this job builds and smoke-tests per-arch images but does not
+  # publish. Before any release, add a docker scout CVE scan (fail on critical/
+  # high), SBOM + provenance, cosign signing, and a manifest-list push — none of
+  # which belong here while v0.1 has no deploy path.
   image:
     name: Image (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}

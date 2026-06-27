@@ -1,6 +1,5 @@
-// Package cli builds the Cobra command tree for the Qovira CLI.
-// Commands are thin wrappers that delegate all logic to internal packages;
-// no business logic belongs here.
+// Package cli builds the Cobra command tree for the Qovira CLI. Commands are thin wrappers that delegate all
+// logic to internal packages; no business logic belongs here.
 package cli
 
 import (
@@ -16,15 +15,14 @@ import (
 	"github.com/qovira/qovira/internal/app"
 )
 
-// Execute is the public entry point. It builds the command tree, sets up a
-// signal-aware context, and runs the root command. It returns the process exit
-// code: 0 for success, non-zero for any error.
+// Execute is the public entry point. It builds the command tree, sets up a signal-aware context, and runs the
+// root command. It returns the process exit code: 0 for success, non-zero for any error.
 func Execute() int {
 	return ExecuteArgsWithOutput(os.Args[1:], os.Stdout)
 }
 
-// ExecuteArgsWithOutput is the fully testable variant: args and output writer
-// are both configurable, so tests can capture help text without a subprocess.
+// ExecuteArgsWithOutput is the fully testable variant: args and output writer are both configurable, so tests
+// can capture help text without a subprocess.
 func ExecuteArgsWithOutput(args []string, out io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -59,14 +57,14 @@ It serves a JSON/SSE API and an embedded web client backed by an encrypted SQLit
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "", "log level: debug, info, warn, error (default: info, env: QOVIRA_LOG_LEVEL)")
 	root.PersistentFlags().StringVar(&logFormat, "log-format", "", "log format: json, text (default: json, env: QOVIRA_LOG_FORMAT)")
 
-	root.AddCommand(newServeCmd(&logLevel, &logFormat, root))
+	root.AddCommand(newServeCmd(&logLevel, &logFormat))
 	root.AddCommand(newHealthcheckCmd())
 
 	return root
 }
 
 // newServeCmd returns the `qovira serve` subcommand.
-func newServeCmd(logLevel, logFormat *string, root *cobra.Command) *cobra.Command {
+func newServeCmd(logLevel, logFormat *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
 		Short: "Start the HTTP server",
@@ -74,11 +72,13 @@ func newServeCmd(logLevel, logFormat *string, root *cobra.Command) *cobra.Comman
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var overrides app.FlagOverrides
 
-			if root.PersistentFlags().Changed("log-level") {
+			// cmd.Flags() exposes the inherited persistent flags once cobra has parsed them, so the
+			// parent command is not needed here to read whether they were explicitly set.
+			if cmd.Flags().Changed("log-level") {
 				overrides.LogLevel = logLevel
 			}
 
-			if root.PersistentFlags().Changed("log-format") {
+			if cmd.Flags().Changed("log-format") {
 				overrides.LogFormat = logFormat
 			}
 

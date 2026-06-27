@@ -13,16 +13,16 @@ import (
 	"github.com/qovira/qovira/internal/app"
 )
 
-// probeTimeout is the maximum time the health probe waits for a response.
-// Kept short so an unreachable container fails fast in HEALTHCHECK evaluation.
+// probeTimeout is the maximum time the health probe waits for a response. Kept short so an unreachable
+// container fails fast in HEALTHCHECK evaluation.
 const probeTimeout = 5 * time.Second
 
-// Probe performs an HTTP GET against baseURL and returns nil if the response
-// status is 200 OK, or a descriptive error otherwise. baseURL is the scheme +
-// host (e.g. "http://127.0.0.1:8080"); Probe appends "/healthz" itself.
+// Probe performs an HTTP GET against baseURL and returns nil if the response status is 200 OK, or a
+// descriptive error otherwise. baseURL is the scheme + host (e.g. "http://127.0.0.1:8080"); Probe appends
+// "/healthz" itself.
 //
-// Probe is exported so tests can drive it directly against an httptest.Server
-// without going through cobra, mirroring the testability pattern of NewSPAHandler.
+// Probe is exported so tests can drive it directly against an httptest.Server without going through cobra,
+// mirroring the testability pattern of NewSPAHandler.
 func Probe(ctx context.Context, baseURL string) error {
 	url := baseURL + "/healthz"
 
@@ -51,10 +51,9 @@ func Probe(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-// probeURLFromAddr converts a bind address (e.g. ":8080", "0.0.0.0:8080",
-// "[::]:8080") into an HTTP URL suitable for an in-process health probe. An
-// empty or wildcard host is replaced with "127.0.0.1" so the probe connects to
-// loopback rather than the unspecified address.
+// probeURLFromAddr converts a bind address (e.g. ":8080", "0.0.0.0:8080", "[::]:8080") into an HTTP URL
+// suitable for an in-process health probe. An empty or wildcard host is replaced with "127.0.0.1" so the
+// probe connects to loopback rather than the unspecified address.
 func probeURLFromAddr(addr string) (string, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -69,10 +68,9 @@ func probeURLFromAddr(addr string) (string, error) {
 	return "http://" + net.JoinHostPort(host, port), nil
 }
 
-// newHealthcheckCmd returns the `qovira healthcheck` subcommand. It resolves
-// the target address from the same config as `serve` (QOVIRA_ADDR), probes
-// /healthz in-process, and exits non-zero on any failure. No logic lives here —
-// only config resolution, URL building, and delegation to Probe.
+// newHealthcheckCmd returns the `qovira healthcheck` subcommand. It resolves the target address from the same
+// config as `serve` (QOVIRA_ADDR), probes /healthz in-process, and exits non-zero on any failure. No logic
+// lives here — only config resolution, URL building, and delegation to Probe.
 func newHealthcheckCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "healthcheck",

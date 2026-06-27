@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,24 @@ func TestProbe_UnreachableReturnsError(t *testing.T) {
 
 	if err := cli.Probe(t.Context(), url); err == nil {
 		t.Error("expected error for unreachable server, got nil")
+	}
+}
+
+// TestProbe_CancelledContextReturnsError verifies Probe honors its context: a
+// context cancelled before the call makes the request fail rather than hang.
+func TestProbe_CancelledContextReturnsError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // cancel before probing — Probe must surface the context error
+
+	if err := cli.Probe(ctx, srv.URL); err == nil {
+		t.Error("expected error for cancelled context, got nil")
 	}
 }
 

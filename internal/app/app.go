@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -13,11 +14,10 @@ import (
 	"github.com/qovira/qovira/internal/httpx"
 )
 
-// HTTP server and graceful-shutdown constants. Kept together so promotion to
-// config is a single, localized change.
+// HTTP server and graceful-shutdown constants. Kept together so promotion to config is a single, localized change.
 const (
-	// serverReadHeaderTimeout limits the time allowed to read request headers.
-	// Setting this prevents the Slowloris class of slow-client attacks (gosec G112).
+	// serverReadHeaderTimeout limits the time allowed to read request headers. Setting this prevents the
+	// Slowloris class of slow-client attacks (gosec G112).
 	serverReadHeaderTimeout = 10 * time.Second
 
 	// serverReadTimeout limits the time allowed to read the full request body.
@@ -26,18 +26,16 @@ const (
 	// serverWriteTimeout limits the time allowed to write the full response.
 	serverWriteTimeout = 30 * time.Second
 
-	// serverIdleTimeout is the maximum time to wait for the next request when
-	// keep-alives are enabled.
+	// serverIdleTimeout is the maximum time to wait for the next request when keep-alives are enabled.
 	serverIdleTimeout = 120 * time.Second
 
-	// shutdownGrace is the maximum time given to in-flight requests to complete
-	// after the shutdown signal is received before the server forcibly closes.
+	// shutdownGrace is the maximum time given to in-flight requests to complete after the shutdown signal is
+	// received before the server forcibly closes.
 	shutdownGrace = 15 * time.Second
 )
 
-// Run is the application entry point. It builds the logger, resolves SPA
-// assets, wires the HTTP server, and blocks until ctx is cancelled, at which
-// point it drains in-flight requests via [http.Server.Shutdown].
+// Run is the application entry point. It builds the logger, resolves SPA assets, wires the HTTP server, and
+// blocks until ctx is cancelled, at which point it drains in-flight requests via [http.Server.Shutdown].
 func Run(ctx context.Context, cfg Config) error {
 	logger, err := BuildLogger(cfg, os.Stdout)
 	if err != nil {
@@ -61,6 +59,11 @@ func Run(ctx context.Context, cfg Config) error {
 	// All other paths — SPA handler with index.html fallback.
 	mux.Handle("/", httpx.NewSPAHandler(assets))
 
+	// TODO(security): wrap mux in a security-headers middleware (X-Content-Type-Options: nosniff at minimum;
+	// add CSP + frame-ancestors) before a real web client ships. While only static placeholder assets are
+	// served this is defense-in-depth, not yet exploitable.
+	// TODO(security): add http.MaxBytesHandler (a request body size limit) once any endpoint reads a request
+	// body — ReadTimeout bounds time, not bytes.
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           mux,
@@ -70,25 +73,33 @@ func Run(ctx context.Context, cfg Config) error {
 		IdleTimeout:       serverIdleTimeout,
 	}
 
-	// Serve in a background goroutine so we can block on context cancel.
+	// Bind synchronously so a bind failure (invalid or already-bound address) is returned directly, and the
+	// "listening" line is logged only once the socket is actually open.
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		return fmt.Errorf("listen %q: %w", cfg.Addr, err)
+	}
+
+	logger.Info("server listening", "addr", ln.Addr().String())
+
+	// Serve in a background goroutine so we can block on context cancellation.
 	serveErr := make(chan error, 1)
 
 	go func() {
-		logger.Info("server starting", "addr", cfg.Addr)
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- err
 		}
 
 		close(serveErr)
 	}()
 
-	// Block until context is cancelled (SIGINT / SIGTERM via signal.NotifyContext).
+	// Block until the context is cancelled (SIGINT / SIGTERM via signal.NotifyContext) or the server fails.
 	select {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received, draining")
 	case err := <-serveErr:
 		if err != nil {
-			return fmt.Errorf("server: %w", err)
+			return fmt.Errorf("serve: %w", err)
 		}
 
 		return nil
@@ -102,14 +113,20 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 
+	// Surface a serve error that raced the shutdown signal: if Serve failed at the same instant ctx was
+	// cancelled, the select above may have taken the ctx.Done() branch and skipped it. The goroutine always
+	// closes serveErr, so this receives nil on a clean shutdown.
+	if err := <-serveErr; err != nil {
+		return fmt.Errorf("serve: %w", err)
+	}
+
 	logger.Info("server stopped gracefully")
 
 	return nil
 }
 
-// BuildLogger constructs a [*slog.Logger] that writes to w, using the level
-// and format from cfg. It is exported so it can be tested and wired
-// independently of [Run].
+// BuildLogger constructs a [*slog.Logger] that writes to w, using the level and format from cfg. It is
+// exported so it can be tested and wired independently of [Run].
 func BuildLogger(cfg Config, w io.Writer) (*slog.Logger, error) {
 	var level slog.Level
 

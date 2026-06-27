@@ -7,8 +7,9 @@
   "scripts": {
     "build": "vite build",
     "format": "prettier --write .",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "lint": "svelte-kit sync && eslint . && svelte-check --tsconfig ./tsconfig.json && prettier --check .",
-    "test": "vitest run --coverage --typecheck",
+    "test": "vitest run --coverage",
     "dev": "vite dev"
   },
   "devDependencies": {
@@ -18,13 +19,13 @@
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@vitest/coverage-v8": "^4.1.7",
     "eslint": "^9.28.0",
-    "eslint-plugin-svelte": "^2.46.1",
+    "eslint-plugin-svelte": "^3.20.0",
     "globals": "^16.2.0",
     "prettier": "^3.5.3",
     "prettier-plugin-svelte": "^3.4.0",
     "svelte": "^5.33.16",
     "svelte-check": "^4.1.6",
-    "typescript": "^5.8.3",
+    "typescript": "^6.0.0",
     "typescript-eslint": "^8.34.1",
     "vite": "^6.3.5",
     "vitest": "^4.1.7"

@@ -11,7 +11,7 @@ export default ts.config(
     files: ["**/*.ts", "**/*.svelte", "**/*.svelte.ts"],
     extends: ts.configs.strictTypeChecked,
   },
-  ...svelte.configs["flat/recommended"],
+  ...svelte.configs.recommended,
   {
     languageOptions: {
       globals: {

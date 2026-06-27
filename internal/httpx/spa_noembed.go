@@ -7,13 +7,12 @@ import (
 	"testing/fstest"
 )
 
-// Assets returns a placeholder in-memory filesystem used when the SPA has not
-// been built and embedded (i.e. the embed_spa build tag is absent). This keeps
-// `go build ./...` and `go test ./...` functional without a populated webdist/
-// directory.
+// Assets returns a placeholder in-memory filesystem used when the SPA has not been built and embedded (i.e.
+// the embed_spa build tag is absent). This keeps `go build ./...` and `go test ./...` functional without a
+// populated webdist/ directory.
 //
-// The real embed is provided by spa_embed.go (//go:build embed_spa), selected
-// when building with -tags embed_spa (i.e. via `make build`).
+// The real embed is provided by spa_embed.go (//go:build embed_spa), selected when building with
+// -tags embed_spa (i.e. via `make build`).
 func Assets() (fs.FS, error) {
 	return fstest.MapFS{
 		"index.html": {

@@ -56,10 +56,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 
 # ── runtime stage ────────────────────────────────────────────────────────────
-# Distroless base-debian12:nonroot — glibc present for CGO; no shell, no curl,
-# no wget; runs as user 65532 (nonroot) out of the box.
+# Distroless base-debian13:nonroot — glibc present for CGO; no shell, no curl,
+# no wget; runs as user 65532 (nonroot) out of the box. Tracks debian13 (trixie)
+# to match the build/web stages' glibc — a cgo binary linked against trixie glibc
+# can fail to load on an older (debian12) userland.
 # Pinned by manifest-list digest so `docker build` resolves per-arch safely.
-FROM gcr.io/distroless/base-debian12:nonroot@sha256:4ae8d0163a6f04d96f36e41324d76f00744f0db7545b6d04039c9e6fa1df77f3
+FROM gcr.io/distroless/base-debian13:nonroot@sha256:ab7554b6d07ad354fad31957f8a1a813e65dfb93a8ad160568c79c3f2be6884f
 
 # OCI image labels — static values stamped now; CI overrides the dynamic ones
 # via --build-arg.
@@ -89,5 +91,9 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD ["/qovira", "healthcheck"]
 
+# Single-process server: it spawns no children and handles SIGTERM itself (see
+# signal.NotifyContext in internal/cli), so no init/tini is needed to reap
+# zombies. Revisit if a subprocess is ever added. Exec-form so PID 1 is qovira
+# and receives signals directly.
 ENTRYPOINT ["/qovira"]
 CMD ["serve"]
