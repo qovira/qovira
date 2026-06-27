@@ -72,7 +72,7 @@ type Config struct {
 	DataDir string
 
 	// HTTPAddr is the TCP address on which the HTTP server listens.
-	// Default: ":8080".
+	// Default: ":8000".
 	HTTPAddr string
 
 	// LogLevel controls the slog minimum level. Accepted: debug, info, warn, error. Default: "info".
@@ -118,7 +118,7 @@ func Load(cfgPath string) (*Config, error) {
 	// Step 1: apply defaults.
 	cfg := &Config{
 		DataDir:     "./data",
-		HTTPAddr:    ":8080",
+		HTTPAddr:    ":8000",
 		LogLevel:    "info",
 		LogFormat:   "json",
 		AutoMigrate: true,
@@ -287,7 +287,7 @@ func validate(cfg *Config) error {
 	}
 
 	// HTTP listen address: must be host:port with a valid, non-empty port number in the range 1..65535. An empty host
-	// (":8080") is fine; an empty or non-numeric port is not.
+	// (":8000") is fine; an empty or non-numeric port is not.
 	if cfg.HTTPAddr != "" {
 		_, port, splitErr := net.SplitHostPort(cfg.HTTPAddr)
 		switch {

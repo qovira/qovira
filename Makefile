@@ -106,7 +106,7 @@ docker-build:
 # For production use QOVIRA_MASTER_KEY_FILE pointing at a Docker secret instead.
 docker-run:
 	docker run --rm \
-		-p 8080:8080 \
+		-p 8000:8000 \
 		-e QOVIRA_MASTER_KEY \
 		-v qovira-data:/data \
 		qovira:$(VERSION)

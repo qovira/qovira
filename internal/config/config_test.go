@@ -56,8 +56,8 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 
 	// Defaults should be populated regardless of validation failure.
-	if cfg.HTTPAddr != ":8080" {
-		t.Errorf("default HTTPAddr = %q, want %q", cfg.HTTPAddr, ":8080")
+	if cfg.HTTPAddr != ":8000" {
+		t.Errorf("default HTTPAddr = %q, want %q", cfg.HTTPAddr, ":8000")
 	}
 	if cfg.LogLevel != "info" {
 		t.Errorf("default LogLevel = %q, want %q", cfg.LogLevel, "info")

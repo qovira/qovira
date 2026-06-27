@@ -154,10 +154,10 @@ VOLUME ["/data"]
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Runtime environment defaults — match the exact env var names config.Load reads.
-ENV QOVIRA_HTTP_ADDR=":8080"
+ENV QOVIRA_HTTP_ADDR=":8000"
 ENV QOVIRA_DATA_DIR="/data"
 
-EXPOSE 8080
+EXPOSE 8000
 
 # Run as the distroless nonroot user (numeric — verifiable as non-root by orchestrators that compare against UID 0).
 USER 65532:65532

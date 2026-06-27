@@ -51,7 +51,7 @@ The binary is written to `./qovira`.
 ./qovira version         # print build information
 ```
 
-The server reads its configuration from environment variables (and an optional `--config` file). At minimum it needs `QOVIRA_MASTER_KEY` to open the encrypted database; it listens on `:8080` and stores data under `./data` by default.
+The server reads its configuration from environment variables (and an optional `--config` file). At minimum it needs `QOVIRA_MASTER_KEY` to open the encrypted database; it listens on `:8000` and stores data under `./data` by default.
 
 To create the first admin user on a fresh installation, set `QOVIRA_ADMIN_EMAIL` and `QOVIRA_ADMIN_PASSWORD` before the first `qovira serve`. When no users exist and both variables are set, the server creates the admin account at startup and logs the email. The seeding is a no-op on every subsequent start (any existing user suppresses it). Both variables support `_FILE` indirection; see config reference below.
 
@@ -72,10 +72,10 @@ The Dockerfile uses `--mount=type=cache` and requires BuildKit (Docker Engine 23
 
 ```sh
 DOCKER_BUILDKIT=1 docker build -t qovira:dev .
-docker run --rm -p 8080:8080 -e QOVIRA_MASTER_KEY=<passphrase> -v qovira-data:/data qovira:dev
+docker run --rm -p 8000:8000 -e QOVIRA_MASTER_KEY=<passphrase> -v qovira-data:/data qovira:dev
 ```
 
-The server listens on `:8080` and stores the encrypted database under `/data` inside the container (backed by the named volume above).
+The server listens on `:8000` and stores the encrypted database under `/data` inside the container (backed by the named volume above).
 
 ### Supplying the master key
 
@@ -101,7 +101,7 @@ The master key **must never be baked into the image**. Two safe runtime options:
 The image exposes `GET /healthz`. Docker queries it automatically via the built-in `HEALTHCHECK` instruction. To probe manually:
 
 ```sh
-curl http://localhost:8080/healthz
+curl http://localhost:8000/healthz
 # or inside a running container (distroless — no curl/shell):
 docker exec <container> /usr/local/bin/qovira healthcheck
 ```
