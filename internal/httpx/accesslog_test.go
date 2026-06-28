@@ -203,7 +203,7 @@ func TestAccessLogMiddleware_PanicStatusCaptured(t *testing.T) {
 	// Chain (outermost first): request-ID → access-log → recovery → panicker.
 	h := httpx.NewRequestIDMiddleware(
 		httpx.NewAccessLogMiddleware(logger,
-			httpx.NewRecoveryMiddleware(panicker)))
+			httpx.NewRecoveryMiddleware(discardLogger(), panicker)))
 
 	req := httptest.NewRequest(http.MethodGet, "/crash", nil)
 	rr := httptest.NewRecorder()

@@ -95,7 +95,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	handler := http.Handler(mux)
 	handler = httpx.NewCORSMiddleware(corsPolicy, handler)
-	handler = httpx.NewRecoveryMiddleware(handler)
+	handler = httpx.NewRecoveryMiddleware(logger, handler)
 	handler = httpx.NewAccessLogMiddleware(logger, handler)
 	handler = httpx.NewRequestIDMiddleware(handler)
 	// http.MaxBytesHandler is the server-edge body-size backstop, paired with the 4 MiB Huma per-op cap.

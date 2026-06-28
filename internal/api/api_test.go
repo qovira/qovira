@@ -85,14 +85,19 @@ func TestHealth_NoHealthzRegistration(t *testing.T) {
 	}
 }
 
-// TestNew_ReturnsMountedAPI verifies that api.New returns a non-nil huma.API value.
-func TestNew_ReturnsMountedAPI(t *testing.T) {
+// TestNew_RegistersHealthOperation verifies that api.New returns a usable huma.API whose OpenAPI spec
+// carries the /health operation — a behavioural check, since the returned interface is never nil.
+func TestNew_RegistersHealthOperation(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
 	humaAPI := api.New(mux, buildinfo.Info{Version: "(devel)", Commit: "x", GoVersion: "go1.26"}, slog.Default())
 
 	if humaAPI == nil {
-		t.Error("api.New returned nil")
+		t.Fatal("api.New returned nil")
+	}
+
+	if _, ok := humaAPI.OpenAPI().Paths["/health"]; !ok {
+		t.Error("api.New did not register the /health operation in the OpenAPI spec")
 	}
 }

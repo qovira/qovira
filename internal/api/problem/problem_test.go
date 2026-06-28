@@ -65,9 +65,13 @@ func TestFrom_UnknownStatus(t *testing.T) {
 	if d.Status != 599 {
 		t.Errorf("status: want 599, got %d", d.Status)
 	}
-	// Code must be non-empty (snake-cased HTTP status text or similar).
-	if d.Code == "" {
-		t.Error("code must be non-empty for unknown status")
+	// http.StatusText(599) is "", so From falls back to the generic "error" code and its derived type URI.
+	// Pin both so a regression in the fallback branch is caught (a non-empty check would pass on garbage).
+	if d.Code != "error" {
+		t.Errorf("code: want %q, got %q", "error", d.Code)
+	}
+	if d.Type != "https://qovira.ai/errors/error" {
+		t.Errorf("type: want %q, got %q", "https://qovira.ai/errors/error", d.Type)
 	}
 }
 
@@ -77,25 +81,6 @@ func TestFrom_UnknownStatus(t *testing.T) {
 
 func TestCodeSlugRoundTrip(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
-		code string
-		slug string
-	}{
-		{"validation_error", "validation-error"},
-		{"not_found", "not-found"},
-		{"method_not_allowed", "method-not-allowed"},
-		{"unsupported_media_type", "unsupported-media-type"},
-		{"internal_error", "internal-error"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.code, func(t *testing.T) {
-			t.Parallel()
-			d := problem.From(0, "") // status 0 won't be in registry; we look at constructors instead
-			_ = d
-		})
-	}
 
 	// Verify each constructor builds the correct type URI.
 	cases := []struct {

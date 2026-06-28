@@ -101,9 +101,11 @@ func TestFallback_WrongMethod_405(t *testing.T) {
 		t.Errorf("Content-Type: want %q, got %q", "application/problem+json", ct)
 	}
 
+	// /health registers only GET, so the Allow header must list exactly that — this pins the sort+join in
+	// newAPIFallback, not merely that some header is present.
 	allow := resp.Header.Get("Allow")
-	if allow == "" {
-		t.Error("Allow header must be set for 405")
+	if allow != http.MethodGet {
+		t.Errorf("Allow header: want %q, got %q", http.MethodGet, allow)
 	}
 
 	requestID := resp.Header.Get("Request-Id")

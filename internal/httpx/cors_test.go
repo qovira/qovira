@@ -186,6 +186,56 @@ func TestCORS_NoOriginPassthrough(t *testing.T) {
 	}
 }
 
+// TestCORS_VaryOriginForCrossOriginRequests verifies that Vary: Origin is emitted for every cross-origin
+// request — including one from a denied origin — so a shared cache cannot replay a response across origins.
+// A request without an Origin header gets no Vary from this middleware.
+func TestCORS_VaryOriginForCrossOriginRequests(t *testing.T) {
+	t.Parallel()
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	t.Run("denied origin still varies", func(t *testing.T) {
+		t.Parallel()
+
+		h := newSameOriginCORSMiddleware(inner) // empty allow-list → every origin denied
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/widgets", nil)
+		req.Header.Set("Origin", "https://evil.example")
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+
+		if vary := rr.Header().Get("Vary"); !containsCaseInsensitive(vary, "Origin") {
+			t.Errorf("denied cross-origin request: Vary must include Origin, got %q", vary)
+		}
+	})
+
+	t.Run("permitted origin varies", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestCORSMiddleware(inner)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/widgets", nil)
+		req.Header.Set("Origin", testOrigin)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+
+		if vary := rr.Header().Get("Vary"); !containsCaseInsensitive(vary, "Origin") {
+			t.Errorf("permitted cross-origin request: Vary must include Origin, got %q", vary)
+		}
+	})
+
+	t.Run("no Origin header gets no Vary", func(t *testing.T) {
+		t.Parallel()
+
+		h := newTestCORSMiddleware(inner)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/widgets", nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+
+		if vary := rr.Header().Get("Vary"); vary != "" {
+			t.Errorf("no-Origin request: Vary must be absent, got %q", vary)
+		}
+	})
+}
+
 // containsCaseInsensitive checks whether s contains sub with a case-insensitive comparison.
 func containsCaseInsensitive(s, sub string) bool {
 	return contains(toLower(s), toLower(sub))

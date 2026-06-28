@@ -35,21 +35,23 @@ import (
 const specVersion = "0.1.0"
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "gen-openapi: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	// Use a local FlagSet rather than the package-level flag.CommandLine so that run() is safe to call
-	// multiple times in the same process (e.g. in tests). flag.CommandLine panics on flag redefinition.
+// run parses args (the program arguments, excluding the binary name) and generates the spec. Taking args as
+// a parameter rather than reading the global os.Args keeps run() pure and lets tests drive it without
+// mutating process-global state. A local FlagSet (not flag.CommandLine, which panics on flag redefinition)
+// makes run safe to call multiple times in the same process.
+func run(args []string) error {
 	fs := flag.NewFlagSet("gen-openapi", flag.ContinueOnError)
 
 	var outPath string
 	fs.StringVar(&outPath, "out", "", "path to write openapi.yaml (default: module-root/openapi.yaml)")
 
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 

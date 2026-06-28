@@ -65,10 +65,8 @@ func TestRunWithOutFlag(t *testing.T) {
 
 	outFile := filepath.Join(t.TempDir(), "openapi.yaml")
 
-	// Simulate: go run cmd/gen-openapi -out <outFile>
-	os.Args = []string{"gen-openapi", "-out", outFile}
-
-	if err := run(); err != nil {
+	// Drive run() directly with args (no os.Args mutation) — safe under t.Parallel.
+	if err := run([]string{"-out", outFile}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 

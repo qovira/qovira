@@ -70,9 +70,9 @@ func TestResolve_GoVersionPresent(t *testing.T) {
 	}
 }
 
-// TestResolve_DirtyFlag verifies that when the VCS-modified setting is "true", Resolve appends "-dirty" to
-// the commit string. We can't force VCS state in a test run, so we just verify the format is valid (no double
-// "-dirty-dirty", commit always non-empty).
+// TestResolve_CommitNeverEmpty verifies that Resolve yields a non-empty Commit for both the stamped
+// (ldflags-provided) and unstamped (development) paths. The "-dirty" suffix behaviour is covered by the
+// white-box tests in resolve_internal_test.go and shortrev_internal_test.go, which can force the VCS state.
 func TestResolve_CommitNeverEmpty(t *testing.T) {
 	t.Parallel()
 

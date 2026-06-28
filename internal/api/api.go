@@ -31,10 +31,10 @@ import (
 
 // maxBodyBytes is the default maximum request-body size ceiling applied to every registered operation. The
 // health endpoint has no body and ignores this field; future body-reading endpoints inherit the ceiling unless
-// they override MaxBodyBytes explicitly in their Operation. This scaffolds the body-size guard noted in the
-// composition root's TODO(security) comment. 4 MiB balances typical API payloads (JSON, small uploads) against
-// server resource protection — a single endpoint can override downward or upward as its contract demands.
-const maxBodyBytes int64 = 4 * 1024 * 1024
+// they override MaxBodyBytes explicitly in their Operation. It references [httpx.MaxBodyBytes] — the single
+// server-wide ceiling, also enforced at the server edge by http.MaxBytesHandler — so the per-operation cap
+// and the edge backstop can never drift. A single endpoint can override downward or upward as its contract demands.
+const maxBodyBytes = httpx.MaxBodyBytes
 
 // New builds the Huma API mounted on the caller's mux under the /api/v1 prefix, registers all operations,
 // installs the /api/ fallback for routing-level 404/405, and returns the huma.API for callers that need to

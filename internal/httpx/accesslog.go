@@ -11,20 +11,42 @@ import (
 // noise while retaining observability when they debug at level=debug.
 const healthPath = "/api/v1/health"
 
-// statusRecorder wraps http.ResponseWriter to capture the status code written by the inner handler. It is
-// the minimal interception needed for the access log — we only need the status, not the body.
+// statusRecorder wraps http.ResponseWriter to capture the status code written by the inner handler and
+// whether the response has been committed. The status feeds the access log; the committed flag lets the
+// recovery middleware avoid writing a 500 over a response a handler already started.
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
-// WriteHeader intercepts the status code before forwarding to the real ResponseWriter.
+// WriteHeader intercepts the status code before forwarding to the real ResponseWriter and records that the
+// response has been committed (the status line is on the wire).
 func (r *statusRecorder) WriteHeader(code int) {
-	if r.status == 0 {
+	if !r.wroteHeader {
 		r.status = code
+		r.wroteHeader = true
 	}
 
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Write records the implicit 200 that net/http emits when a handler streams a body without calling
+// WriteHeader, so Committed reports accurately even for handlers that never set a status explicitly.
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if !r.wroteHeader {
+		r.status = http.StatusOK
+		r.wroteHeader = true
+	}
+
+	return r.ResponseWriter.Write(b)
+}
+
+// Committed reports whether the response has been started (headers or body written). The recovery
+// middleware uses it to skip writing a 500 over an already-committed response (e.g. a streaming handler
+// that wrote part of a 200 before panicking).
+func (r *statusRecorder) Committed() bool {
+	return r.wroteHeader
 }
 
 // Unwrap returns the wrapped ResponseWriter so http.ResponseController can reach the underlying writer's
@@ -36,10 +58,10 @@ func (r *statusRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
 }
 
-// written returns the captured status code, defaulting to 200 when WriteHeader was never called (the Go
-// net/http convention: an implicit 200 when the handler writes a body without calling WriteHeader).
+// written returns the captured status code, defaulting to 200 when the response was never committed (the
+// Go net/http convention: an implicit 200 when the handler writes a body without calling WriteHeader).
 func (r *statusRecorder) written() int {
-	if r.status == 0 {
+	if !r.wroteHeader {
 		return http.StatusOK
 	}
 

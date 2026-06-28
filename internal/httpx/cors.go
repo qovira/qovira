@@ -67,6 +67,11 @@ func NewCORSMiddleware(cfg CORSConfig, next http.Handler) http.Handler {
 			return
 		}
 
+		// The response depends on the Origin (CORS headers are set only for allow-listed origins), so a
+		// shared cache must not replay it to a different origin. Signal that with Vary regardless of the
+		// allow-list outcome — both permitted and denied responses vary by Origin.
+		addVary(w, "Origin")
+
 		_, permitted := allowed[origin]
 
 		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
@@ -94,16 +99,24 @@ func NewCORSMiddleware(cfg CORSConfig, next http.Handler) http.Handler {
 
 // setCORSHeaders sets the common CORS response headers shared by preflight and simple requests.
 // It deliberately never sets Access-Control-Allow-Credentials: true alongside a wildcard origin — the
-// only way this function is reachable is via the explicit allow-list check above (no reflection).
+// only way this function is reachable is via the explicit allow-list check above (no reflection). The
+// Vary: Origin header is set by the middleware for every cross-origin request, so it is not set here.
 func setCORSHeaders(w http.ResponseWriter, origin string) {
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Expose-Headers", corsExposeHeaders)
-	// Vary tells caches that the response differs by Origin, preventing one client's response from being
-	// served to a different origin.
-	vary := w.Header().Get("Vary")
-	if vary == "" {
-		w.Header().Set("Vary", "Origin")
-	} else if !strings.Contains(vary, "Origin") {
-		w.Header().Set("Vary", vary+", Origin")
+}
+
+// addVary appends value to the response's Vary header, treating the existing header(s) as a comma-separated
+// token list so the same token is never duplicated (no malformed "Origin, Origin"). Comparison is
+// case-insensitive per RFC 9110 §12.5.5 — field names are case-insensitive.
+func addVary(w http.ResponseWriter, value string) {
+	for _, header := range w.Header().Values("Vary") {
+		for token := range strings.SplitSeq(header, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), value) {
+				return
+			}
+		}
 	}
+
+	w.Header().Add("Vary", value)
 }
