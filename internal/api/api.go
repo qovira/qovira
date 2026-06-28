@@ -49,6 +49,10 @@ func New(mux *http.ServeMux, bi buildinfo.Info, _ *slog.Logger) huma.API {
 	//      early, preventing the link transformer's $schema from ever touching error bodies.
 	cfg.Transformers = append(cfg.Transformers, requestIDTransformer)
 
+	// TODO(config): docs UI enable/disable toggle — to disable the Stoplight Elements docs page (e.g. in
+	// production hardening, unit 9), set cfg.DocsPath = "" here before calling humago.NewWithPrefix. The
+	// route is intentionally left public for now; the CSP carve-out for /docs is deferred to unit 6.
+
 	ha := humago.NewWithPrefix(mux, "/api/v1", cfg)
 
 	registerMeta(ha, bi)

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := build
 
-.PHONY: build build-web build-go run docker lint test clean
+.PHONY: build build-web build-go run docker lint test generate clean
 
 # Build-identity ldflags — stamped from git at `make` time. The same variable names (QOVIRA_VERSION,
 # QOVIRA_REVISION, QOVIRA_CREATED) are used as build-args in the Dockerfile and passed as --build-arg in CI,
@@ -52,6 +52,11 @@ lint:
 test:
 	go test -race ./...
 	pnpm -C web test
+
+## generate: regenerate derived artifacts from source (runs go generate ./...). Writes openapi.yaml at the
+##           repo root from the live api.New registration — re-run after any handler or schema change.
+generate:
+	go generate ./...
 
 ## clean: remove the compiled binary and the generated webdist/ tree.
 clean:
