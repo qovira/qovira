@@ -88,8 +88,7 @@ EXPOSE 18888
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD ["/qovira", "healthcheck"]
 
-# Single-process server: it spawns no children and handles SIGTERM itself (see signal.NotifyContext in internal/cli),
-# so no init/tini is needed to reap zombies. Revisit if a subprocess is ever added. Exec-form so PID 1 is qovira
-# and receives signals directly.
+# Single-process server: it spawns no children and handles SIGTERM itself (see signal.NotifyContext in internal/cli).
+# Exec-form so PID 1 is qovira and receives signals directly.
 ENTRYPOINT ["/qovira"]
 CMD ["serve"]

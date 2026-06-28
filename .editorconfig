@@ -23,6 +23,4 @@ indent_size = 2
 
 [*.md]
 trim_trailing_whitespace = false
-# Prose is written one unwrapped line per paragraph (editor soft-wraps), so the line-length cap does not apply to
-# Markdown.
 max_line_length = off

@@ -1,4 +1,3 @@
-# actionlint configuration.
 # Declare the Blacksmith self-hosted runner labels so actionlint does not flag them as unknown. Every CI job runs on
 # Blacksmith (house rule); add new label sizes here as they are used. See conventions:writing-workflows for the scheme.
 self-hosted-runner:
