@@ -13,6 +13,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/qovira/qovira/internal/api"
+	"github.com/qovira/qovira/internal/buildinfo"
 	"github.com/qovira/qovira/internal/httpx"
 )
 
@@ -51,12 +53,19 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("resolve SPA assets: %w", err)
 	}
 
+	// Resolve build identity once at startup. The package-level ldflags vars are set by the Makefile /
+	// Dockerfile / CI; Resolve fills gaps from runtime/debug.ReadBuildInfo for development builds.
+	bi := buildinfo.Resolve(buildinfo.Info{
+		Version:   buildinfo.Version,
+		Commit:    buildinfo.Commit,
+		BuildTime: buildinfo.BuildTime,
+	})
+
 	mux := http.NewServeMux()
 
-	// Liveness probe — trivially returns 200.
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	// Mount the Huma API under /api/v1. Go 1.22 most-specific-pattern routing ensures /api/v1/... requests
+	// reach Huma before the SPA catch-all, so no manual prefix-stripping is needed.
+	api.New(mux, bi, logger)
 
 	// All other paths — SPA handler with index.html fallback.
 	mux.Handle("/", httpx.NewSPAHandler(assets))
