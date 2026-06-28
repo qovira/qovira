@@ -47,9 +47,8 @@ jobs:
       - name: go test -race
         run: go test -race ./...
 
-      # Vulnerability scan — installed and run directly so it reuses this job's
-      # Go 1.26 toolchain and checkout. (The govulncheck-action re-checks-out the
-      # repo and collides with the persisted git auth, and bundles an outdated
+      # Vulnerability scan — installed and run directly so it reuses this job's Go 1.26 toolchain and checkout.
+      # (The govulncheck-action re-checks-out the repo and collides with the persisted git auth, and bundles an outdated
       # actions/checkout.)
       - name: govulncheck
         run: |
@@ -95,10 +94,9 @@ jobs:
         run: pnpm -C web build
 
   # ── Image: native Docker build + smoke-test on both arches ────────────────
-  # TODO(release): this job builds and smoke-tests per-arch images but does not
-  # publish. Before any release, add a docker scout CVE scan (fail on critical/
-  # high), SBOM + provenance, cosign signing, and a manifest-list push — none of
-  # which belong here while v0.1 has no deploy path.
+  # TODO(release): this job builds and smoke-tests per-arch images but does not publish. Before any release,
+  # add a docker scout CVE scan (fail on critical/high), SBOM + provenance, cosign signing, and a manifest-list
+  # push — none of which belong here while v0.1 has no deploy path.
   image:
     name: Image (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}

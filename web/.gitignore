@@ -1,7 +1,7 @@
 node_modules
 /.svelte-kit
-# adapter-static writes to ../internal/httpx/webdist (gitignored at repo root),
-# so no web/build directory is ever produced by this project.
+# adapter-static writes to ../internal/httpx/webdist (gitignored at repo root), so no web/build directory is ever
+# produced by this project.
 /coverage
 .env
 .env.*

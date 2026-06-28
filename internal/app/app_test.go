@@ -88,9 +88,8 @@ func TestBuildLogger_RespectsLevel(t *testing.T) {
 	logger.Info("info msg")
 	logger.Warn("warn msg")
 
-	// At warn level only the warn line is emitted; assert on the structured
-	// level/msg fields rather than a raw substring so the check can't pass on
-	// mangled output.
+	// At warn level only the warn line is emitted; assert on the structured level/msg fields rather than a raw
+	// substring so the check can't pass on mangled output.
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("want exactly 1 line emitted at warn level, got %d: %q", len(lines), buf.String())

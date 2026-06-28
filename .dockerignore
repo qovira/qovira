@@ -1,8 +1,8 @@
 # Version control
 .git/
 
-# Docker build files — changes here don't affect the build output and would
-# otherwise bust every layer's cache unnecessarily.
+# Docker build files — changes here don't affect the build output and would otherwise bust every layer's cache
+# unnecessarily.
 Dockerfile*
 .dockerignore
 compose*.yaml

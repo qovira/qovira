@@ -38,8 +38,7 @@ func TestProbe_503ReturnsError(t *testing.T) {
 	}
 }
 
-// TestProbe_UnreachableReturnsError verifies that a closed/unreachable server
-// maps to an error.
+// TestProbe_UnreachableReturnsError verifies that a closed/unreachable server maps to an error.
 func TestProbe_UnreachableReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -55,8 +54,8 @@ func TestProbe_UnreachableReturnsError(t *testing.T) {
 	}
 }
 
-// TestProbe_CancelledContextReturnsError verifies Probe honors its context: a
-// context cancelled before the call makes the request fail rather than hang.
+// TestProbe_CancelledContextReturnsError verifies Probe honors its context: a context cancelled before the call makes
+// the request fail rather than hang.
 func TestProbe_CancelledContextReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -73,8 +72,7 @@ func TestProbe_CancelledContextReturnsError(t *testing.T) {
 	}
 }
 
-// TestExecute_HealthcheckHelp verifies the subcommand is registered and --help
-// exits 0.
+// TestExecute_HealthcheckHelp verifies the subcommand is registered and --help exits 0.
 func TestExecute_HealthcheckHelp(t *testing.T) {
 	t.Parallel()
 
@@ -84,8 +82,8 @@ func TestExecute_HealthcheckHelp(t *testing.T) {
 	}
 }
 
-// TestExecute_HealthcheckExitsZeroOnRunningServer verifies the full
-// cobra-to-probe path exits 0 when the target returns 200.
+// TestExecute_HealthcheckExitsZeroOnRunningServer verifies the full cobra-to-probe path exits 0 when the target
+// returns 200.
 // Not parallel — uses t.Setenv.
 func TestExecute_HealthcheckExitsZeroOnRunningServer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -102,8 +100,8 @@ func TestExecute_HealthcheckExitsZeroOnRunningServer(t *testing.T) {
 	}
 }
 
-// TestExecute_HealthcheckExitsNonZeroOnDownServer verifies the full
-// cobra-to-probe path exits non-zero when the target is unreachable.
+// TestExecute_HealthcheckExitsNonZeroOnDownServer verifies the full cobra-to-probe path exits non-zero when the target
+// is unreachable.
 // Not parallel — uses t.Setenv.
 func TestExecute_HealthcheckExitsNonZeroOnDownServer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

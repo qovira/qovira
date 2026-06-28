@@ -53,17 +53,11 @@ func LoadConfig(flags FlagOverrides) (Config, error) {
 
 	// Validate.
 	if !slices.Contains(validLogLevels, cfg.LogLevel) {
-		return Config{}, fmt.Errorf(
-			"invalid QOVIRA_LOG_LEVEL %q: must be one of %v",
-			cfg.LogLevel, validLogLevels,
-		)
+		return Config{}, fmt.Errorf("invalid QOVIRA_LOG_LEVEL %q: must be one of %v", cfg.LogLevel, validLogLevels)
 	}
 
 	if !slices.Contains(validLogFormats, cfg.LogFormat) {
-		return Config{}, fmt.Errorf(
-			"invalid QOVIRA_LOG_FORMAT %q: must be one of %v",
-			cfg.LogFormat, validLogFormats,
-		)
+		return Config{}, fmt.Errorf("invalid QOVIRA_LOG_FORMAT %q: must be one of %v", cfg.LogFormat, validLogFormats)
 	}
 
 	return cfg, nil

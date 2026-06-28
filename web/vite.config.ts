@@ -16,9 +16,8 @@ export default defineConfig({
       reporter: ["text", "html", "lcov"],
       include: ["src/**"],
       exclude: ["**/*.test.ts", "**/*.svelte.test.ts", "src/**/*.d.ts", "src/app.html"],
-      // Thresholds are intentionally omitted for this scaffold — the app
-      // has one blank route and one harness test. They will be set once
-      // real source and component tests land in a later unit.
+      // Thresholds are intentionally omitted for this scaffold — the app has one blank route and one harness test.
+      // They will be set once real source and component tests land in a later unit.
     },
   },
 });

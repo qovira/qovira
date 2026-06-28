@@ -2,8 +2,7 @@
 
 .PHONY: build build-web build-go run docker lint test clean
 
-## build-web: install web dependencies and compile the SvelteKit SPA into
-##            internal/httpx/webdist/ via adapter-static.
+## build-web: install web dependencies and compile the SvelteKit SPA into internal/httpx/webdist/ via adapter-static.
 build-web:
 	pnpm -C web install --frozen-lockfile
 	pnpm -C web build
@@ -14,13 +13,12 @@ build-go:
 	go build ./...
 
 ## build: run the web build then compile the binary with the real SPA embedded.
-##        Depends on build-web so webdist/ is always populated before the
-##        //go:embed directive compiles.
+##        Depends on build-web so webdist/ is always populated before the //go:embed directive compiles.
 build: build-web
 	go build -tags embed_spa -o ./qovira ./cmd/qovira
 
-## run: build the embedded binary then serve it locally with dev-friendly env:
-##      port :18888, debug-level human-readable (text) logs. Blocks until Ctrl-C.
+## run: build the embedded binary then serve it locally with dev-friendly env: port :18888, debug-level human-readable
+##      (text) logs. Blocks until Ctrl-C.
 run: build
 	QOVIRA_ADDR=:18888 QOVIRA_LOG_LEVEL=debug QOVIRA_LOG_FORMAT=text ./qovira serve
 

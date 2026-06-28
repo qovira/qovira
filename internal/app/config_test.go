@@ -6,8 +6,8 @@ import (
 	"github.com/qovira/qovira/internal/app"
 )
 
-// Note: these tests use t.Setenv and therefore cannot use t.Parallel —
-// t.Setenv is incompatible with parallel subtests since Go 1.24.
+// Note: these tests use t.Setenv and therefore cannot use t.Parallel — t.Setenv is incompatible with parallel subtests
+// since Go 1.24.
 
 func TestLoadConfig_Defaults(t *testing.T) {
 	t.Setenv("QOVIRA_ADDR", "")
