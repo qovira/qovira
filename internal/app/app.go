@@ -73,11 +73,38 @@ func Run(ctx context.Context, cfg Config) error {
 	// TODO(security): wrap mux in a security-headers middleware (X-Content-Type-Options: nosniff at minimum;
 	// add CSP + frame-ancestors) before a real web client ships. While only static placeholder assets are
 	// served this is defense-in-depth, not yet exploitable.
-	// TODO(security): add http.MaxBytesHandler (a request body size limit) once any endpoint reads a request
-	// body — ReadTimeout bounds time, not bytes.
+
+	// Compose the server-edge middleware chain. Layer order matters — each line wraps everything below it:
+	//
+	//   MaxBytesHandler — outermost body-size gate; pairs the 4 MiB Huma per-op cap with a server-edge
+	//                     backstop so bodies are rejected before any handler reads them.
+	//   RequestID       — injects the req_… correlation token into context and sets the Request-Id header;
+	//                     must sit outside everything that reads the ID (access-log, recovery, error edge).
+	//   AccessLog       — emits one structured slog line per request; must be outside recovery so it
+	//                     observes the 500 that recovery writes after a panic (AC3).
+	//   Recovery        — catches panics from the non-API surface and returns a generic 500; must be inside
+	//                     the access-log so the logged status is the recovered one.
+	//   CORS            — answers OPTIONS preflights before routing; must be inside recovery so a bug in
+	//                     the CORS logic is caught rather than dropping the connection.
+
+	// TODO(config): wire CORSConfig.AllowedOrigins from the instance config model (unit 9) so operators
+	// can configure allowed origins for their deployment without recompiling.
+	corsPolicy := httpx.CORSConfig{
+		AllowedOrigins: nil, // same-origin-default: no cross-origin access until unit 9 wires origins
+	}
+
+	handler := http.Handler(mux)
+	handler = httpx.NewCORSMiddleware(corsPolicy, handler)
+	handler = httpx.NewRecoveryMiddleware(handler)
+	handler = httpx.NewAccessLogMiddleware(logger, handler)
+	handler = httpx.NewRequestIDMiddleware(handler)
+	// http.MaxBytesHandler is the server-edge body-size backstop, paired with the 4 MiB Huma per-op cap.
+	// It ensures oversized bodies are rejected before any handler reads them, not just per-operation.
+	handler = http.MaxBytesHandler(handler, httpx.MaxBodyBytes)
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: serverReadHeaderTimeout,
 		ReadTimeout:       serverReadTimeout,
 		WriteTimeout:      serverWriteTimeout,
