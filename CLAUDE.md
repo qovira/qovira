@@ -8,15 +8,32 @@ The **Qovira application server**: a private, self-hostable personal assistant s
 
 It consumes the published `@qovira/theme` + `@qovira/ui` libraries for its frontend and the Omnilium `go-sqlcipher` driver via Go modules for its encrypted store.
 
-> **Repository status:** freshly reset to a clean slate. The codebase, build tooling, and the sections below are being rebuilt — keep this file honest as the real layout and commands land.
+> **Repository status:** the build chassis is in place — Go module, cobra CLI, embedded SvelteKit SPA, distroless image, and CI. The product itself is still early: the HTTP API, persistence, and the real web client are later units. Keep this file honest as they land.
 
 ## Commands
 
-No build tooling exists yet. Once code lands, the standard Go commands apply (`go build ./...`, `go test ./...`); the intended `Makefile`-driven pipeline (SPA build + embed, sqlc generation, lint, Docker image) will be recorded here as it is added. This section is the authority other flows read.
+The `Makefile` is the build authority other flows read:
+
+- `make build` — build the web SPA, then compile the embedded binary (`-tags embed_spa`) to `./qovira`.
+- `make build-web` — install web deps (frozen lockfile) and build the SvelteKit SPA into `internal/httpx/webdist/`.
+- `make build-go` — compile `./qovira` from the no-embed stub (no SPA needed; placeholder page) and type-check all packages; for fast manual CLI checks without the web build.
+- `make run` — `make build` then serve the embedded binary locally with dev env (`QOVIRA_ADDR=:18888`, debug-level text logs); blocks until Ctrl-C.
+- `make lint` — `golangci-lint run`, `pnpm -C web lint`, plus `actionlint` over the GitHub Actions workflows.
+- `make test` — `go test -race ./...` plus `pnpm -C web test`.
+- `make docker` — build the multi-stage distroless image.
+- `make clean` — remove `./qovira` and `internal/httpx/webdist/`.
+
+For backend work without the web toolchain, the plain Go commands work against the no-embed stub: `go build ./...`, `go test ./...`, and `go run ./cmd/qovira serve` (which serves a placeholder page on `/`). The real SvelteKit SPA is embedded only under `-tags embed_spa` — i.e. `make build` and the Docker image.
 
 ## Layout & build
 
-Not yet scaffolded. The planned shape is a `cmd/qovira` entrypoint delegating to a command tree, wired from `internal/*` packages through one composition root, with the SvelteKit SPA built and embedded into the binary. Fill in the directory map as packages are created.
+- `cmd/qovira/` — entrypoint; one line handing off to `internal/cli`.
+- `internal/cli/` — the cobra command tree (`root`, `serve`, `healthcheck`); thin adapters, no business logic.
+- `internal/app/` — the composition root: env config, `slog` setup, HTTP server wiring, run + graceful shutdown.
+- `internal/httpx/` — HTTP serving and the SPA embed seam: `spa.go` (the `fs.FS` handler with `index.html` fallback), `spa_embed.go` (`//go:embed all:webdist`, built under `-tags embed_spa`), `spa_noembed.go` (the placeholder stub), and the gitignored `webdist/` build output.
+- `web/` — the SvelteKit SPA (Vite + adapter-static), built straight into `internal/httpx/webdist/`.
+
+The SPA is embedded into the binary via a build tag: a bare `go build`/`go test` compiles against the no-embed placeholder, while `-tags embed_spa` embeds the real `webdist/` tree. The `all:` prefix on the embed directive is mandatory — it captures SvelteKit's leading-underscore `_app/` bundle.
 
 ## Conventions
 
@@ -24,4 +41,4 @@ Follow the `conventions:writing-go` house guide (and the matching `writing-*` gu
 
 ## Testing
 
-`go test ./...` once the module exists. Write tests first (house TDD discipline): a failing test that fails for the right reason, then the minimal code to pass. "Green" — build, lint, and the full test suite passing — is the bar before pushing to `main` or opening a PR.
+`make test` runs the full suite (`go test -race ./...` plus `pnpm -C web test`); `go test ./...` covers the Go side alone. Write tests first (house TDD discipline): a failing test that fails for the right reason, then the minimal code to pass. "Green" — build, lint, and the full test suite passing — is the bar before pushing to `main` or opening a PR.

@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least-privilege: only read the repository contents.
+permissions:
+  contents: read
+
+# Cancel any in-progress run for the same branch/PR when a new push arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+
+      - name: go vet
+        run: go vet ./...
+
+      # golangci-lint-action v9+ supports golangci-lint v2.
+      - uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+        with:
+          version: v2.12.2
+
+      - name: go test -race
+        run: go test -race ./...
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: make build-go
+        run: make build-go
+
+  web:
+    name: Web
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          package_json_file: web/package.json
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: pnpm install
+        run: pnpm -C web install --frozen-lockfile
+
+      - name: pnpm lint
+        run: pnpm -C web lint
+
+      - name: pnpm test
+        run: pnpm -C web test
+
+      - name: pnpm build
+        run: pnpm -C web build
+
+  # ── Image: native Docker build + smoke-test on both arches ────────────────
+  # TODO(release): this job builds and smoke-tests per-arch images but does not publish. Before any release,
+  # add a docker scout CVE scan (fail on critical/high), SBOM + provenance, cosign signing, and a manifest-list
+  # push — none of which belong here while v0.1 has no deploy path.
+  image:
+    name: Image (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - blacksmith-2vcpu-ubuntu-2404 # linux/amd64
+          - blacksmith-2vcpu-ubuntu-2404-arm # linux/arm64
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      # Blacksmith's builder — replaces docker/setup-buildx-action.
+      # Blacksmith persists layers automatically; no type=gha cache needed.
+      - uses: useblacksmith/setup-docker-builder@ab5c1da94f53f5cd75c1038092aa276dddfccbba # v1
+
+      # Build the multi-stage image natively for this arch and load it locally.
+      # push: false + load: true works for single-platform per-leg builds.
+      # No cache-from/cache-to: Blacksmith layer persistence handles caching.
+      - uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
+        with:
+          context: .
+          push: false
+          load: true
+          tags: qovira:ci
+
+      - name: Smoke-test container
+        run: |
+          set -euo pipefail
+
+          docker run -d -p 18888:18888 --name qovira-ci qovira:ci
+
+          # Poll /healthz until the server is up (up to 30 s, 1 s intervals).
+          echo "Waiting for /healthz..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:18888/healthz > /dev/null 2>&1; then
+              echo "  ready after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "  timed out waiting for /healthz"
+              docker logs qovira-ci
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Assert /healthz → 200.
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:18888/healthz)
+          if [ "$status" != "200" ]; then
+            echo "FAIL: /healthz returned $status, want 200"
+            exit 1
+          fi
+          echo "PASS: /healthz → $status"
+
+          # Assert / → 200 with a real SPA marker (_app/ reference in body).
+          body=$(curl -sf http://localhost:18888/)
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:18888/)
+          if [ "$status" != "200" ]; then
+            echo "FAIL: / returned $status, want 200"
+            exit 1
+          fi
+          if ! echo "$body" | grep -q "_app/"; then
+            echo "FAIL: / body does not contain '_app/' — placeholder served instead of real SPA"
+            echo "Body snippet: $(echo "$body" | head -20)"
+            exit 1
+          fi
+          echo "PASS: / → $status (real SPA confirmed)"
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f qovira-ci || true

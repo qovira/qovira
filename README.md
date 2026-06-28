@@ -2,11 +2,11 @@
 
 Qovira is a private, self-hostable AI personal assistant: a single Go binary that serves a JSON/SSE API and an embedded web client, organizing your reminders, notes, and day through chat backed by real structured records. It runs on your own server against the model endpoint you choose — nothing phones home.
 
-> **Status:** early development. The repository has been reset to a clean slate and is being rebuilt; build tooling, the API, and the web client are not yet in place.
+> **Status:** early development. The build chassis is in place — the `qovira` binary builds with the web client embedded and serves a blank page, packaged as a distroless image and exercised by CI on amd64 and arm64. The HTTP API and the real web client are still to come.
 
 ## Install
 
-Not yet available. Qovira will ship as a single binary built from this repository and as a distroless Docker image. Build and run instructions will land here once the server foundation is in place.
+Not yet available for end users — there is no functionality to use yet. To build the current chassis from source you need a Go toolchain plus Node and pnpm for the web client: `make build` produces the `./qovira` binary (with the SPA embedded) and `make docker` builds the distroless image. End-user install instructions will land here as the server gains real capabilities.
 
 ## Usage
 
