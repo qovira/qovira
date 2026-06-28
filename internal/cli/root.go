@@ -15,79 +15,63 @@ import (
 	"github.com/qovira/qovira/internal/app"
 )
 
+// Process exit codes returned by Execute and handed to os.Exit by main. Specific failure modes can claim
+// their own dedicated codes here as they emerge; for now any error collapses to exitError.
+const (
+	exitSuccess = 0
+	exitError   = 1
+)
+
 // Execute is the public entry point. It builds the command tree, sets up a signal-aware context, and runs the
-// root command. It returns the process exit code: 0 for success, non-zero for any error.
+// root command. It returns the process exit code: exitSuccess on success, non-zero for any error.
 func Execute() int {
-	return ExecuteArgsWithOutput(os.Args[1:], os.Stdout)
+	return ExecuteArgsWithOutput(os.Args[1:], os.Stdout, os.Stderr)
 }
 
-// ExecuteArgsWithOutput is the fully testable variant: args and output writer are both configurable, so tests
-// can capture help text without a subprocess.
-func ExecuteArgsWithOutput(args []string, out io.Writer) int {
+// ExecuteArgsWithOutput is the fully testable variant: args and the normal/error output writers are all
+// configurable, so tests can capture help text and error output without a subprocess. Normal output (help,
+// usage) goes to out; errors go to errOut.
+func ExecuteArgsWithOutput(args []string, out, errOut io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	root := buildRoot(out)
+	root := buildRoot(out, errOut)
 	root.SetArgs(args)
 
+	// SilenceErrors keeps cobra from printing the error itself, so the caller owns surfacing it. Print to
+	// errOut here rather than letting it vanish — this covers flag-parsing errors, unknown commands, and any
+	// RunE failure that returns before app.Run's logger is wired up (e.g. config loading).
 	if err := root.ExecuteContext(ctx); err != nil {
-		return 1
+		fmt.Fprintln(errOut, "Error:", err)
+		return exitError
 	}
 
-	return 0
+	return exitSuccess
 }
 
 // buildRoot constructs the cobra root command and attaches all subcommands.
-func buildRoot(out io.Writer) *cobra.Command {
-	var logLevel, logFormat string
+func buildRoot(out, errOut io.Writer) *cobra.Command {
+	var addr, logLevel, logFormat string
 
 	root := &cobra.Command{
 		Use:   "qovira",
 		Short: "Qovira — self-hostable personal AI assistant",
 		Long: `Qovira is a private, self-hostable AI personal assistant.
-It serves a JSON/SSE API and an embedded web client backed by an encrypted SQLite store.`,
+It serves a JSON/SSE API and an embedded web client backed by an encrypted store.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
 
 	root.SetOut(out)
-	root.SetErr(out)
+	root.SetErr(errOut)
 
 	// Persistent flags inherited by every subcommand.
-	root.PersistentFlags().StringVar(&logLevel, "log-level", "", "log level: debug, info, warn, error (default: info, env: QOVIRA_LOG_LEVEL)")
-	root.PersistentFlags().StringVar(&logFormat, "log-format", "", "log format: json, text (default: json, env: QOVIRA_LOG_FORMAT)")
+	root.PersistentFlags().StringVar(&addr, "addr", app.DefaultAddr, "TCP listen/probe address, e.g. :18888 (env: QOVIRA_ADDR)")
+	root.PersistentFlags().StringVar(&logLevel, "log-level", app.DefaultLogLevel, "log level: debug, info, warn, error (env: QOVIRA_LOG_LEVEL)")
+	root.PersistentFlags().StringVar(&logFormat, "log-format", app.DefaultLogFormat, "log format: json, text (env: QOVIRA_LOG_FORMAT)")
 
-	root.AddCommand(newServeCmd(&logLevel, &logFormat))
-	root.AddCommand(newHealthcheckCmd())
+	root.AddCommand(newServeCmd(&addr, &logLevel, &logFormat))
+	root.AddCommand(newHealthcheckCmd(&addr))
 
 	return root
-}
-
-// newServeCmd returns the `qovira serve` subcommand.
-func newServeCmd(logLevel, logFormat *string) *cobra.Command {
-	return &cobra.Command{
-		Use:   "serve",
-		Short: "Start the HTTP server",
-		Long:  "Start the Qovira HTTP server and block until a shutdown signal is received.",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			var overrides app.FlagOverrides
-
-			// cmd.Flags() exposes the inherited persistent flags once cobra has parsed them, so the
-			// parent command is not needed here to read whether they were explicitly set.
-			if cmd.Flags().Changed("log-level") {
-				overrides.LogLevel = logLevel
-			}
-
-			if cmd.Flags().Changed("log-format") {
-				overrides.LogFormat = logFormat
-			}
-
-			cfg, err := app.LoadConfig(overrides)
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
-			}
-
-			return app.Run(cmd.Context(), cfg)
-		},
-	}
 }
