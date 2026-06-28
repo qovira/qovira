@@ -83,10 +83,10 @@ COPY --from=build /qovira /qovira
 # Numeric UID:GID — verifiably non-root; matches the distroless nonroot user.
 USER 65532:65532
 
-EXPOSE 8080
+EXPOSE 18888
 
 # Self-probe via the built-in healthcheck subcommand.
-# QOVIRA_ADDR defaults to :8080; the healthcheck command rewrites the empty host
+# QOVIRA_ADDR defaults to :18888; the healthcheck command rewrites the empty host
 # to 127.0.0.1, so this works with no extra env vars.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD ["/qovira", "healthcheck"]

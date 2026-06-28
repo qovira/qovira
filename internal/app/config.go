@@ -11,7 +11,7 @@ import (
 // Config holds the resolved application configuration. Fields are populated by [LoadConfig] from environment
 // variables and optional flag overrides.
 type Config struct {
-	// Addr is the TCP address for the HTTP server to listen on (e.g. ":8080").
+	// Addr is the TCP address for the HTTP server to listen on (e.g. ":18888").
 	Addr string
 
 	// LogLevel is one of: debug, info, warn, error.
@@ -37,7 +37,7 @@ var (
 // overrides. The precedence order (highest wins) is: flag → env → built-in default.
 func LoadConfig(flags FlagOverrides) (Config, error) {
 	cfg := Config{
-		Addr:      getEnvOr("QOVIRA_ADDR", ":8080"),
+		Addr:      getEnvOr("QOVIRA_ADDR", ":18888"),
 		LogLevel:  getEnvOr("QOVIRA_LOG_LEVEL", "info"),
 		LogFormat: getEnvOr("QOVIRA_LOG_FORMAT", "json"),
 	}

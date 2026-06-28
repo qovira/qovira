@@ -132,12 +132,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker run -d -p 8080:8080 --name qovira-ci qovira:ci
+          docker run -d -p 18888:18888 --name qovira-ci qovira:ci
 
           # Poll /healthz until the server is up (up to 30 s, 1 s intervals).
           echo "Waiting for /healthz..."
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/healthz > /dev/null 2>&1; then
+            if curl -sf http://localhost:18888/healthz > /dev/null 2>&1; then
               echo "  ready after ${i}s"
               break
             fi
@@ -150,7 +150,7 @@ jobs:
           done
 
           # Assert /healthz → 200.
-          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz)
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:18888/healthz)
           if [ "$status" != "200" ]; then
             echo "FAIL: /healthz returned $status, want 200"
             exit 1
@@ -158,8 +158,8 @@ jobs:
           echo "PASS: /healthz → $status"
 
           # Assert / → 200 with a real SPA marker (_app/ reference in body).
-          body=$(curl -sf http://localhost:8080/)
-          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/)
+          body=$(curl -sf http://localhost:18888/)
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:18888/)
           if [ "$status" != "200" ]; then
             echo "FAIL: / returned $status, want 200"
             exit 1

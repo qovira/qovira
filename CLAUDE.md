@@ -17,6 +17,7 @@ The `Makefile` is the build authority other flows read:
 - `make build` — build the web SPA, then compile the embedded binary (`-tags embed_spa`) to `./qovira`.
 - `make build-web` — install web deps (frozen lockfile) and build the SvelteKit SPA into `internal/httpx/webdist/`.
 - `make build-go` — fast `go build ./...` stub compile (no SPA needed; uses the no-embed placeholder).
+- `make run` — `make build` then serve the embedded binary locally with dev env (`QOVIRA_ADDR=:18888`, debug-level text logs); blocks until Ctrl-C.
 - `make lint` — `golangci-lint run` plus `pnpm -C web lint`.
 - `make test` — `go test -race ./...` plus `pnpm -C web test`.
 - `make docker` — build the multi-stage distroless image.

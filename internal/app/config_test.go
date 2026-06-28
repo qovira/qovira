@@ -19,8 +19,8 @@ func TestLoadConfig_Defaults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.Addr != ":8080" {
-		t.Errorf("Addr: want :8080, got %q", cfg.Addr)
+	if cfg.Addr != ":18888" {
+		t.Errorf("Addr: want :18888, got %q", cfg.Addr)
 	}
 
 	if cfg.LogLevel != "info" {
