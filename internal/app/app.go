@@ -1,3 +1,5 @@
+// Package app is the composition root for the Qovira application server. It reads env config, builds the slog
+// logger, wires the HTTP server, and owns the run / graceful-shutdown lifecycle.
 package app
 
 import (

@@ -79,6 +79,21 @@ func TestLoadConfig_FlagOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_AddrFlagOverridesEnv(t *testing.T) {
+	t.Setenv("QOVIRA_ADDR", ":9000")
+
+	addr := ":7777"
+	cfg, err := app.LoadConfig(app.FlagOverrides{Addr: &addr})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// flag wins over env
+	if cfg.Addr != ":7777" {
+		t.Errorf("Addr: want :7777, got %q", cfg.Addr)
+	}
+}
+
 func TestLoadConfig_InvalidLogLevel(t *testing.T) {
 	t.Setenv("QOVIRA_LOG_LEVEL", "trace")
 	t.Setenv("QOVIRA_LOG_FORMAT", "")
