@@ -39,6 +39,75 @@ const (
 	shutdownGrace = 15 * time.Second
 )
 
+// HubShutdowner is the interface consumed by GracefulShutdown for the event hub drain step. It is satisfied
+// by *events.Hub; extracted here so graceful-shutdown logic can be unit-tested with a fake.
+type HubShutdowner interface {
+	Shutdown(ctx context.Context) error
+}
+
+// ServerShutdowner is the interface consumed by GracefulShutdown for the HTTP server drain and force-close
+// steps. It is satisfied by *http.Server; extracted here so graceful-shutdown logic can be unit-tested with
+// a fake.
+type ServerShutdowner interface {
+	Shutdown(ctx context.Context) error
+	Close() error
+}
+
+// GracefulShutdown drains the hub and then the HTTP server in two sequential steps, each with its own
+// independent timeout budget (derived from ctx via context.WithoutCancel so that a cancelled root ctx does
+// not poison the budgets). The steps are intentionally ordered hub-first, server-second — see the inline
+// comment inside Run for the rationale.
+//
+// Hub timeout: if hub.Shutdown exhausts its budget the error is logged at Warn and we proceed — the server
+// shutdown step will force-close any SSE connections that did not drain in time.
+//
+// Server timeout: if srv.Shutdown exhausts its budget, srv.Close() is called to force-close all remaining
+// open connections, and GracefulShutdown returns nil. A deadline/timeout on the server side means the
+// connections are now force-closed — that is the documented fallback, not a Run-level failure. Only a
+// non-timeout error from srv.Shutdown is surfaced to the caller.
+func GracefulShutdown(ctx context.Context, hub HubShutdowner, srv ServerShutdowner, grace time.Duration) error {
+	// Each step gets its own fresh budget. context.WithoutCancel ensures a cancelled root ctx (i.e. the
+	// shutdown signal itself) does not immediately expire these derived contexts — only the per-step timeout
+	// governs them.
+	hubCtx, hubCancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
+	defer hubCancel()
+
+	if err := hub.Shutdown(hubCtx); err != nil {
+		// A partial drain is acceptable: srv.Close() below will force-close any connections that did not drain.
+		// Log at Warn so operators can see wedged clients, but do not treat it as a Run-level failure.
+		slog.Warn("hub shutdown did not fully drain within budget — will force-close remainder via srv.Close()",
+			"err", err,
+		)
+	}
+
+	// Give the HTTP server its own independent budget. srv.Shutdown asks active connections to finish their
+	// current requests and then returns; for SSE connections that the hub already drained this returns
+	// immediately. For any that did not drain (e.g. non-SSE long-polling), srv.Shutdown will wait up to
+	// grace; if it still times out, srv.Close() actually force-closes the connections.
+	srvCtx, srvCancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
+	defer srvCancel()
+
+	if err := srv.Shutdown(srvCtx); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			// The server-shutdown budget expired — force-close all remaining connections now. This is
+			// the correct fallback: net/http.Server.Shutdown does NOT interrupt active connections;
+			// only srv.Close() does. Log at Warn (not Error — this is an expected wedged-client scenario)
+			// and return nil so the caller (Run) does not treat a stuck client as a fatal error.
+			slog.Warn("srv.Shutdown timed out — force-closing remaining connections via srv.Close()")
+
+			if cerr := srv.Close(); cerr != nil {
+				slog.Warn("srv.Close() after shutdown timeout returned error", "err", cerr)
+			}
+
+			return nil
+		}
+
+		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+
+	return nil
+}
+
 // Run is the application entry point. It builds the logger, resolves SPA assets, wires the HTTP server, and
 // blocks until ctx is cancelled, at which point it drains in-flight requests via [http.Server.Shutdown].
 func Run(ctx context.Context, cfg Config) error {
@@ -163,20 +232,11 @@ func Run(ctx context.Context, cfg Config) error {
 	// and allowing net/http to mark the connection as idle. srv.Shutdown then finds no live connections and
 	// returns promptly.
 	//
-	// Error handling: hub.Shutdown returns ctx.Err() when a connection goroutine fails to drain within the
-	// budget. This is not a fatal Run error — srv.Shutdown will force-close any remaining wedged connections.
-	// We log the partial-drain at Warn and proceed, so a single wedged client does not mask a clean shutdown.
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
-	defer cancel()
-
-	if err := hub.Shutdown(shutdownCtx); err != nil {
-		logger.Warn("hub shutdown did not fully drain within budget — srv.Shutdown will force-close remainder",
-			"err", err,
-		)
-	}
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("graceful shutdown: %w", err)
+	// Each step gets its own independent timeout budget via GracefulShutdown — a hub drain timeout does NOT
+	// poison the server-shutdown budget, and a server-shutdown timeout triggers srv.Close() (which actually
+	// force-closes connections) rather than becoming a fatal Run error.
+	if err := GracefulShutdown(ctx, hub, srv, shutdownGrace); err != nil {
+		return err
 	}
 
 	// Surface a serve error that raced the shutdown signal: if Serve failed at the same instant ctx was
