@@ -1,12 +1,14 @@
 package events
 
-// handler_internal_test.go unit-tests the pure SSE frame serialization (formatFrame) in the events package
-// itself, where it can feed multi-line payloads the production path (compact json.Marshal) never produces —
-// proving the defensive data:-line split is correct rather than dead.
+// handler_internal_test.go unit-tests the pure SSE frame serialization (formatFrame) and the NewHandler
+// constructor in the events package itself. The internal package scope lets tests type-assert the returned
+// http.Handler to *handler and read unexported fields like .timing — impossible from the external _test package.
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFormatFrame_SingleLine(t *testing.T) {
@@ -56,5 +58,55 @@ func TestFormatFrame_MultiLineSplitsAcrossDataLines(t *testing.T) {
 		if !strings.HasPrefix(line, "data: ") {
 			t.Errorf("multi-line frame has a non-data: continuation line %q — split is broken", line)
 		}
+	}
+}
+
+// TestFormatFrame_NoNewlinePayload covers a single-segment payload that contains no newlines — the common
+// production case (compact json.Marshal output). Ensures the single-line path emits exactly one data: line and
+// no spurious blank data: lines from an off-by-one in the split logic.
+func TestFormatFrame_NoNewlinePayload(t *testing.T) {
+	t.Parallel()
+
+	got := string(formatFrame("system.ping", []byte(`{"time":"2026-06-30T00:00:00Z"}`)))
+	want := "event: system.ping\n" +
+		"data: {\"time\":\"2026-06-30T00:00:00Z\"}\n" +
+		"\n"
+
+	if got != want {
+		t.Errorf("formatFrame no-newline payload:\n got %q\nwant %q", got, want)
+	}
+}
+
+// TestNewHandler_InvalidTimingsFallsBackToDefault verifies that NewHandler rejects a Timings where
+// PingInterval >= WriteDeadline and falls back to DefaultTimings wholesale, leaving a valid Timings
+// caller's values unchanged.
+func TestNewHandler_InvalidTimingsFallsBackToDefault(t *testing.T) {
+	t.Parallel()
+
+	hub := New(DefaultBufferSize)
+	log := slog.Default()
+
+	// (a) Invalid: PingInterval (30 s) >= WriteDeadline (15 s) — violates the invariant.
+	bad := Timings{
+		PingInterval:  30 * time.Second,
+		WriteDeadline: 15 * time.Second,
+		RetryHint:     3 * time.Second,
+	}
+	h := NewHandler(hub, log, bad).(*handler)
+
+	if h.timing != DefaultTimings {
+		t.Errorf("invalid Timings: expected DefaultTimings %+v, got %+v", DefaultTimings, h.timing)
+	}
+
+	// (b) Valid custom Timings must be preserved unchanged.
+	good := Timings{
+		PingInterval:  5 * time.Second,
+		WriteDeadline: 20 * time.Second,
+		RetryHint:     2 * time.Second,
+	}
+	h2 := NewHandler(hub, log, good).(*handler)
+
+	if h2.timing != good {
+		t.Errorf("valid Timings: expected %+v preserved, got %+v", good, h2.timing)
 	}
 }

@@ -1,12 +1,12 @@
 package events
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/qovira/qovira/internal/api/problem"
@@ -87,7 +87,21 @@ type handler struct {
 //   - Writes SSE headers (Content-Type, Cache-Control, X-Accel-Buffering) and the retry: directive.
 //   - Emits a system.ready frame carrying the connection id (from httpx.RequestID).
 //   - Runs a select loop with four cases: fan-out event, heartbeat ping, hub shutdown, client disconnect.
+//
+// If t violates the Timings invariant (any field non-positive, or PingInterval >= WriteDeadline), NewHandler
+// falls back to DefaultTimings and logs a Warn. This mirrors how Hub.New guards a non-positive bufferSize:
+// a silent misconfiguration must never corrupt a live stream.
 func NewHandler(hub *Hub, log *slog.Logger, t Timings) http.Handler {
+	if t.PingInterval <= 0 || t.WriteDeadline <= 0 || t.RetryHint <= 0 || t.PingInterval >= t.WriteDeadline {
+		log.Warn("SSE: invalid Timings (PingInterval must be >0 and < WriteDeadline) — using DefaultTimings",
+			"pingInterval", t.PingInterval,
+			"writeDeadline", t.WriteDeadline,
+			"retryHint", t.RetryHint,
+		)
+
+		t = DefaultTimings
+	}
+
 	return &handler{hub: hub, log: log, timing: t}
 }
 
@@ -175,6 +189,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// it is irrelevant under HTTP/2.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	// X-Accel-Buffering: no — deliberate exception to the house "no X--prefixed headers (RFC 6648)" rule.
+	// This is the de-facto nginx / reverse-proxy contract that disables response buffering for SSE; there
+	// is no standardized replacement header, so this exact name is required for the mechanism to work.
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
@@ -283,22 +300,30 @@ func (h *handler) writeFrame(w http.ResponseWriter, rc *http.ResponseController,
 // today, so for the system.* events the split yields one line — it is defensive framing that keeps the wire
 // correct if a payload ever carries embedded newlines (e.g. pre-formatted JSON from a future producer). No
 // id: field is emitted: the hub holds no history, so a Last-Event-ID would only be ignored.
+//
+// Implementation note: bytes.Buffer + bytes.SplitSeq avoids two redundant allocations present in the
+// strings.Builder path: the string(data) copy needed to feed strings.SplitSeq, and the []byte(b.String())
+// copy to convert the result. buf.Bytes() returns the underlying slice directly (no copy).
 func formatFrame(eventType string, data []byte) []byte {
-	var b strings.Builder
+	// Pre-size: "event: \n" + type + (len(data) + "data: \n" overhead) + "\n" terminator.
+	// This is a lower-bound estimate (multi-line payloads add more "data: \n" prefixes); bytes.Buffer
+	// will grow as needed, but for the common single-line case this avoids any reallocation.
+	var buf bytes.Buffer
+	buf.Grow(len("event: \n") + len(eventType) + len("data: \n") + len(data) + 1)
 
-	b.WriteString("event: ")
-	b.WriteString(eventType)
-	b.WriteByte('\n')
+	buf.WriteString("event: ")
+	buf.WriteString(eventType)
+	buf.WriteByte('\n')
 
-	for segment := range strings.SplitSeq(string(data), "\n") {
-		b.WriteString("data: ")
-		b.WriteString(segment)
-		b.WriteByte('\n')
+	for segment := range bytes.SplitSeq(data, []byte{'\n'}) {
+		buf.WriteString("data: ")
+		buf.Write(segment)
+		buf.WriteByte('\n')
 	}
 
-	b.WriteByte('\n') // blank line terminates the frame
+	buf.WriteByte('\n') // blank line terminates the frame
 
-	return []byte(b.String())
+	return buf.Bytes()
 }
 
 // supportsFlusher reports whether rw (or an http.ResponseWriter reached via Unwrap) implements
