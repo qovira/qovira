@@ -63,6 +63,13 @@ type pingPayload struct {
 	Time string `json:"time"`
 }
 
+// shutdownPayload is the data field of a system.shutdown SSE frame. RetryMs carries the reconnect hint
+// in milliseconds, mirroring the "retry:" directive sent on connect, so the client's EventSource can
+// schedule its reconnection attempt correctly even if it has already consumed the initial retry: directive.
+type shutdownPayload struct {
+	RetryMs int64 `json:"retryMs"`
+}
+
 // handler is the http.Handler that drives one SSE connection.
 type handler struct {
 	hub    *Hub
@@ -78,7 +85,7 @@ type handler struct {
 //     it writes a 500 problem+json response before any streaming starts.
 //   - Writes SSE headers (Content-Type, Cache-Control, X-Accel-Buffering) and the retry: directive.
 //   - Emits a system.ready frame carrying the connection id (from httpx.RequestID).
-//   - Runs a select loop with three cases: fan-out event, heartbeat ping, client disconnect.
+//   - Runs a select loop with four cases: fan-out event, heartbeat ping, hub shutdown, client disconnect.
 func NewHandler(hub *Hub, log *slog.Logger, t Timings) http.Handler {
 	return &handler{hub: hub, log: log, timing: t}
 }
@@ -129,6 +136,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+
+	// Register this connection with the hub BEFORE subscribing and before entering the loop. If the hub is
+	// already shutting down (ConnStart returns false), skip the loop entirely — the client will get an EOF
+	// and its EventSource will reconnect using the retry: hint. We do NOT write a system.shutdown frame in
+	// this early-exit path: we haven't yet sent SSE headers (so the response is not yet committed), and the
+	// problem.json path above is the correct 5xx surface if we want to report something. A clean EOF is
+	// sufficient — the browser will reconnect immediately.
+	if !h.hub.ConnStart() {
+		h.log.DebugContext(r.Context(), "SSE: hub is shutting down — rejecting late connect", "requestId", connID)
+		return
+	}
+
+	defer h.hub.ConnDone()
 
 	// Subscribe before writing the SSE headers so we cannot miss an event published between the header
 	// write and the select loop start.
@@ -183,6 +203,20 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.log.DebugContext(r.Context(), "SSE: write ping frame failed", "requestId", connID, "err", err)
 				return
 			}
+
+		case <-h.hub.Done():
+			// Hub is shutting down. Write a system.shutdown frame directly to this connection's own
+			// writer — do NOT use hub.Publish, which would attempt to send into the subscriber map
+			// while the hub is tearing it down (a data race / use-after-teardown). Writing directly
+			// here is safe: this goroutine owns w and rc for the lifetime of ServeHTTP.
+			payload := shutdownPayload{RetryMs: h.timing.RetryHint.Milliseconds()}
+
+			if err := h.writeFrame(w, rc, Event{Type: "system.shutdown", Data: payload}); err != nil {
+				h.log.DebugContext(r.Context(), "SSE: write system.shutdown frame failed", "requestId", connID, "err", err)
+			}
+			// Return regardless of write error: the hub is shutting down and ConnDone (deferred above)
+			// will decrement the WaitGroup so Shutdown can proceed.
+			return
 
 		case <-r.Context().Done():
 			h.log.DebugContext(r.Context(), "SSE: client disconnected", "requestId", connID)

@@ -68,8 +68,8 @@ func Run(ctx context.Context, cfg Config) error {
 	// reach Huma before the SPA catch-all, so no manual prefix-stripping is needed.
 	api.New(mux, bi, logger)
 
-	// Construct the event hub. Issue 3 will reference hub in the graceful-shutdown block to drain open
-	// SSE connections before the process exits; hold it in a local for that future wiring point.
+	// Construct the event hub. hub.Shutdown is called in the graceful-shutdown block below (before
+	// srv.Shutdown) to drain all open SSE connections before the process exits.
 	hub := events.New(events.DefaultBufferSize)
 
 	// Mount the SSE endpoint. Go 1.22 most-specific-pattern routing sends GET /events to this handler
@@ -152,9 +152,28 @@ func Run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
-	// Graceful shutdown: give in-flight requests up to shutdownGrace to finish.
+	// Graceful shutdown: the order here is intentionally inverted — hub.Shutdown runs BEFORE srv.Shutdown.
+	//
+	// Why: an SSE connection is never "idle" from net/http's perspective (it has an open, streaming response
+	// body that never naturally completes). Calling srv.Shutdown first would block on every open SSE stream
+	// until the shutdownGrace budget expired, then hard-close them — a silent mid-stream drop for every user.
+	//
+	// By draining the hub first, every connection goroutine receives the hub.Done() signal, writes a
+	// system.shutdown frame (so the client knows to reconnect), and returns — releasing its http.ResponseWriter
+	// and allowing net/http to mark the connection as idle. srv.Shutdown then finds no live connections and
+	// returns promptly.
+	//
+	// Error handling: hub.Shutdown returns ctx.Err() when a connection goroutine fails to drain within the
+	// budget. This is not a fatal Run error — srv.Shutdown will force-close any remaining wedged connections.
+	// We log the partial-drain at Warn and proceed, so a single wedged client does not mask a clean shutdown.
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
 	defer cancel()
+
+	if err := hub.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("hub shutdown did not fully drain within budget — srv.Shutdown will force-close remainder",
+			"err", err,
+		)
+	}
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)

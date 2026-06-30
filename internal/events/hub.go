@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"sync"
 )
 
@@ -18,10 +19,25 @@ const DefaultBufferSize = 64
 // Design: the hub uses a mutex-guarded map with non-blocking sends rather than an owning goroutine. At
 // single-node household scale the owning-goroutine pattern adds lifecycle complexity without a concurrency
 // advantage.
+//
+// Lifecycle: Hub has a done channel and a WaitGroup that together coordinate graceful shutdown. The order in
+// app.Run is intentionally inverted: hub.Shutdown (which drains all SSE connections) runs BEFORE
+// srv.Shutdown. This means a new SSE connection can arrive between those two calls — while the listener is
+// still accepting — even after done is closed. ConnStart guards against a wg.Add(1) racing a concurrent
+// wg.Wait by serialising the done-check and the wg.Add under h.mu. See ConnStart for the full argument.
 type Hub struct {
 	mu         sync.RWMutex
 	bufferSize int
 	topics     map[string]map[*Subscription]struct{}
+
+	// done is closed (exactly once, guarded by once) when Shutdown is called. Every connection's select
+	// loop receives on h.Done() to detect shutdown and emit system.shutdown before returning.
+	done chan struct{}
+	once sync.Once // guards close(done)
+
+	// wg tracks live connection goroutines. ConnStart calls wg.Add(1); ConnDone calls wg.Done().
+	// Shutdown calls wg.Wait() (bounded by ctx) after closing done.
+	wg sync.WaitGroup
 }
 
 // New constructs a Hub whose per-subscription channels are buffered to bufferSize. Production callers pass
@@ -37,6 +53,88 @@ func New(bufferSize int) *Hub {
 	return &Hub{
 		bufferSize: bufferSize,
 		topics:     make(map[string]map[*Subscription]struct{}),
+		done:       make(chan struct{}),
+	}
+}
+
+// Done returns the hub's shutdown channel. It is closed when Shutdown is called. Connection goroutines
+// select on this channel to detect shutdown and emit a system.shutdown frame before returning.
+func (h *Hub) Done() <-chan struct{} {
+	return h.done
+}
+
+// ConnStart registers a new live connection with the hub's WaitGroup. It returns true if the connection
+// was successfully registered, false if the hub is already shutting down (done is closed). The caller
+// MUST call ConnDone exactly once when the connection goroutine exits if and only if ConnStart returned true.
+//
+// Race-safety argument (the "sharp edge"):
+//
+// The order in app.Run is: hub.Shutdown → srv.Shutdown. Between those two calls the HTTP listener is still
+// accepting connections, so a new /events request can arrive after done is closed. sync.WaitGroup forbids a
+// wg.Add(1) that takes the counter from 0→1 from racing a concurrent wg.Wait — such a race is a data race
+// and can panic.
+//
+// We serialize the done-channel check and the wg.Add under h.mu (the hub's existing write lock). Shutdown
+// closes done under h.mu, then calls wg.Wait outside the lock. This gives a clean happens-before:
+//
+//   - If ConnStart takes h.mu BEFORE Shutdown closes done: it sees done open, calls wg.Add(1) (counter ≥ 1),
+//     returns true. When it later observes Done() closed in its select loop it calls ConnDone → wg.Done.
+//     Shutdown's wg.Wait sees the counter go to zero and returns normally.
+//   - If Shutdown closes done and releases h.mu BEFORE ConnStart takes it: ConnStart sees done closed, skips
+//     wg.Add, returns false. The caller must not register — no add after Wait.
+//   - Shutdown cannot call wg.Wait before ConnStart's wg.Add because: if a goroutine is about to call
+//     ConnStart and hasn't taken the lock yet when Shutdown closes done, that goroutine will see done closed
+//     once it takes the lock, skip the Add, and return false — so wg.Wait will never have a missing Done.
+func (h *Hub) ConnStart() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	select {
+	case <-h.done:
+		// Hub is shutting down. Do not add to WaitGroup — done is closed and wg.Wait may already be running.
+		return false
+	default:
+	}
+
+	h.wg.Add(1)
+
+	return true
+}
+
+// ConnDone signals to the hub that a connection goroutine has finished draining. The caller MUST call this
+// exactly once, and only if ConnStart returned true. It wraps wg.Done.
+func (h *Hub) ConnDone() {
+	h.wg.Done()
+}
+
+// Shutdown signals all connection goroutines to drain by closing the done channel, then waits for them to
+// finish, bounded by ctx. It returns nil when all connections drain within ctx's deadline, or ctx.Err() when
+// the deadline fires first (the remaining connections will be force-closed by the subsequent srv.Shutdown).
+//
+// Shutdown is idempotent: calling it more than once is safe and the second call returns promptly (the once
+// guard ensures done is closed at most once; wg.Wait returns immediately when the counter is already zero).
+func (h *Hub) Shutdown(ctx context.Context) error {
+	// Close done under the write-lock so ConnStart's lock-guarded check is fully serialized.
+	// After this point, any new ConnStart call will see done closed and return false.
+	h.once.Do(func() {
+		h.mu.Lock()
+		close(h.done)
+		h.mu.Unlock()
+	})
+
+	// Wait for all live connections to drain, bounded by ctx.
+	waitDone := make(chan struct{})
+
+	go func() {
+		h.wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
