@@ -1,0 +1,40 @@
+description: |
+  Qovira house OpenAPI ruleset — enforces three structural rules on every spec commit.
+  Run with: vacuum lint -r openapi-ruleset.yaml openapi.yaml
+rules:
+  # Rule 1: Kebab-case URL paths — /health and /project-members are valid; /Project_Members is not.
+  qovira-paths-kebab-case:
+    description: Path segments must use kebab-case (lowercase letters, digits, hyphens only).
+    severity: error
+    given: $.paths
+    then:
+      function: pathsKebabCase
+
+  # Rule 2: CamelCase schema property names — buildTime, requestId are valid; build_time is not.
+  # The $schema JSON Schema keyword starts with '$', which is not a letter, so the rule uses
+  # separator.char='$' with separator.allowLeading=true to exempt keys beginning with '$' (like $schema).
+  qovira-schema-properties-camel-case:
+    description: Schema property names must be camelCase ($schema is exempt — it is a JSON Schema keyword starting with $).
+    severity: error
+    given: "$.components.schemas[*].properties"
+    then:
+      function: casing
+      functionOptions:
+        type: camel
+        separator.char: "$"
+        separator.allowLeading: "true"
+
+  # Rule 3: Problem+json on error responses — every declared 'default' response must carry
+  # application/problem+json as its content type, per the house RFC 9457 error contract.
+  qovira-error-responses-problem-json:
+    description: Every declared default error response must carry application/problem+json content.
+    severity: error
+    given: "$.paths[*][*].responses.default"
+    then:
+      field: content
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          required:
+            - "application/problem+json"

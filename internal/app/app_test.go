@@ -173,7 +173,7 @@ func waitReady(t *testing.T, client *http.Client, url string) *http.Response {
 	return nil
 }
 
-func TestRun_HealthzReturns200(t *testing.T) {
+func TestRun_HealthReturns200WithJSON(t *testing.T) {
 	t.Parallel()
 
 	addr := freePort(t)
@@ -191,23 +191,50 @@ func TestRun_HealthzReturns200(t *testing.T) {
 	}()
 
 	client := &http.Client{Timeout: time.Second}
-	url := fmt.Sprintf("http://%s/healthz", addr)
+	healthURL := fmt.Sprintf("http://%s/api/v1/health", addr)
 
-	resp := waitReady(t, client, url)
+	// Wait for the server to be up — waitReady returns on the first successful HTTP response (any status).
+	// We then re-read the response properly below.
+	resp := waitReady(t, client, healthURL)
 	if resp == nil {
-		t.Fatalf("server did not become ready at %s", url)
+		t.Fatalf("server did not become ready at %s", healthURL)
 	}
 
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		t.Errorf("drain response body: %v", err)
+	// Drain and close the poll response.
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+
+	// Issue a fresh request to read the JSON body accurately.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
 	}
 
-	if err := resp.Body.Close(); err != nil {
-		t.Errorf("close response body: %v", err)
+	resp2, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/health: %v", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("GET /healthz: want 200, got %d", resp.StatusCode)
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp2.Body)
+		_ = resp2.Body.Close()
+	}()
+
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("GET /api/v1/health: want 200, got %d", resp2.StatusCode)
+	}
+
+	// Decode and assert the JSON payload carries status:"ok".
+	var payload struct {
+		Status string `json:"status"`
+	}
+
+	if err := json.NewDecoder(resp2.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode JSON body: %v", err)
+	}
+
+	if payload.Status != "ok" {
+		t.Errorf("health status: want %q, got %q", "ok", payload.Status)
 	}
 
 	// Cancel the context and assert Run returns nil within a tight deadline.
@@ -279,7 +306,7 @@ func TestRun_SLOGIsSetAsDefault(t *testing.T) {
 
 	// Poll until the server is up so we know Run has executed slog.SetDefault.
 	client := &http.Client{Timeout: time.Second}
-	url := fmt.Sprintf("http://%s/healthz", addr)
+	url := fmt.Sprintf("http://%s/api/v1/health", addr)
 
 	resp := waitReady(t, client, url)
 	if resp != nil {

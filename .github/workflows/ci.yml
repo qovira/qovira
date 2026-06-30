@@ -42,10 +42,42 @@ jobs:
       - name: go test -race
         run: go test -race ./...
 
-      - name: govulncheck
+      - name: OpenAPI spec drift
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          go generate ./...
+          git diff --exit-code openapi.yaml
+
+      # Download vacuum's prebuilt, checksum-verified release binary instead of `go install` — avoids
+      # recompiling vacuum and all its dependencies from source on every run.
+      - name: OpenAPI spec lint (vacuum)
+        env:
+          VACUUM_VERSION: "0.15.0"
+        run: |
+          set -euo pipefail
+          asset="vacuum_${VACUUM_VERSION}_linux_x86_64.tar.gz"
+          base="https://github.com/daveshanley/vacuum/releases/download/v${VACUUM_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL "${base}/${asset}" -o "${tmp}/${asset}"
+          curl -fsSL "${base}/checksums.txt" -o "${tmp}/checksums.txt"
+          ( cd "$tmp" && grep " ${asset}\$" checksums.txt | sha256sum -c - )
+          tar -xzf "${tmp}/${asset}" -C "$tmp" vacuum
+          "${tmp}/vacuum" lint -d --no-style --fail-severity error -r openapi-ruleset.yaml openapi.yaml
+
+      # govulncheck ships no prebuilt binaries (source-install only), so cache the compiled binary keyed on its
+      # pinned version. The vuln DB is fetched fresh from vuln.go.dev at run time, so a cached binary is never stale.
+      - name: Cache govulncheck binary
+        id: cache-govulncheck
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/go/bin/govulncheck
+          key: govulncheck-${{ runner.os }}-${{ runner.arch }}-v1.5.0
+
+      - name: Install govulncheck
+        if: steps.cache-govulncheck.outputs.cache-hit != 'true'
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.5.0
+
+      - name: govulncheck
+        run: govulncheck ./...
 
       - name: make build-go
         run: make build-go
@@ -101,15 +133,27 @@ jobs:
       # Blacksmith persists layers automatically; no type=gha cache needed.
       - uses: useblacksmith/setup-docker-builder@ab5c1da94f53f5cd75c1038092aa276dddfccbba # v1
 
+      # Capture the actual build time (UTC, RFC 3339) for the OCI created label and the binary's BuildTime —
+      # github.event.repository.updated_at is the repo's last metadata change, not when this image was built.
+      - name: Capture build timestamp
+        id: build_meta
+        run: echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
       # Build the multi-stage image natively for this arch and load it locally.
       # push: false + load: true works for single-platform per-leg builds.
       # No cache-from/cache-to: Blacksmith layer persistence handles caching.
+      # Pass the same build-args the OCI labels consume so the binary is stamped with build identity. The full
+      # github.sha goes to the OCI revision label; the binary's health Commit field shortens it in Go.
       - uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
         with:
           context: .
           push: false
           load: true
           tags: qovira:ci
+          build-args: |
+            QOVIRA_VERSION=${{ github.ref_name }}
+            QOVIRA_REVISION=${{ github.sha }}
+            QOVIRA_CREATED=${{ steps.build_meta.outputs.created }}
 
       - name: Smoke-test container
         run: |
@@ -117,28 +161,37 @@ jobs:
 
           docker run -d -p 18888:18888 --name qovira-ci qovira:ci
 
-          # Poll /healthz until the server is up (up to 30 s, 1 s intervals).
-          echo "Waiting for /healthz..."
+          # Poll /api/v1/health until the server is up (up to 30 s, 1 s intervals).
+          echo "Waiting for /api/v1/health..."
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:18888/healthz > /dev/null 2>&1; then
+            if curl -sf http://localhost:18888/api/v1/health > /dev/null 2>&1; then
               echo "  ready after ${i}s"
               break
             fi
             if [ "$i" -eq 30 ]; then
-              echo "  timed out waiting for /healthz"
+              echo "  timed out waiting for /api/v1/health"
               docker logs qovira-ci
               exit 1
             fi
             sleep 1
           done
 
-          # Assert /healthz → 200.
-          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:18888/healthz)
+          # Assert /api/v1/health → 200 with JSON body carrying status:"ok".
+          health_body=$(curl -sf http://localhost:18888/api/v1/health)
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:18888/api/v1/health)
           if [ "$status" != "200" ]; then
-            echo "FAIL: /healthz returned $status, want 200"
+            echo "FAIL: /api/v1/health returned $status, want 200"
             exit 1
           fi
-          echo "PASS: /healthz → $status"
+          echo "PASS: /api/v1/health → $status"
+
+          # Assert the JSON body carries status:"ok".
+          if ! echo "$health_body" | grep -q '"status":"ok"'; then
+            echo "FAIL: /api/v1/health body does not contain status:\"ok\""
+            echo "Body: $health_body"
+            exit 1
+          fi
+          echo "PASS: /api/v1/health body contains status:\"ok\""
 
           # Assert / → 200 with a real SPA marker (_app/ reference in body).
           body=$(curl -sf http://localhost:18888/)

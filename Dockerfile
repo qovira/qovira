@@ -32,6 +32,13 @@ RUN pnpm build
 # Tag + manifest-list digest; bump both together (Renovate/Dependabot handles this).
 FROM golang:1.26-trixie@sha256:76a29248dedcd75870e95cbd90cc8cb356db082404ac7d3a5803f276c3ba79c9 AS build
 
+# Build-identity args — passed from CI (and `make docker`) to stamp the binary via ldflags. These must be
+# declared in the build stage (not just the runtime stage) so the go build command can consume them. The
+# runtime stage re-declares them to populate the OCI labels, reading from the same --build-arg values.
+ARG QOVIRA_VERSION=""
+ARG QOVIRA_REVISION=""
+ARG QOVIRA_CREATED=""
+
 WORKDIR /app
 
 # Copy Go module manifests and download dependencies as a separate cached layer.
@@ -47,11 +54,17 @@ COPY --from=web /app/internal/httpx/webdist ./internal/httpx/webdist
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 
-# Build the binary with CGO_ENABLED=1 and the embed_spa build tag.
+# Build the binary with CGO_ENABLED=1, the embed_spa build tag, and the version ldflags stamped from the
+# build-args. -w -s strips DWARF/symbol tables to reduce binary size.
 # Cache mounts for the module cache and the build cache keep rebuilds fast.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -tags embed_spa -o /qovira ./cmd/qovira
+    CGO_ENABLED=1 go build -tags embed_spa \
+      -ldflags "-w -s \
+        -X github.com/qovira/qovira/internal/buildinfo.Version=${QOVIRA_VERSION} \
+        -X github.com/qovira/qovira/internal/buildinfo.Commit=${QOVIRA_REVISION} \
+        -X github.com/qovira/qovira/internal/buildinfo.BuildTime=${QOVIRA_CREATED}" \
+      -o /qovira ./cmd/qovira
 
 
 # ── runtime stage ────────────────────────────────────────────────────────────

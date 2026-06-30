@@ -24,12 +24,12 @@ const timeoutEnv = "QOVIRA_HEALTHCHECK_TIMEOUT"
 
 // Probe performs an HTTP GET against baseURL and returns nil if the response status is 200 OK, or a
 // descriptive error otherwise. baseURL is the scheme + host (e.g. "http://127.0.0.1:8080"); Probe appends
-// "/healthz" itself. timeout bounds the whole request.
+// "/api/v1/health" itself. timeout bounds the whole request.
 //
 // Probe is exported so tests can drive it directly against an httptest.Server without going through cobra,
 // mirroring the testability pattern of NewSPAHandler.
 func Probe(ctx context.Context, baseURL string, timeout time.Duration) error {
-	url := baseURL + "/healthz"
+	url := baseURL + "/api/v1/health"
 
 	client := &http.Client{Timeout: timeout}
 
@@ -101,15 +101,15 @@ func resolveTimeout(flagVal time.Duration, flagChanged bool, env string) (time.D
 
 // newHealthcheckCmd returns the `qovira healthcheck` subcommand. It resolves the target address from the same
 // config as `serve` (--addr / QOVIRA_ADDR) and the probe timeout from --timeout / QOVIRA_HEALTHCHECK_TIMEOUT,
-// probes /healthz in-process, and exits non-zero on any failure. No logic lives here — only config
+// probes /api/v1/health in-process, and exits non-zero on any failure. No logic lives here — only config
 // resolution, URL building, and delegation to Probe.
 func newHealthcheckCmd(addr *string) *cobra.Command {
 	var timeout time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "healthcheck",
-		Short: "Probe a running instance's /healthz endpoint",
-		Long: `Probe the /healthz endpoint of a running Qovira instance.
+		Short: "Probe a running instance's /api/v1/health endpoint",
+		Long: `Probe the /api/v1/health endpoint of a running Qovira instance.
 
 Exits 0 if the instance responds with HTTP 200, non-zero otherwise.
 The target address is resolved from --addr or QOVIRA_ADDR (same as 'serve').

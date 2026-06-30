@@ -16,7 +16,7 @@ import (
 // connection (not on the timeout itself).
 const testProbeTimeout = 5 * time.Second
 
-// TestProbe_200ReturnsNil verifies that a /healthz returning 200 maps to nil.
+// TestProbe_200ReturnsNil verifies that a /api/v1/health returning 200 maps to nil.
 func TestProbe_200ReturnsNil(t *testing.T) {
 	t.Parallel()
 
@@ -30,7 +30,7 @@ func TestProbe_200ReturnsNil(t *testing.T) {
 	}
 }
 
-// TestProbe_503ReturnsError verifies that a non-200 /healthz maps to an error.
+// TestProbe_503ReturnsError verifies that a non-200 /api/v1/health maps to an error.
 func TestProbe_503ReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -44,7 +44,7 @@ func TestProbe_503ReturnsError(t *testing.T) {
 	}
 }
 
-// TestProbe_UnreachableReturnsError verifies that a closed/unreachable server maps to an error.
+// TestProbe_UnreachableReturnsError verifies that a closed/unreachable server maps to an error for /api/v1/health.
 func TestProbe_UnreachableReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -60,8 +60,8 @@ func TestProbe_UnreachableReturnsError(t *testing.T) {
 	}
 }
 
-// TestProbe_CancelledContextReturnsError verifies Probe honors its context: a context cancelled before the call makes
-// the request fail rather than hang.
+// TestProbe_CancelledContextReturnsError verifies Probe honors its context for /api/v1/health: a context
+// cancelled before the call makes the request fail rather than hang.
 func TestProbe_CancelledContextReturnsError(t *testing.T) {
 	t.Parallel()
 
