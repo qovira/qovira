@@ -672,3 +672,82 @@ func TestHandler_WriteDeadlineRolling(t *testing.T) {
 			"stream likely died at WriteTimeout without rolling reset", wantPings, pingCount)
 	}
 }
+
+// ── AC 7: connection cap — 503 problem+json on over-limit connects ────────────
+
+// TestHandler_OverCapRejects503 verifies that when the hub is at its connection cap a second /events
+// connect receives:
+//   - HTTP 503
+//   - Content-Type: application/problem+json
+//   - a Retry-After header
+//   - no SSE bytes (no "event:" or "data:" lines) in the body
+//
+// The first connection is held open (its system.ready is consumed to confirm the loop started); the
+// second connection is the one that must be rejected.
+func TestHandler_OverCapRejects503(t *testing.T) {
+	t.Parallel()
+
+	hub := events.New(4)
+	hub.SetMaxConns(1) // cap at 1 so the second connect is immediately over-limit
+
+	tm := fastTimings()
+	srv := httptest.NewServer(newTestHandler(t, hub, tm))
+
+	t.Cleanup(srv.Close)
+
+	// Open the first connection and consume system.ready to confirm the handler loop is running.
+	_, br1 := openSSEStream(t, srv, 3*time.Second)
+
+	var gotReady bool
+
+	for !gotReady {
+		line, err := br1.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read while waiting for system.ready on conn1: %v", err)
+		}
+
+		if strings.TrimRight(line, "\r\n") == "event: system.ready" {
+			gotReady = true
+		}
+	}
+
+	// Drain past the system.ready frame terminator.
+	for {
+		line, err := br1.ReadString('\n')
+		if err != nil {
+			t.Fatalf("draining system.ready frame on conn1: %v", err)
+		}
+
+		if strings.TrimRight(line, "\r\n") == "" {
+			break
+		}
+	}
+
+	// Open the second connection — must be rejected with 503.
+	status, headers, br2 := openSSEStreamWithHeaders(t, srv, 3*time.Second)
+
+	if status != http.StatusServiceUnavailable {
+		t.Errorf("over-cap connect: want HTTP 503, got %d", status)
+	}
+
+	ct := headers.Get("Content-Type")
+	if !strings.Contains(ct, "application/problem+json") {
+		t.Errorf("over-cap connect: want Content-Type application/problem+json, got %q", ct)
+	}
+
+	if headers.Get("Retry-After") == "" {
+		t.Error("over-cap connect: want Retry-After header, got none")
+	}
+
+	// Read the full body and confirm no SSE bytes were written.
+	body, err := io.ReadAll(br2)
+	if err != nil {
+		t.Fatalf("read over-cap body: %v", err)
+	}
+
+	bodyStr := string(body)
+
+	if strings.Contains(bodyStr, "event:") || strings.Contains(bodyStr, "data:") {
+		t.Errorf("over-cap connect: must write no SSE bytes, got body: %q", bodyStr)
+	}
+}

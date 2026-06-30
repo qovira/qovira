@@ -13,6 +13,34 @@ import (
 // buffer for their deployment's expected connection count and event rate.
 const DefaultBufferSize = 64
 
+// DefaultMaxConnections is the deliberately generous coarse GLOBAL cap on concurrent SSE connections for
+// single-node household scale. It bounds goroutine, file-descriptor, and memory exhaustion from an
+// unauthenticated client without affecting legitimate usage patterns at the expected deployment size.
+//
+// Note: this cap is global — one attacker can fill it and starve everyone else. The per-IP fairness
+// mechanism that prevents that is deferred to the unit-9 config work.
+//
+// TODO(config): make configurable via the instance config model (unit 9), and consider a per-IP cap there.
+const DefaultMaxConnections = 256
+
+// connAdmission is the result of a connStart call. It distinguishes between the three possible outcomes
+// so the handler can respond appropriately to each without inspecting the hub's internal state.
+type connAdmission int
+
+const (
+	// connAdmitted means the connection was accepted and registered. The caller MUST call connDone
+	// exactly once when the connection goroutine exits.
+	connAdmitted connAdmission = iota
+
+	// connRejectedShuttingDown means the hub's done channel was already closed; the connection was not
+	// registered. The caller must NOT call connDone.
+	connRejectedShuttingDown
+
+	// connRejectedAtCapacity means the hub has reached maxConns; the connection was not registered.
+	// The caller must NOT call connDone.
+	connRejectedAtCapacity
+)
+
 // Hub fans events out to all subscribers registered on a topic. Topics are opaque keys; they will later map
 // to per-principal (per-user) channels once auth lands. Hub is safe for concurrent use.
 //
@@ -28,7 +56,12 @@ const DefaultBufferSize = 64
 type Hub struct {
 	mu         sync.RWMutex
 	bufferSize int
+	maxConns   int // maximum concurrent connections; enforced in connStart under h.mu
 	topics     map[string]map[*Subscription]struct{}
+
+	// liveConns is the count of currently admitted connections. Guarded by h.mu; incremented in
+	// connStart and decremented in connDone.
+	liveConns int
 
 	// done is closed (exactly once, guarded by once) when Shutdown is called. Every connection's select
 	// loop receives on h.Done() to detect shutdown and emit system.shutdown before returning.
@@ -52,6 +85,7 @@ func New(bufferSize int) *Hub {
 
 	return &Hub{
 		bufferSize: bufferSize,
+		maxConns:   DefaultMaxConnections,
 		topics:     make(map[string]map[*Subscription]struct{}),
 		done:       make(chan struct{}),
 	}
@@ -63,9 +97,13 @@ func (h *Hub) Done() <-chan struct{} {
 	return h.done
 }
 
-// connStart registers a new live connection with the hub's WaitGroup. It returns true if the connection
-// was successfully registered, false if the hub is already shutting down (done is closed). The caller
-// MUST call connDone exactly once when the connection goroutine exits if and only if connStart returned true.
+// connStart attempts to register a new live connection with the hub's WaitGroup. The caller MUST call
+// connDone exactly once when the connection goroutine exits if and only if connStart returned connAdmitted.
+//
+// Possible results:
+//   - connAdmitted:            connection registered; h.liveConns incremented; wg.Add(1) called.
+//   - connRejectedShuttingDown: done is closed; wg.Add was NOT called.
+//   - connRejectedAtCapacity:  h.liveConns >= h.maxConns; wg.Add was NOT called.
 //
 // Race-safety argument (the "sharp edge"):
 //
@@ -74,36 +112,48 @@ func (h *Hub) Done() <-chan struct{} {
 // wg.Add(1) that takes the counter from 0→1 from racing a concurrent wg.Wait — such a race is a data race
 // and can panic.
 //
-// We serialize the done-channel check and the wg.Add under h.mu (the hub's existing write lock). Shutdown
-// closes done under h.mu, then calls wg.Wait outside the lock. This gives a clean happens-before:
+// We serialize the done-channel check, the capacity check, and wg.Add under h.mu (the hub's existing write
+// lock). Shutdown closes done under h.mu, then calls wg.Wait outside the lock. This gives a clean
+// happens-before:
 //
-//   - If connStart takes h.mu BEFORE Shutdown closes done: it sees done open, calls wg.Add(1) (counter ≥ 1),
-//     returns true. When it later observes Done() closed in its select loop it calls connDone → wg.Done.
-//     Shutdown's wg.Wait sees the counter go to zero and returns normally.
+//   - If connStart takes h.mu BEFORE Shutdown closes done: it sees done open, checks capacity, calls
+//     wg.Add(1) (counter ≥ 1), returns connAdmitted. When it later observes Done() closed in its select
+//     loop it calls connDone → wg.Done. Shutdown's wg.Wait sees the counter go to zero and returns normally.
 //   - If Shutdown closes done and releases h.mu BEFORE connStart takes it: connStart sees done closed, skips
-//     wg.Add, returns false. The caller must not register — no add after Wait.
+//     wg.Add, returns connRejectedShuttingDown. The caller must not register — no add after Wait.
 //   - Shutdown cannot call wg.Wait before connStart's wg.Add because: if a goroutine is about to call
 //     connStart and hasn't taken the lock yet when Shutdown closes done, that goroutine will see done closed
-//     once it takes the lock, skip the Add, and return false — so wg.Wait will never have a missing Done.
-func (h *Hub) connStart() bool {
+//     once it takes the lock, skip the Add, and return connRejectedShuttingDown — so wg.Wait will never
+//     have a missing Done.
+func (h *Hub) connStart() connAdmission {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	select {
 	case <-h.done:
 		// Hub is shutting down. Do not add to WaitGroup — done is closed and wg.Wait may already be running.
-		return false
+		return connRejectedShuttingDown
 	default:
 	}
 
+	if h.liveConns >= h.maxConns {
+		return connRejectedAtCapacity
+	}
+
+	h.liveConns++
 	h.wg.Add(1)
 
-	return true
+	return connAdmitted
 }
 
 // connDone signals to the hub that a connection goroutine has finished draining. The caller MUST call this
-// exactly once, and only if connStart returned true. It wraps wg.Done.
+// exactly once, and only if connStart returned connAdmitted. It decrements liveConns under h.mu, then
+// calls wg.Done outside the lock.
 func (h *Hub) connDone() {
+	h.mu.Lock()
+	h.liveConns--
+	h.mu.Unlock()
+
 	h.wg.Done()
 }
 

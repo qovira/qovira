@@ -272,6 +272,45 @@ func TestHub_InjectableBufferSizeIsHonoured(t *testing.T) {
 	drainUntilClosed(sub) // channel must close; this must not block
 }
 
+// ── AC 6: connection cap ─────────────────────────────────────────────────────
+
+// TestHub_ConnectionCapRejectsAtCapacity verifies that ConnStart returns false when the hub has reached
+// maxConns, but returns true again once a slot is freed via ConnDone. The test also verifies that the
+// counter-based rejection is distinct from the shutting-down rejection (hub remains open throughout).
+//
+// Run under -race: the liveConns counter must be guarded correctly by h.mu.
+func TestHub_ConnectionCapRejectsAtCapacity(t *testing.T) {
+	t.Parallel()
+
+	h := events.New(4)
+	h.SetMaxConns(2)
+
+	// Two admissions must succeed (cap = 2).
+	if ok := h.ConnStart(); !ok {
+		t.Fatal("ConnStart #1: want true (admitted), got false")
+	}
+
+	if ok := h.ConnStart(); !ok {
+		t.Fatal("ConnStart #2: want true (admitted), got false")
+	}
+
+	// Third must be rejected — at capacity, NOT shutting down.
+	if ok := h.ConnStart(); ok {
+		t.Fatal("ConnStart #3: want false (at capacity), got true")
+	}
+
+	// Release one slot; next ConnStart must succeed.
+	h.ConnDone()
+
+	if ok := h.ConnStart(); !ok {
+		t.Fatal("ConnStart after ConnDone: want true (slot freed), got false")
+	}
+
+	// Clean up the two remaining open connections.
+	h.ConnDone()
+	h.ConnDone()
+}
+
 // ── AC 5: concurrent stress — race detector ──────────────────────────────────
 
 // TestHub_ConcurrentPublishSubscribeUnsubscribe is the race-detector stress test: many goroutines publish,

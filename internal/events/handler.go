@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -137,18 +138,33 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Register this connection with the hub BEFORE subscribing and before entering the loop. If the hub is
-	// already shutting down (connStart returns false), skip the loop entirely — the client will get an EOF
-	// and its EventSource will reconnect using the retry: hint. We do NOT write a system.shutdown frame in
-	// this early-exit path: we haven't yet sent SSE headers (so the response is not yet committed), and the
-	// problem.json path above is the correct 5xx surface if we want to report something. A clean EOF is
-	// sufficient — the browser will reconnect immediately.
-	if !h.hub.connStart() {
+	// Register this connection with the hub BEFORE subscribing and before entering the loop. Three outcomes:
+	//   - connAdmitted:             proceed into the stream loop.
+	//   - connRejectedShuttingDown: clean EOF, no body — browser reconnects via the retry: hint.
+	//   - connRejectedAtCapacity:   503 problem+json with Retry-After — too many concurrent streams.
+	//
+	// We do NOT write a system.shutdown frame on the shutting-down path: SSE headers have not yet been
+	// sent (response uncommitted), so a clean EOF is the correct signal. The browser will reconnect.
+	switch h.hub.connStart() {
+	case connAdmitted:
+		defer h.hub.connDone()
+
+	case connRejectedShuttingDown:
 		h.log.DebugContext(r.Context(), "SSE: hub is shutting down — rejecting late connect", "requestId", connID)
 		return
-	}
 
-	defer h.hub.connDone()
+	case connRejectedAtCapacity:
+		h.log.WarnContext(r.Context(), "SSE: hub at connection capacity — rejecting connect", "requestId", connID)
+
+		d := problem.From(http.StatusServiceUnavailable,
+			"Too many open event streams; the server is at capacity. Please retry shortly.")
+		d.RequestID = connID
+
+		w.Header().Set("Retry-After", strconv.Itoa(int(h.timing.RetryHint.Seconds())))
+		problem.WriteJSON(w, d)
+
+		return
+	}
 
 	// Subscribe before writing the SSE headers so we cannot miss an event published between the header
 	// write and the select loop start.
