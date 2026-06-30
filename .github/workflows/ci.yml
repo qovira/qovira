@@ -47,15 +47,37 @@ jobs:
           go generate ./...
           git diff --exit-code openapi.yaml
 
+      # Download vacuum's prebuilt, checksum-verified release binary instead of `go install` — avoids
+      # recompiling vacuum and all its dependencies from source on every run.
       - name: OpenAPI spec lint (vacuum)
+        env:
+          VACUUM_VERSION: "0.15.0"
         run: |
-          go install github.com/daveshanley/vacuum@v0.15.0
-          vacuum lint -d --no-style --fail-severity error -r openapi-ruleset.yaml openapi.yaml
+          set -euo pipefail
+          asset="vacuum_${VACUUM_VERSION}_linux_x86_64.tar.gz"
+          base="https://github.com/daveshanley/vacuum/releases/download/v${VACUUM_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL "${base}/${asset}" -o "${tmp}/${asset}"
+          curl -fsSL "${base}/checksums.txt" -o "${tmp}/checksums.txt"
+          ( cd "$tmp" && grep " ${asset}\$" checksums.txt | sha256sum -c - )
+          tar -xzf "${tmp}/${asset}" -C "$tmp" vacuum
+          "${tmp}/vacuum" lint -d --no-style --fail-severity error -r openapi-ruleset.yaml openapi.yaml
+
+      # govulncheck ships no prebuilt binaries (source-install only), so cache the compiled binary keyed on its
+      # pinned version. The vuln DB is fetched fresh from vuln.go.dev at run time, so a cached binary is never stale.
+      - name: Cache govulncheck binary
+        id: cache-govulncheck
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/go/bin/govulncheck
+          key: govulncheck-${{ runner.os }}-${{ runner.arch }}-v1.5.0
+
+      - name: Install govulncheck
+        if: steps.cache-govulncheck.outputs.cache-hit != 'true'
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.5.0
 
       - name: govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+        run: govulncheck ./...
 
       - name: make build-go
         run: make build-go
