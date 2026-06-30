@@ -12,3 +12,11 @@ func (h *Hub) SubscriberCount(topic string) int {
 
 	return len(h.topics[topic])
 }
+
+// ConnStart is a test-only shim that forwards to the unexported connStart so that external tests in
+// package events_test can exercise the WaitGroup lifecycle without the method appearing in the production API.
+func (h *Hub) ConnStart() bool { return h.connStart() }
+
+// ConnDone is a test-only shim that forwards to the unexported connDone so that external tests in
+// package events_test can exercise the WaitGroup lifecycle without the method appearing in the production API.
+func (h *Hub) ConnDone() { h.connDone() }

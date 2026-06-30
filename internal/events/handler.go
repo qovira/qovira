@@ -138,17 +138,17 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Register this connection with the hub BEFORE subscribing and before entering the loop. If the hub is
-	// already shutting down (ConnStart returns false), skip the loop entirely — the client will get an EOF
+	// already shutting down (connStart returns false), skip the loop entirely — the client will get an EOF
 	// and its EventSource will reconnect using the retry: hint. We do NOT write a system.shutdown frame in
 	// this early-exit path: we haven't yet sent SSE headers (so the response is not yet committed), and the
 	// problem.json path above is the correct 5xx surface if we want to report something. A clean EOF is
 	// sufficient — the browser will reconnect immediately.
-	if !h.hub.ConnStart() {
+	if !h.hub.connStart() {
 		h.log.DebugContext(r.Context(), "SSE: hub is shutting down — rejecting late connect", "requestId", connID)
 		return
 	}
 
-	defer h.hub.ConnDone()
+	defer h.hub.connDone()
 
 	// Subscribe before writing the SSE headers so we cannot miss an event published between the header
 	// write and the select loop start.
@@ -214,7 +214,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err := h.writeFrame(w, rc, Event{Type: "system.shutdown", Data: payload}); err != nil {
 				h.log.DebugContext(r.Context(), "SSE: write system.shutdown frame failed", "requestId", connID, "err", err)
 			}
-			// Return regardless of write error: the hub is shutting down and ConnDone (deferred above)
+			// Return regardless of write error: the hub is shutting down and connDone (deferred above)
 			// will decrement the WaitGroup so Shutdown can proceed.
 			return
 

@@ -23,8 +23,8 @@ const DefaultBufferSize = 64
 // Lifecycle: Hub has a done channel and a WaitGroup that together coordinate graceful shutdown. The order in
 // app.Run is intentionally inverted: hub.Shutdown (which drains all SSE connections) runs BEFORE
 // srv.Shutdown. This means a new SSE connection can arrive between those two calls — while the listener is
-// still accepting — even after done is closed. ConnStart guards against a wg.Add(1) racing a concurrent
-// wg.Wait by serialising the done-check and the wg.Add under h.mu. See ConnStart for the full argument.
+// still accepting — even after done is closed. connStart guards against a wg.Add(1) racing a concurrent
+// wg.Wait by serialising the done-check and the wg.Add under h.mu. See connStart for the full argument.
 type Hub struct {
 	mu         sync.RWMutex
 	bufferSize int
@@ -35,7 +35,7 @@ type Hub struct {
 	done chan struct{}
 	once sync.Once // guards close(done)
 
-	// wg tracks live connection goroutines. ConnStart calls wg.Add(1); ConnDone calls wg.Done().
+	// wg tracks live connection goroutines. connStart calls wg.Add(1); connDone calls wg.Done().
 	// Shutdown calls wg.Wait() (bounded by ctx) after closing done.
 	wg sync.WaitGroup
 }
@@ -63,9 +63,9 @@ func (h *Hub) Done() <-chan struct{} {
 	return h.done
 }
 
-// ConnStart registers a new live connection with the hub's WaitGroup. It returns true if the connection
+// connStart registers a new live connection with the hub's WaitGroup. It returns true if the connection
 // was successfully registered, false if the hub is already shutting down (done is closed). The caller
-// MUST call ConnDone exactly once when the connection goroutine exits if and only if ConnStart returned true.
+// MUST call connDone exactly once when the connection goroutine exits if and only if connStart returned true.
 //
 // Race-safety argument (the "sharp edge"):
 //
@@ -77,15 +77,15 @@ func (h *Hub) Done() <-chan struct{} {
 // We serialize the done-channel check and the wg.Add under h.mu (the hub's existing write lock). Shutdown
 // closes done under h.mu, then calls wg.Wait outside the lock. This gives a clean happens-before:
 //
-//   - If ConnStart takes h.mu BEFORE Shutdown closes done: it sees done open, calls wg.Add(1) (counter ≥ 1),
-//     returns true. When it later observes Done() closed in its select loop it calls ConnDone → wg.Done.
+//   - If connStart takes h.mu BEFORE Shutdown closes done: it sees done open, calls wg.Add(1) (counter ≥ 1),
+//     returns true. When it later observes Done() closed in its select loop it calls connDone → wg.Done.
 //     Shutdown's wg.Wait sees the counter go to zero and returns normally.
-//   - If Shutdown closes done and releases h.mu BEFORE ConnStart takes it: ConnStart sees done closed, skips
+//   - If Shutdown closes done and releases h.mu BEFORE connStart takes it: connStart sees done closed, skips
 //     wg.Add, returns false. The caller must not register — no add after Wait.
-//   - Shutdown cannot call wg.Wait before ConnStart's wg.Add because: if a goroutine is about to call
-//     ConnStart and hasn't taken the lock yet when Shutdown closes done, that goroutine will see done closed
+//   - Shutdown cannot call wg.Wait before connStart's wg.Add because: if a goroutine is about to call
+//     connStart and hasn't taken the lock yet when Shutdown closes done, that goroutine will see done closed
 //     once it takes the lock, skip the Add, and return false — so wg.Wait will never have a missing Done.
-func (h *Hub) ConnStart() bool {
+func (h *Hub) connStart() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -101,9 +101,9 @@ func (h *Hub) ConnStart() bool {
 	return true
 }
 
-// ConnDone signals to the hub that a connection goroutine has finished draining. The caller MUST call this
-// exactly once, and only if ConnStart returned true. It wraps wg.Done.
-func (h *Hub) ConnDone() {
+// connDone signals to the hub that a connection goroutine has finished draining. The caller MUST call this
+// exactly once, and only if connStart returned true. It wraps wg.Done.
+func (h *Hub) connDone() {
 	h.wg.Done()
 }
 
@@ -114,8 +114,8 @@ func (h *Hub) ConnDone() {
 // Shutdown is idempotent: calling it more than once is safe and the second call returns promptly (the once
 // guard ensures done is closed at most once; wg.Wait returns immediately when the counter is already zero).
 func (h *Hub) Shutdown(ctx context.Context) error {
-	// Close done under the write-lock so ConnStart's lock-guarded check is fully serialized.
-	// After this point, any new ConnStart call will see done closed and return false.
+	// Close done under the write-lock so connStart's lock-guarded check is fully serialized.
+	// After this point, any new connStart call will see done closed and return false.
 	h.once.Do(func() {
 		h.mu.Lock()
 		close(h.done)
