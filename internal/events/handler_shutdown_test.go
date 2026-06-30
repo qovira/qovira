@@ -72,8 +72,9 @@ func TestHandler_ShutdownFrameDelivered(t *testing.T) {
 		}
 	}
 
-	// Give the handler loop a moment to settle (so it is blocked in select, not in startup).
-	time.Sleep(20 * time.Millisecond)
+	// The system.ready read above provides the happens-before guarantee: the handler writes system.ready
+	// strictly after entering its select loop, so after draining the frame the handler is provably
+	// blocked in select and ready to receive the shutdown signal.
 
 	// Trigger shutdown.
 	shutdownCtx, cancel := makeShutdownCtx(t, 2*time.Second)

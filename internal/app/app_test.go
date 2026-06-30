@@ -157,18 +157,31 @@ func freePort(t *testing.T) string {
 	return addr
 }
 
-// waitReady polls url until it responds without error or the attempt budget is exhausted. Returns the last
-// response (may be nil).
+// waitReady polls url until it responds with a non-5xx status or the attempt budget is exhausted.
+// A >= 500 response is treated as not-yet-ready (transient startup error) and the poll continues.
+// Returns the last response that was deemed ready (may be nil if the server never became ready).
+// Bodies of discarded not-ready responses are drained and closed to avoid leaking connections.
 func waitReady(t *testing.T, client *http.Client, url string) *http.Response {
 	t.Helper()
 
 	for range 50 {
 		resp, err := client.Get(url) //nolint:noctx // test-only polling loop
-		if err == nil {
-			return resp
+		if err != nil {
+			time.Sleep(5 * time.Millisecond)
+			continue
 		}
 
-		time.Sleep(5 * time.Millisecond)
+		if resp.StatusCode >= 500 {
+			// Transient server-side error during startup — drain and discard, keep polling.
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+
+			time.Sleep(5 * time.Millisecond)
+
+			continue
+		}
+
+		return resp
 	}
 
 	return nil

@@ -270,9 +270,6 @@ func TestHandler_ConnectSSEHeaders(t *testing.T) {
 
 	hub := events.New(4)
 	tm := fastTimings()
-	srv := httptest.NewServer(newTestHandler(t, hub, tm))
-
-	t.Cleanup(srv.Close)
 
 	// Use the request-ID middleware so connectionId is set in context.
 	mux := http.NewServeMux()
@@ -396,8 +393,12 @@ func TestHandler_FanOutPublish(t *testing.T) {
 
 	_, br := openSSEStream(t, srv, 3*time.Second)
 
-	// Consume the system.ready frame + any ping before the event we publish.
-	// We'll publish and look for our specific event type.
+	// Consume the system.ready frame before publishing. openSSEStream returns only after the server has
+	// flushed the HTTP response headers; the handler writes system.ready (and flushes it) strictly AFTER
+	// hub.Subscribe, so reading the system.ready frame here provides a deterministic happens-before:
+	// the subscription is guaranteed to be registered by the time we call hub.Publish below.
+	readFrames(t, br, 1) // consumes system.ready
+
 	type nested struct {
 		Line1 string `json:"line1"`
 		Line2 string `json:"line2"`
@@ -406,8 +407,6 @@ func TestHandler_FanOutPublish(t *testing.T) {
 	payload := nested{Line1: "hello", Line2: "world"}
 	publishedEvt := events.Event{Type: "test.event", Data: payload}
 
-	// Publish after a brief moment so the handler loop is running.
-	time.Sleep(10 * time.Millisecond)
 	hub.Publish(events.BroadcastTopic, publishedEvt)
 
 	// Read frames until we find our event type (skipping system.ready and system.ping).
