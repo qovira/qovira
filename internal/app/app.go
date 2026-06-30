@@ -148,14 +148,16 @@ func Run(ctx context.Context, cfg Config) error {
 	// All other paths — SPA handler with index.html fallback.
 	mux.Handle("/", httpx.NewSPAHandler(assets))
 
-	// TODO(security): wrap mux in a security-headers middleware (X-Content-Type-Options: nosniff at minimum;
-	// add CSP + frame-ancestors) before a real web client ships. While only static placeholder assets are
-	// served this is defense-in-depth, not yet exploitable.
+	// TODO(security): add CSP and X-Frame-Options / frame-ancestors before a real web client ships.
+	// X-Content-Type-Options: nosniff is now handled by NewSecurityHeadersMiddleware (outermost layer below).
 
 	// Compose the server-edge middleware chain. Layer order matters — each line wraps everything below it:
 	//
-	//   MaxBytesHandler — outermost body-size gate; pairs the 4 MiB Huma per-op cap with a server-edge
-	//                     backstop so bodies are rejected before any handler reads them.
+	//   SecurityHeaders — outermost: sets X-Content-Type-Options: nosniff (and, once wired, CSP/frame-ancestors)
+	//                     on every response — SPA assets, API JSON, SSE streams, recovery 500s, and CORS
+	//                     preflights — so no response ever escapes without the baseline security headers.
+	//   MaxBytesHandler — body-size gate; pairs the 4 MiB Huma per-op cap with a server-edge backstop so
+	//                     bodies are rejected before any handler reads them.
 	//   RequestID       — injects the req_… correlation token into context and sets the Request-Id header;
 	//                     must sit outside everything that reads the ID (access-log, recovery, error edge).
 	//   AccessLog       — emits one structured slog line per request; must be outside recovery so it
@@ -179,6 +181,9 @@ func Run(ctx context.Context, cfg Config) error {
 	// http.MaxBytesHandler is the server-edge body-size backstop, paired with the 4 MiB Huma per-op cap.
 	// It ensures oversized bodies are rejected before any handler reads them, not just per-operation.
 	handler = http.MaxBytesHandler(handler, httpx.MaxBodyBytes)
+	// NewSecurityHeadersMiddleware is the outermost wrapper so X-Content-Type-Options: nosniff (and future
+	// CSP / frame-ancestors) is set on every response, including body-size rejections and CORS preflights.
+	handler = httpx.NewSecurityHeadersMiddleware(handler)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
