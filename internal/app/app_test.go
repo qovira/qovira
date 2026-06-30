@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -329,5 +330,100 @@ func TestRun_SLOGIsSetAsDefault(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("Run did not return within 5 s")
+	}
+}
+
+// ── AC 2: non-GET /events does not invoke the SSE handler ─────────────────────
+
+// TestRun_PostEventsDoesNotStartSSEStream tests the real mux built by app.Run (GET /events + SPA catch-all
+// at /) against a non-GET request. The invariant is that the SSE handler never starts streaming for a
+// non-GET method.
+//
+// Observed behavior (reported to orchestrator): POST /events returns 200 from the SPA catch-all
+// (index.html fallback), NOT 405. Go 1.22's automatic 405 fires only when a path-only pattern (e.g.
+// "/events") exists alongside a method-specific one; here "GET /events" is registered alongside "/" with
+// no method prefix, so the POST falls through to the "/" SPA handler.
+//
+// The SSE handler invariant holds: no SSE headers and no streaming body are produced for POST /events.
+func TestRun_PostEventsDoesNotStartSSEStream(t *testing.T) {
+	t.Parallel()
+
+	addr := freePort(t)
+	cfg := app.Config{Addr: addr, LogLevel: "error", LogFormat: "json"}
+
+	//nolint:testingcontext // need to cancel manually before test returns
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+
+	go func() {
+		runErr <- app.Run(ctx, cfg)
+	}()
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	healthURL := fmt.Sprintf("http://%s/api/v1/health", addr)
+
+	if resp := waitReady(t, client, healthURL); resp != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+
+	eventsURL := fmt.Sprintf("http://%s/events", addr)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, eventsURL, nil)
+	if err != nil {
+		t.Fatalf("build POST /events request: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /events: %v", err)
+	}
+
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	// The SSE handler must NOT have run: assert that Content-Type is NOT text/event-stream.
+	ct := resp.Header.Get("Content-Type")
+	if strings.Contains(ct, "text/event-stream") {
+		t.Errorf("POST /events: SSE handler must not run for non-GET — got Content-Type: %s", ct)
+	}
+
+	// Read the body with a deadline to detect any accidental streaming. A legitimate SPA or error
+	// response terminates immediately; an SSE stream would hang here.
+	bodyCh := make(chan string, 1)
+
+	go func() {
+		var sb strings.Builder
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			sb.WriteString(scanner.Text())
+			sb.WriteByte('\n')
+		}
+
+		bodyCh <- sb.String()
+	}()
+
+	select {
+	case body := <-bodyCh:
+		// Body was read to completion — not an SSE stream. Report status for the orchestrator record.
+		t.Logf("POST /events → status=%d Content-Type=%q body-len=%d (SPA fallthrough confirmed, not SSE)",
+			resp.StatusCode, ct, len(body))
+	case <-time.After(2 * time.Second):
+		t.Error("POST /events: response body did not terminate — possible accidental SSE streaming")
+	}
+
+	cancel()
+
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("Run returned non-nil error after cancel: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Run did not return within 5 s after context cancel")
 	}
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/qovira/qovira/internal/api"
 	"github.com/qovira/qovira/internal/buildinfo"
+	"github.com/qovira/qovira/internal/events"
 	"github.com/qovira/qovira/internal/httpx"
 )
 
@@ -66,6 +67,14 @@ func Run(ctx context.Context, cfg Config) error {
 	// Mount the Huma API under /api/v1. Go 1.22 most-specific-pattern routing ensures /api/v1/... requests
 	// reach Huma before the SPA catch-all, so no manual prefix-stripping is needed.
 	api.New(mux, bi, logger)
+
+	// Construct the event hub. Issue 3 will reference hub in the graceful-shutdown block to drain open
+	// SSE connections before the process exits; hold it in a local for that future wiring point.
+	hub := events.New(events.DefaultBufferSize)
+
+	// Mount the SSE endpoint. Go 1.22 most-specific-pattern routing sends GET /events to this handler
+	// and all other paths (including non-GET /events) to the SPA catch-all below.
+	mux.Handle("GET /events", events.NewHandler(hub, logger, events.DefaultTimings))
 
 	// All other paths — SPA handler with index.html fallback.
 	mux.Handle("/", httpx.NewSPAHandler(assets))
