@@ -45,7 +45,6 @@ func generateRequestID() string {
 	copy(result, "req_")
 
 	// Accumulate bits from the raw bytes and emit one Crockford character per 5 bits.
-	// We process in 5-character (25-bit) groups to keep the logic simple; 10 bytes = 16 characters exactly.
 	var acc uint64
 	var bits int
 	pos := 4

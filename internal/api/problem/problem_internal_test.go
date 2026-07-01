@@ -6,9 +6,7 @@ package problem
 
 import "testing"
 
-// ---------------------------------------------------------------------------
 // locationToPointer table — load-bearing logic for RFC 6901 pointer conversion.
-// ---------------------------------------------------------------------------
 
 func TestLocationToPointer(t *testing.T) {
 	t.Parallel()
@@ -46,10 +44,8 @@ func TestLocationToPointer(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // messageToCode table — classify Huma validation message text to house codes.
 // All message strings are taken directly from validation/messages.go v2.38.0.
-// ---------------------------------------------------------------------------
 
 func TestMessageToCode(t *testing.T) {
 	t.Parallel()

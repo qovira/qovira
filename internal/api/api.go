@@ -29,11 +29,9 @@ import (
 	"github.com/qovira/qovira/internal/httpx"
 )
 
-// maxBodyBytes is the default maximum request-body size ceiling applied to every registered operation. The
-// health endpoint has no body and ignores this field; future body-reading endpoints inherit the ceiling unless
-// they override MaxBodyBytes explicitly in their Operation. It references [httpx.MaxBodyBytes] — the single
-// server-wide ceiling, also enforced at the server edge by http.MaxBytesHandler — so the per-operation cap
-// and the edge backstop can never drift. A single endpoint can override downward or upward as its contract demands.
+// maxBodyBytes is the default request-body ceiling for every registered operation. It aliases
+// [httpx.MaxBodyBytes] so the per-operation cap and the server-edge backstop (http.MaxBytesHandler) stay in
+// lockstep. An operation may override MaxBodyBytes as its contract demands.
 const maxBodyBytes = httpx.MaxBodyBytes
 
 // New builds the Huma API mounted on the caller's mux under the /api/v1 prefix, registers all operations,
@@ -80,9 +78,8 @@ func requestIDTransformer(ctx huma.Context, _ string, v any) (any, error) {
 	return v, nil
 }
 
-// withMaxBodyBytes returns op with MaxBodyBytes set to maxBodyBytes when the caller did not specify one. This
-// is the house helper every file in this package should use instead of constructing huma.Operation directly —
-// it ensures the body-size ceiling is always applied without each registration callsite having to remember it.
+// withMaxBodyBytes returns op with MaxBodyBytes defaulted to maxBodyBytes when the caller left it unset, so
+// every operation inherits the body-size ceiling without each registration callsite repeating it.
 func withMaxBodyBytes(op huma.Operation) huma.Operation {
 	if op.MaxBodyBytes == 0 {
 		op.MaxBodyBytes = maxBodyBytes

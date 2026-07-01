@@ -1,8 +1,6 @@
 package events_test
 
 // handler_test.go exercises the SSE handler (NewHandler) end-to-end against a real httptest.Server.
-// All assertions follow the TDD contract: the test was written before the implementation and was
-// watched to fail for the RIGHT reason before any production code existed.
 //
 // Test structure:
 //   - AC 1  TestHandler_ConnectSSEHeaders     — SSE headers + retry: + system.ready frame on connect.
@@ -57,10 +55,6 @@ func readFrames(t *testing.T, r *bufio.Reader, n int) []sseFrame {
 
 		if err != nil && line == "" {
 			// EOF or deadline — return what we have.
-			if len(frames) > 0 {
-				return frames
-			}
-
 			return frames
 		}
 

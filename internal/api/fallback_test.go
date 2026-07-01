@@ -235,10 +235,6 @@ func TestTransformer_RequestIDInjection(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 func assertProblemField(t *testing.T, payload map[string]any, field, want string) {
 	t.Helper()
 	v, ok := payload[field]

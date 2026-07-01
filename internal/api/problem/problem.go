@@ -24,10 +24,6 @@ import (
 // https://qovira.ai/errors/{slug}, where {slug} is the kebab-case form of the error code.
 const typeBase = "https://qovira.ai/errors/"
 
-// ---------------------------------------------------------------------------
-// Structs
-// ---------------------------------------------------------------------------
-
 // Details is the house RFC 9457 problem+json body. It implements huma.StatusError (GetStatus, Error),
 // huma.ContentTypeFilter (ContentType), and can be marshaled to JSON with the required field set.
 //
@@ -55,12 +51,12 @@ type FieldError struct {
 	Detail string `json:"detail"`
 }
 
-// Error implements the error interface; it returns the Detail field.
+// Error implements the error interface.
 func (d *Details) Error() string {
 	return d.Detail
 }
 
-// GetStatus implements huma.StatusError; it returns the HTTP status code.
+// GetStatus implements huma.StatusError.
 func (d *Details) GetStatus() int {
 	return d.Status
 }
@@ -73,10 +69,6 @@ func (d *Details) ContentType(ct string) string {
 	}
 	return ct
 }
-
-// ---------------------------------------------------------------------------
-// Error registry — five framework codes
-// ---------------------------------------------------------------------------
 
 // kind holds the static fields for a single error code in the registry.
 type kind struct {
@@ -101,10 +93,6 @@ var registry = map[int]kind{
 		status: http.StatusUnsupportedMediaType},
 	http.StatusInternalServerError: {code: "internal_error", title: "Internal Error", status: http.StatusInternalServerError},
 }
-
-// ---------------------------------------------------------------------------
-// From — the central constructor
-// ---------------------------------------------------------------------------
 
 // From builds a *Details from the given HTTP status code and message. It looks up the registry for the
 // house code/title/type triple; unknown statuses get a sensible generic fallback (never panic). Each err
@@ -147,10 +135,6 @@ func From(status int, msg string, errs ...error) *Details {
 	return d
 }
 
-// ---------------------------------------------------------------------------
-// Constructor helpers
-// ---------------------------------------------------------------------------
-
 // NotFound builds a 404 *Details.
 func NotFound(detail string) *Details {
 	return From(http.StatusNotFound, detail)
@@ -180,10 +164,6 @@ func Internal(detail string) *Details {
 	return From(http.StatusInternalServerError, detail)
 }
 
-// ---------------------------------------------------------------------------
-// WriteJSON — response writer helper for the fallback handler
-// ---------------------------------------------------------------------------
-
 // WriteJSON writes d as an application/problem+json response to w. Callers must set any extra headers
 // (e.g. Allow for 405) on w BEFORE calling WriteJSON, because WriteHeader flushes the header map.
 func WriteJSON(w http.ResponseWriter, d *Details) {
@@ -194,10 +174,6 @@ func WriteJSON(w http.ResponseWriter, d *Details) {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(d)
 }
-
-// ---------------------------------------------------------------------------
-// locationToPointer — RFC 6901 JSON Pointer from a Huma location string.
-// ---------------------------------------------------------------------------
 
 // locationToPointer converts a Huma validation-error location string into an RFC 6901 JSON Pointer.
 //
@@ -228,10 +204,7 @@ func locationToPointer(location string) string {
 		return ""
 	}
 
-	// Convert the Huma dot+bracket path to an RFC 6901 pointer. Build token by token.
-	//
-	// Strategy: scan character by character accumulating tokens. Split on '.', '[', ']'.
-	// RFC 6901 escaping: replace '~' → '~0' and '/' → '~1' in each token.
+	// Convert the Huma dot+bracket path to an RFC 6901 pointer, one token at a time (split on '.', '[', ']').
 	var buf strings.Builder
 
 	var token strings.Builder
@@ -266,10 +239,6 @@ func locationToPointer(location string) string {
 	return buf.String()
 }
 
-// ---------------------------------------------------------------------------
-// messageToCode — classify Huma validation message text to house per-field codes.
-// ---------------------------------------------------------------------------
-
 // messageToCode maps a Huma validation error message to a house per-field error code. The patterns match
 // Huma's actual message strings from validation/messages.go v2.38.0.
 //
@@ -283,10 +252,6 @@ func locationToPointer(location string) string {
 //  7. "expected value to be one of" → enum
 //  8. "expected boolean"/"number"/"integer"/"string"/"array"/"object" → type
 //  9. default → invalid
-//
-// Format is checked BEFORE the pattern fallback to avoid the precedence bug where "expected string to be
-// either …" or "expected string to be regex: …" (both real Huma format messages) were misclassified as
-// pattern because they don't start with "RFC ".
 func messageToCode(message string) string {
 	switch {
 	case strings.HasPrefix(message, "expected required property"):
@@ -305,9 +270,6 @@ func messageToCode(message string) string {
 		return "min"
 	case strings.HasPrefix(message, "expected array length <="):
 		return "max"
-	// Format is checked before the generic "expected string to be" guard so that messages like
-	// "expected string to be either …" (MsgExpectedRFCIPAddr) and "expected string to be regex: …"
-	// (MsgExpectedRegexp) classify as format rather than pattern.
 	case isFormatMessage(message):
 		return "format"
 	case strings.HasPrefix(message, "expected string to match pattern"),
@@ -350,10 +312,6 @@ func isFormatMessage(msg string) bool {
 		strings.HasPrefix(rest, "base64") ||
 		strings.HasPrefix(rest, "regex:")
 }
-
-// ---------------------------------------------------------------------------
-// init — install the global huma.NewError override
-// ---------------------------------------------------------------------------
 
 // init sets huma.NewError to produce *Details so that every error Huma generates — validation (422),
 // unsupported media type (415), panics (500), and any future codes — emerges in the house problem+json

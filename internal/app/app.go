@@ -178,11 +178,7 @@ func Run(ctx context.Context, cfg Config) error {
 	handler = httpx.NewRecoveryMiddleware(logger, handler)
 	handler = httpx.NewAccessLogMiddleware(logger, handler)
 	handler = httpx.NewRequestIDMiddleware(handler)
-	// http.MaxBytesHandler is the server-edge body-size backstop, paired with the 4 MiB Huma per-op cap.
-	// It ensures oversized bodies are rejected before any handler reads them, not just per-operation.
 	handler = http.MaxBytesHandler(handler, httpx.MaxBodyBytes)
-	// NewSecurityHeadersMiddleware is the outermost wrapper so X-Content-Type-Options: nosniff (and future
-	// CSP / frame-ancestors) is set on every response, including body-size rejections and CORS preflights.
 	handler = httpx.NewSecurityHeadersMiddleware(handler)
 
 	srv := &http.Server{

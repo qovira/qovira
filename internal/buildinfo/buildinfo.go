@@ -42,17 +42,9 @@ type Info struct {
 	GoVersion string
 }
 
-// Resolve returns a fully-populated Info. When the ldflags vars are set they win (the Commit is normalized to
-// its short form). When they are absent (empty strings), the function reads runtime/debug.ReadBuildInfo to
-// fill Commit, BuildTime, and GoVersion from the embedded VCS data, and marks Version as "(devel)".
-//
-// Pass the package-level vars as the seed; this separation makes it testable without touching package globals:
-//
-//	bi := buildinfo.Resolve(buildinfo.Info{
-//	    Version:   buildinfo.Version,
-//	    Commit:    buildinfo.Commit,
-//	    BuildTime: buildinfo.BuildTime,
-//	})
+// Resolve returns a fully-populated Info, reading runtime/debug.ReadBuildInfo for whatever ldflags did not
+// stamp. Callers seed it with the package-level vars (passed in rather than read directly, so the fallback
+// rules in resolve stay testable without touching globals).
 func Resolve(seed Info) Info {
 	var (
 		settings  []debug.BuildSetting

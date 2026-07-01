@@ -24,9 +24,8 @@ import (
 // catch-all (returning 200 HTML). Registering this handler on the "/api/" subtree pattern and relying on
 // Go 1.22's most-specific-pattern routing ensures that exact Huma operation patterns win before this catch-all.
 //
-// Limitation: path-parameter routes (e.g. /items/{id}) would require parameter matching to correctly
-// distinguish "known path, wrong method" from "unknown path". No such templated routes exist yet; when they
-// are added, this handler should be extended to match them. A code comment marks the location.
+// Limitation: only exact-path routes are matched; templated path-param routes (e.g. /items/{id}) are not
+// distinguished yet. None exist today — the callsite comment marks where to extend when they are added.
 func newAPIFallback(ha huma.API) http.Handler {
 	// Build the path→method set once, captured in the closure, from ha.OpenAPI().Paths. Paths is keyed by
 	// the operation path WITHOUT the /api/v1 prefix (e.g. "/health"). We convert the key set to a map of
@@ -84,10 +83,8 @@ func newAPIFallback(ha huma.API) http.Handler {
 			if methods, known := opMethods[opPath]; known {
 				// The path exists but the requested method is not registered → 405.
 				//
-				// NOTE: when templated path-param routes (e.g. /items/{id}) are added, an exact string
-				// lookup in opMethods won't match them. At that point this block should be extended with
-				// a linear scan that matches template patterns against r.URL.Path. For now (only /health),
-				// exact match is correct and sufficient.
+				// NOTE: exact-match only. When templated routes (e.g. /items/{id}) are added, extend this
+				// with a linear scan matching patterns against r.URL.Path. For now (/health only) it suffices.
 				sorted := make([]string, 0, len(methods))
 				for m := range methods {
 					sorted = append(sorted, m)

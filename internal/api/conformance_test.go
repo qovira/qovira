@@ -26,10 +26,6 @@ import (
 	"github.com/pb33f/libopenapi/orderedmap"
 )
 
-// ----------------------------------------------------------------------------
-// Spec fixture
-// ----------------------------------------------------------------------------
-
 // fetchSpec fetches the YAML spec bytes from /api/v1/openapi.yaml on the given test server. Using the
 // served endpoint (rather than reading openapi.yaml from disk) simultaneously exercises the spec endpoint
 // and guarantees the validator is working against the same bytes the server will serve.
@@ -53,10 +49,6 @@ func fetchSpec(t *testing.T, srv *httptest.Server) []byte {
 
 	return b
 }
-
-// ----------------------------------------------------------------------------
-// TestConformance_OperationResponses
-// ----------------------------------------------------------------------------
 
 // TestConformance_OperationResponses boots the real API, enumerates every registered operation from the
 // parsed spec model (so new endpoints are covered for free), issues a live request for each, and validates
@@ -154,10 +146,6 @@ func TestConformance_OperationResponses(t *testing.T) {
 		})
 	}
 }
-
-// ----------------------------------------------------------------------------
-// TestConformance_ErrorBodySchema
-// ----------------------------------------------------------------------------
 
 // TestConformance_ErrorBodySchema triggers a 404 on an unknown /api/v1 path and validates the response
 // body against the Details component schema extracted from the spec. The fallback-generated 404 is not

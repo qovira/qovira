@@ -280,7 +280,6 @@ func (h *handler) writeFrame(w http.ResponseWriter, rc *http.ResponseController,
 		return fmt.Errorf("write frame: %w", err)
 	}
 
-	// Flush pushes the frame to the client immediately rather than waiting for the response buffer to fill.
 	if err := rc.Flush(); err != nil {
 		return fmt.Errorf("flush: %w", err)
 	}
@@ -294,20 +293,12 @@ func (h *handler) writeFrame(w http.ResponseWriter, rc *http.ResponseController,
 //	data: <segment>\n   (one data: line per newline-separated segment of the payload)
 //	\n
 //
-// The newline split is required by the SSE spec: a raw newline inside a data: value would otherwise be read
-// as a record/field boundary, corrupting the stream. The client's parser rejoins the data: lines with a
-// single newline, reconstructing the payload exactly. json.Marshal emits compact (single-line) output
-// today, so for the system.* events the split yields one line — it is defensive framing that keeps the wire
-// correct if a payload ever carries embedded newlines (e.g. pre-formatted JSON from a future producer). No
-// id: field is emitted: the hub holds no history, so a Last-Event-ID would only be ignored.
-//
-// Implementation note: bytes.Buffer + bytes.SplitSeq avoids two redundant allocations present in the
-// strings.Builder path: the string(data) copy needed to feed strings.SplitSeq, and the []byte(b.String())
-// copy to convert the result. buf.Bytes() returns the underlying slice directly (no copy).
+// The newline split is required by the SSE spec: a raw newline inside a data: value reads as a field boundary
+// and would corrupt the stream. json.Marshal is compact today so system.* payloads yield a single data: line;
+// the split is defensive framing for any future payload with embedded newlines. No id: field is emitted — the
+// hub keeps no history, so a Last-Event-ID would only be ignored.
 func formatFrame(eventType string, data []byte) []byte {
-	// Pre-size: "event: \n" + type + (len(data) + "data: \n" overhead) + "\n" terminator.
-	// This is a lower-bound estimate (multi-line payloads add more "data: \n" prefixes); bytes.Buffer
-	// will grow as needed, but for the common single-line case this avoids any reallocation.
+	// Pre-size for the common single-line frame; bytes.Buffer grows if a multi-line payload needs more.
 	var buf bytes.Buffer
 	buf.Grow(len("event: \n") + len(eventType) + len("data: \n") + len(data) + 1)
 
