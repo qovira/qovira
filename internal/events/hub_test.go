@@ -7,8 +7,6 @@ import (
 	"github.com/qovira/qovira/internal/events"
 )
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
 // collect drains up to n events from sub's channel without blocking; returns whatever arrived.
 func collect(sub *events.Subscription, n int) []events.Event {
 	out := make([]events.Event, 0, n)
@@ -40,8 +38,6 @@ func drainUntilClosed(sub *events.Subscription) []events.Event {
 
 	return out
 }
-
-// ── AC 1: fan-out and topic isolation ────────────────────────────────────────
 
 // TestHub_PublishReachesAllSubscribersOnTopic verifies that every active subscriber on the published topic
 // receives the event (fan-out), and that a subscriber on a different topic never receives it (isolation).
@@ -76,8 +72,6 @@ func TestHub_PublishReachesAllSubscribersOnTopic(t *testing.T) {
 		t.Errorf("subOther (topicB): want 0 events, got %d — topic isolation violated", len(gotOther))
 	}
 }
-
-// ── AC 2: slow-consumer drop ─────────────────────────────────────────────────
 
 // TestHub_SlowConsumerIsDroppedWithoutBlockingPublisher verifies that when a subscription's buffer is full
 // and a further Publish arrives, the hub:
@@ -135,8 +129,6 @@ func TestHub_PublisherDoesNotBlockOnFullBuffer(t *testing.T) {
 	h.Publish("t", evt) // fills the buffer — subscriber is now full
 	h.Publish("t", evt) // must drop, not block — test would time-out if it does
 }
-
-// ── AC 3: Unsubscribe ────────────────────────────────────────────────────────
 
 // TestHub_UnsubscribeRemovesSubscription verifies that after Unsubscribe, a subsequent Publish no longer
 // reaches that subscription.
@@ -211,8 +203,6 @@ func TestHub_ConcurrentDropAndUnsubscribeNoPanic(t *testing.T) {
 	}
 }
 
-// ── AC 4: defaultBufferSize constant and injectable buffer ───────────────────
-
 // TestHub_DefaultBufferSizeConstantExists verifies that events.DefaultBufferSize is exported and positive.
 // The production caller will pass it to New; the test-injected size in other tests proves the constructor
 // param is honoured.
@@ -272,8 +262,6 @@ func TestHub_InjectableBufferSizeIsHonoured(t *testing.T) {
 	drainUntilClosed(sub) // channel must close; this must not block
 }
 
-// ── AC 6: connection cap ─────────────────────────────────────────────────────
-
 // TestHub_ConnectionCapRejectsAtCapacity verifies that ConnStart returns false when the hub has reached
 // maxConns, but returns true again once a slot is freed via ConnDone. The test also verifies that the
 // counter-based rejection is distinct from the shutting-down rejection (hub remains open throughout).
@@ -310,8 +298,6 @@ func TestHub_ConnectionCapRejectsAtCapacity(t *testing.T) {
 	h.ConnDone()
 	h.ConnDone()
 }
-
-// ── AC 5: concurrent stress — race detector ──────────────────────────────────
 
 // TestHub_ConcurrentPublishSubscribeUnsubscribe is the race-detector stress test: many goroutines publish,
 // subscribe, and unsubscribe on the same topic concurrently. Any data race surfaces under -race.

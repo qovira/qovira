@@ -1,15 +1,7 @@
 package api_test
 
 // conformance_test.go — contract-conformance tests that boot the real API over httptest and validate live
-// responses against the committed OpenAPI 3.1 spec using libopenapi-validator.
-//
-// Design goals:
-//   - Generic operation loop: operations are enumerated from the spec model, not hardcoded, so new endpoints
-//     are covered for free.
-//   - Server-prefix awareness: the spec has servers: [{url: /api/v1}]; libopenapi-validator strips that
-//     prefix when matching path keys, so the live request must use the full /api/v1/... path.
-//   - Error-body contract: undocumented fallback paths (404) are validated against the Details component
-//     schema extracted from the spec via the schema_validation sub-package.
+// responses against the committed OpenAPI 3.1 spec (libopenapi-validator).
 
 import (
 	"encoding/json"

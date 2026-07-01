@@ -1,13 +1,6 @@
 package events_test
 
 // handler_test.go exercises the SSE handler (NewHandler) end-to-end against a real httptest.Server.
-//
-// Test structure:
-//   - AC 1  TestHandler_ConnectSSEHeaders     — SSE headers + retry: + system.ready frame on connect.
-//   - AC 3  TestHandler_FanOutPublish         — hub.Publish delivers a typed frame; multi-line JSON splits.
-//   - AC 4  TestHandler_Heartbeat             — system.ping arrives every (fast, injected) interval.
-//   - AC 5  TestHandler_ClientDisconnect      — context cancel cleans up; no goroutine leak; no later events.
-//   - AC 6  TestHandler_WriteDeadlineRolling  — rolling per-flush deadline outlasts server WriteTimeout.
 
 import (
 	"bufio"
@@ -25,8 +18,6 @@ import (
 	"github.com/qovira/qovira/internal/events"
 	"github.com/qovira/qovira/internal/httpx"
 )
-
-// ── SSE frame parser ─────────────────────────────────────────────────────────
 
 // sseFrame holds one parsed SSE frame: the event type (from "event:" lines) and the concatenated
 // payload (from "data:" lines). The SSE spec appends a newline between multiple data: lines, and the
@@ -94,8 +85,6 @@ func readFrames(t *testing.T, r *bufio.Reader, n int) []sseFrame {
 		}
 	}
 }
-
-// ── helpers ──────────────────────────────────────────────────────────────────
 
 // newTestHandler returns a NewHandler with discarded logging and the given Timings. Hub is also
 // returned so tests can publish events and inspect subscription state.
@@ -250,8 +239,6 @@ func openSSEStreamWithHeaders(t *testing.T, srv *httptest.Server, readDeadline t
 	return status, headers, br
 }
 
-// ── AC 1: connect headers + retry + system.ready ─────────────────────────────
-
 // TestHandler_ConnectSSEHeaders verifies that connecting to GET /events yields:
 //   - HTTP 200
 //   - Content-Type: text/event-stream
@@ -368,8 +355,6 @@ func assertHeaderEquals(t *testing.T, h http.Header, key, want string) {
 		t.Errorf("header %s: want %q, got %q", key, want, got)
 	}
 }
-
-// ── AC 3: hub.Publish fan-out + multi-line JSON + no id: field ───────────────
 
 // TestHandler_FanOutPublish verifies that hub.Publish(BroadcastTopic, evt) delivers a typed event: / data:
 // frame on the open connection end-to-end, that the JSON payload round-trips, and that no id: field appears
@@ -493,8 +478,6 @@ func TestHandler_FanOutPublish(t *testing.T) {
 	}
 }
 
-// ── AC 4: system.ping heartbeat ───────────────────────────────────────────────
-
 // TestHandler_Heartbeat verifies that a system.ping frame arrives within a small multiple of the
 // injected PingInterval. The test uses a fast interval (20 ms) so it completes in well under a
 // second without any real-time sleep.
@@ -553,8 +536,6 @@ func TestHandler_Heartbeat(t *testing.T) {
 	}
 }
 
-// ── AC 5: client disconnect ───────────────────────────────────────────────────
-
 // TestHandler_ClientDisconnect verifies that cancelling the request context (simulated by closing the
 // connection) causes the handler to return and a later hub.Publish no longer reaches the subscription.
 // We assert on the hub's subscription count via Publish behaviour: after the handler returns, a publish
@@ -604,8 +585,6 @@ func TestHandler_ClientDisconnect(t *testing.T) {
 		t.Errorf("after disconnect: want 0 subscriptions (Unsubscribe ran), got %d — subscription leaked", got)
 	}
 }
-
-// ── AC 6: rolling write-deadline outlasts server WriteTimeout ─────────────────
 
 // TestHandler_WriteDeadlineRolling verifies that the rolling per-flush SetWriteDeadline keeps a
 // healthy SSE connection alive past the server's WriteTimeout. The test uses httptest.NewUnstartedServer
@@ -665,8 +644,6 @@ func TestHandler_WriteDeadlineRolling(t *testing.T) {
 			"stream likely died at WriteTimeout without rolling reset", wantPings, pingCount)
 	}
 }
-
-// ── AC 7: connection cap — 503 problem+json on over-limit connects ────────────
 
 // TestHandler_OverCapRejects503 verifies that when the hub is at its connection cap a second /events
 // connect receives:

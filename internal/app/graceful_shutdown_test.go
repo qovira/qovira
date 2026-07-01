@@ -1,16 +1,6 @@
 package app_test
 
-// graceful_shutdown_test.go tests the gracefulShutdown helper in isolation using fakes.
-//
-// Test mapping:
-//   - TestGracefulShutdown_HubTimeoutAndSrvTimeoutReturnsNilAndCallsClose — the bug under fix:
-//     when hub.Shutdown exhausts its budget (DeadlineExceeded) AND srv.Shutdown hits its own
-//     budget (DeadlineExceeded), Run's shutdown logic must return nil — not promote the deadline
-//     error to a fatal failure — and must call srv.Close() to force-close wedged connections.
-//   - TestGracefulShutdown_HappyPathReturnNilNoClose — both sides drain cleanly; nil is returned
-//     and Close is never called.
-//   - TestGracefulShutdown_HubTimeoutSrvSucceedsReturnsNil — hub times out but srv drains within
-//     its fresh budget; still returns nil, no Close needed.
+// GracefulShutdown tested in isolation against fake hub/server shutdowners.
 
 import (
 	"context"

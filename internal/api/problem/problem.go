@@ -175,22 +175,14 @@ func WriteJSON(w http.ResponseWriter, d *Details) {
 	_ = enc.Encode(d)
 }
 
-// locationToPointer converts a Huma validation-error location string into an RFC 6901 JSON Pointer.
+// locationToPointer converts a Huma validation-error location ({prefix}.{rest}, prefix ∈ body/path/query/
+// header/cookie, rest using dot fields and [i] indices) into an RFC 6901 JSON Pointer. The full case table
+// lives in problem_test.go; the non-obvious bits:
 //
-// Huma location format:  {prefix}.{rest}   where prefix ∈ {body, path, query, header, cookie}
-// and rest uses dot-separated fields and bracket-enclosed array indices.
-//
-// Examples (all cases are covered by the test table in problem_test.go):
-//
-//	"body.items[0].dueDate"   → "/items/0/dueDate"
-//	"body.name"               → "/name"
-//	"body.friends[1].active"  → "/friends/1/active"
-//	"body.a[0][1]"            → "/a/0/1"
-//	"body"                    → ""          (whole-body error)
-//	"body.a~b"                → "/a~0b"     (RFC 6901: ~ escaped)
-//	"body.a/b"                → "/a~1b"     (RFC 6901: / escaped)
-//	"query.limit"             → "/limit"    (non-body: best-effort strip prefix)
-//	"path.thing-id"           → "/thing-id"
+//	"body.items[0].dueDate" → "/items/0/dueDate"   (fields and indices both become tokens)
+//	"body"                  → ""                     (whole-body error)
+//	"body.a~b"              → "/a~0b"                (RFC 6901: ~ and / escaped)
+//	"query.limit"           → "/limit"              (non-body: strip prefix best-effort)
 func locationToPointer(location string) string {
 	if location == "" {
 		return ""
@@ -239,19 +231,9 @@ func locationToPointer(location string) string {
 	return buf.String()
 }
 
-// messageToCode maps a Huma validation error message to a house per-field error code. The patterns match
-// Huma's actual message strings from validation/messages.go v2.38.0.
-//
-// Matching precedence (checked in order):
-//  1. "expected required property" → required
-//  2. "expected length >=" / "<=" → min_length / max_length
-//  3. "expected number >=" / ">" → min; "<=" / "<" → max
-//  4. "expected array length >=" / "<=" → min / max
-//  5. isFormatMessage → format (checked before the generic "expected string to be" pattern guard)
-//  6. "expected string to match pattern" / "expected string to be {non-format suffix}" → pattern
-//  7. "expected value to be one of" → enum
-//  8. "expected boolean"/"number"/"integer"/"string"/"array"/"object" → type
-//  9. default → invalid
+// messageToCode maps a Huma validation message (as emitted by validation/messages.go in v2.38.0) to a house
+// per-field code by prefix-matching. The switch order is load-bearing: isFormatMessage is checked before the
+// generic "expected string to be" pattern guard, and unmatched messages fall through to "invalid".
 func messageToCode(message string) string {
 	switch {
 	case strings.HasPrefix(message, "expected required property"):

@@ -1,12 +1,9 @@
 package problem
 
-// White-box tests for the unexported locationToPointer and messageToCode helpers. Being in the same package
-// lets us call the unexported functions directly, so the exported LocationToPointer / MessageToCode wrappers
-// that were in the previous iteration are not needed and have been removed.
+// White-box tests for the unexported locationToPointer and messageToCode helpers — same package, so they can
+// be called directly.
 
 import "testing"
-
-// locationToPointer table — load-bearing logic for RFC 6901 pointer conversion.
 
 func TestLocationToPointer(t *testing.T) {
 	t.Parallel()
@@ -44,8 +41,7 @@ func TestLocationToPointer(t *testing.T) {
 	}
 }
 
-// messageToCode table — classify Huma validation message text to house codes.
-// All message strings are taken directly from validation/messages.go v2.38.0.
+// Message strings are taken verbatim from Huma's validation/messages.go v2.38.0.
 
 func TestMessageToCode(t *testing.T) {
 	t.Parallel()

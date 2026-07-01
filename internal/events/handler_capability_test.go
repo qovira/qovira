@@ -23,8 +23,6 @@ import (
 	"time"
 )
 
-// ── Gap 1 fakes ─────────────────────────────────────────────────────────────
-
 // recordingWriter is a base http.ResponseWriter that captures status code and body for assertion. It
 // deliberately does NOT implement http.Flusher, FlushError, or SetWriteDeadline, so any probe via
 // http.ResponseController will fail unless the outer fake adds those methods.
@@ -93,8 +91,6 @@ type fakeWithDeadlineNoFlush struct {
 
 func (f *fakeWithDeadlineNoFlush) SetWriteDeadline(_ time.Time) error { return nil }
 
-// ── Gap 1: supportsFlusher unit tests ────────────────────────────────────────
-
 // flusherW implements http.Flusher directly.
 type flusherW struct{ recordingWriter }
 
@@ -159,8 +155,6 @@ func TestSupportsFlusher_UnwrapChainReachesInnerFlusher(t *testing.T) {
 		t.Error("supportsFlusher: must walk Unwrap chain and find inner http.Flusher")
 	}
 }
-
-// ── Gap 1: SetWriteDeadline unsupported → 500 problem+json ───────────────────
 
 // TestHandler_CapabilityProbe_NoSetWriteDeadline verifies that ServeHTTP writes a 500 application/problem+json
 // response and no SSE bytes when the underlying ResponseWriter does not support SetWriteDeadline (Fake A).
@@ -231,8 +225,6 @@ func TestHandler_CapabilityProbe_NoFlush(t *testing.T) {
 		t.Errorf("must write no SSE bytes before any streaming starts; body: %q", body)
 	}
 }
-
-// ── Gap 2: slow-consumer drop → handler !ok branch ───────────────────────────
 
 // blockingWriter is a ResponseWriter whose Write method signals on the writeStarted channel each time it is
 // entered, then blocks on the permit channel until the test sends a struct{}. It implements http.Flusher

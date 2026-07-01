@@ -1,14 +1,7 @@
 package app_test
 
-// app_shutdown_test.go tests AC 3: the inverted shutdown order (hub.Shutdown before srv.Shutdown)
-// ensures that app.Run returns promptly after context cancel even with a live SSE connection open.
-//
-// Without the inversion: srv.Shutdown would block on the never-idle SSE stream until the 15 s
-// shutdownGrace expired. With the inversion: hub.Shutdown signals the connection to drain first,
-// so srv.Shutdown finds no live connections and returns immediately.
-//
-// Test mapping to acceptance criteria:
-//   - TestRun_ShutdownDeliversShutdownFrameAndReturnsPromptly — AC 1 + AC 3
+// End-to-end test of the inverted shutdown order (hub before server): with a live SSE connection open,
+// app.Run must still return promptly after ctx cancel.
 
 import (
 	"bufio"
@@ -102,8 +95,6 @@ func TestRun_ShutdownDeliversShutdownFrameAndReturnsPromptly(t *testing.T) {
 		t.Fatal("Run did not return within 5 s after ctx cancel — likely blocked in srv.Shutdown on the open SSE stream (missing hub.Shutdown inversion)")
 	}
 }
-
-// ── helpers ──────────────────────────────────────────────────────────────────
 
 // openRawSSEConn opens a raw TCP connection to addr and issues GET /events, returning the connection
 // and a buffered reader positioned after the HTTP response headers. This mirrors openSSEStream from

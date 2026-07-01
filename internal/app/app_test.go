@@ -17,8 +17,6 @@ import (
 	"github.com/qovira/qovira/internal/app"
 )
 
-// ── buildLogger tests ────────────────────────────────────────────────────────
-
 func TestBuildLogger_JSONEmitsJSON(t *testing.T) {
 	t.Parallel()
 
@@ -136,8 +134,6 @@ func testConfig(level, format string) app.Config {
 		LogFormat: format,
 	}
 }
-
-// ── Run tests ────────────────────────────────────────────────────────────────
 
 // freePort asks the OS for an available TCP port then releases it.
 func freePort(t *testing.T) string {
@@ -346,18 +342,10 @@ func TestRun_SLOGIsSetAsDefault(t *testing.T) {
 	}
 }
 
-// ── AC 2: non-GET /events does not invoke the SSE handler ─────────────────────
-
-// TestRun_PostEventsDoesNotStartSSEStream tests the real mux built by app.Run (GET /events + SPA catch-all
-// at /) against a non-GET request. The invariant is that the SSE handler never starts streaming for a
-// non-GET method.
-//
-// Observed behavior (reported to orchestrator): POST /events returns 200 from the SPA catch-all
-// (index.html fallback), NOT 405. Go 1.22's automatic 405 fires only when a path-only pattern (e.g.
-// "/events") exists alongside a method-specific one; here "GET /events" is registered alongside "/" with
-// no method prefix, so the POST falls through to the "/" SPA handler.
-//
-// The SSE handler invariant holds: no SSE headers and no streaming body are produced for POST /events.
+// TestRun_PostEventsDoesNotStartSSEStream asserts a non-GET request never starts an SSE stream. POST /events
+// returns 200 from the SPA catch-all, not 405: Go's automatic 405 fires only when a method-less pattern like
+// "/events" is also registered, but here only "GET /events" and "/" exist, so the POST falls through to the
+// SPA handler. Either way, no SSE headers or streaming body are produced.
 func TestRun_PostEventsDoesNotStartSSEStream(t *testing.T) {
 	t.Parallel()
 
@@ -422,7 +410,7 @@ func TestRun_PostEventsDoesNotStartSSEStream(t *testing.T) {
 
 	select {
 	case body := <-bodyCh:
-		// Body was read to completion — not an SSE stream. Report status for the orchestrator record.
+		// Body read to completion — not an SSE stream.
 		t.Logf("POST /events → status=%d Content-Type=%q body-len=%d (SPA fallthrough confirmed, not SSE)",
 			resp.StatusCode, ct, len(body))
 	case <-time.After(2 * time.Second):

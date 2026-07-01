@@ -21,8 +21,8 @@ import (
 //
 // This is necessary because Huma over the humago stdlib-ServeMux adapter does NOT emit routing-level 404 or
 // 405 responses — the mux owns routing and unmatched /api/* paths would otherwise fall through to the SPA
-// catch-all (returning 200 HTML). Registering this handler on the "/api/" subtree pattern and relying on
-// Go 1.22's most-specific-pattern routing ensures that exact Huma operation patterns win before this catch-all.
+// catch-all (returning 200 HTML). Registering this handler on the "/api/" pattern lets most-specific-pattern
+// routing keep exact Huma operation patterns winning ahead of this catch-all.
 //
 // Limitation: only exact-path routes are matched; templated path-param routes (e.g. /items/{id}) are not
 // distinguished yet. None exist today — the callsite comment marks where to extend when they are added.

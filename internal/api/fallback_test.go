@@ -194,19 +194,14 @@ func TestFallback_NonV1_404(t *testing.T) {
 	}
 }
 
-// TestTransformer_RequestIDInjection tests the transformer in isolation by building a humago context with a
-// request carrying a requestId in its context, then calling api.New through a live server and verifying
-// the body's requestId matches the Request-Id header.
+// TestTransformer_RequestIDInjection verifies that an error body's requestId matches the Request-Id response
+// header, driven through a live server.
 func TestTransformer_RequestIDInjection(t *testing.T) {
 	t.Parallel()
 
-	// Make a real request through the test server so the transformer fires on an actual Huma error path.
-	// We trigger a 404 on an unknown /api/v1 path — the fallback sets requestId directly, so use a Huma
-	// error instead. POST /api/v1/health returns 405 via the fallback — also uses the fallback path.
-	// To test the transformer path (not the fallback), we need a Huma-generated error. Since 415 is
-	// only produced when a body operation receives wrong content-type (no body op exists yet), this test
-	// verifies the fallback correctly sets requestId matching the header — the transformer is separately
-	// verified via the 415/422 unit tests in the problem package.
+	// No Huma-generated error path exists yet (415 needs a body operation, none registered), so this
+	// exercises the fallback's requestId wiring; the transformer itself is covered by the problem package's
+	// 415/422 unit tests.
 	srv := newTestMux(t)
 	t.Cleanup(srv.Close)
 

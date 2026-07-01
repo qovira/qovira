@@ -1,12 +1,8 @@
 package events_test
 
-// handler_shutdown_test.go tests the system.shutdown frame delivery path end-to-end:
-// when Hub.Shutdown is called, every connected /events client must receive exactly one
-// system.shutdown frame (written by the connection's own goroutine, NOT via hub.Publish)
-// followed by a clean EOF.
-//
-// Test mapping to acceptance criteria:
-//   - TestHandler_ShutdownFrameDelivered — AC 1 + AC 4: one system.shutdown frame with retry hint, then EOF
+// handler_shutdown_test.go tests the system.shutdown frame delivery path end-to-end: when Hub.Shutdown is
+// called, every connected /events client receives exactly one system.shutdown frame (written by the
+// connection's own goroutine, not via hub.Publish) followed by a clean EOF.
 
 import (
 	"bufio"
@@ -248,7 +244,6 @@ func readFramesUntilEOF(t *testing.T, br *bufio.Reader, limit int) []sseFrame {
 	return frames
 }
 
-// makeShutdownCtx is a test helper that returns a context with the given timeout plus a cancel.
 func makeShutdownCtx(t *testing.T, timeout time.Duration) (context.Context, context.CancelFunc) {
 	t.Helper()
 

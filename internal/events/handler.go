@@ -41,8 +41,7 @@ type Timings struct {
 	RetryHint time.Duration
 }
 
-// DefaultTimings holds the production SSE handler timings. PingInterval is strictly below
-// WriteDeadline so a healthy connection always resets its per-write deadline before it can expire.
+// DefaultTimings holds the production SSE handler timings (satisfying the Timings invariant).
 //
 // TODO(config): wire from the instance config model (unit 9) so operators can tune heartbeat
 // and deadline values for their deployment without recompiling.
@@ -78,19 +77,11 @@ type handler struct {
 	timing Timings
 }
 
-// NewHandler returns an http.Handler that upgrades the connection to a server-sent events stream.
-// On connect it:
-//
-//   - Subscribes to BroadcastTopic; defers Unsubscribe for cleanup.
-//   - Obtains an http.ResponseController and verifies Flush + SetWriteDeadline are supported; if not,
-//     it writes a 500 problem+json response before any streaming starts.
-//   - Writes SSE headers (Content-Type, Cache-Control, X-Accel-Buffering) and the retry: directive.
-//   - Emits a system.ready frame carrying the connection id (from httpx.RequestID).
-//   - Runs a select loop with four cases: fan-out event, heartbeat ping, hub shutdown, client disconnect.
-//
-// If t violates the Timings invariant (any field non-positive, or PingInterval >= WriteDeadline), NewHandler
-// falls back to DefaultTimings and logs a Warn. This mirrors how Hub.New guards a non-positive bufferSize:
-// a silent misconfiguration must never corrupt a live stream.
+// NewHandler returns an http.Handler that streams server-sent events. On connect it subscribes to
+// BroadcastTopic, verifies the writer supports Flush + SetWriteDeadline (writing a 500 problem+json if not),
+// sends the SSE headers and a system.ready frame, then runs a select loop over four cases: fan-out event,
+// heartbeat ping, hub shutdown, client disconnect. If t violates the Timings invariant, it falls back to
+// DefaultTimings and logs a Warn — a silent misconfiguration must never corrupt a live stream.
 func NewHandler(hub *Hub, log *slog.Logger, t Timings) http.Handler {
 	if t.PingInterval <= 0 || t.WriteDeadline <= 0 || t.RetryHint <= 0 || t.PingInterval >= t.WriteDeadline {
 		log.Warn("SSE: invalid Timings (PingInterval must be >0 and < WriteDeadline) — using DefaultTimings",

@@ -1,16 +1,6 @@
 package events_test
 
-// hub_shutdown_test.go tests Hub.Shutdown, Hub.Done, connStart/connDone lifecycle, and the WaitGroup
-// race-safety invariant. Every test here was written BEFORE the implementation code (TDD: watch it fail
-// for the right reason first).
-//
-// Test mapping to acceptance criteria:
-//   - TestHub_ShutdownDrainsAllConnections       — AC 2: multi-connection drain within a deadline
-//   - TestHub_ShutdownWedgedClientBoundedByCtx   — AC 2: wedged client / ctx-deadline path
-//   - TestHub_ShutdownIdempotent                 — second Shutdown call must not double-close done
-//   - TestHub_ConnectAfterShutdownSafe           — AC 2 + sharp edge: connection arriving after Shutdown
-//   - TestHub_DoneChannelSignalsShutdown         — Hub.Done() closes when Shutdown is called
-//   - TestHub_ConcurrentConnectShutdownNoRace    — -race harness for Add-vs-Wait
+// Tests for Hub.Shutdown, Hub.Done, the connStart/connDone lifecycle, and the WaitGroup race-safety invariant.
 
 import (
 	"context"

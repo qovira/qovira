@@ -68,20 +68,12 @@ func (r *statusRecorder) written() int {
 	return r.status
 }
 
-// NewAccessLogMiddleware returns a middleware that emits one structured slog line per request. Each line
-// carries:
-//   - method — HTTP method
-//   - path   — URL path
-//   - status — HTTP status code as written by the inner handler
-//   - duration — wall-clock request duration as a float64 seconds value
-//   - requestId — the correlation token from context (set by [NewRequestIDMiddleware])
+// NewAccessLogMiddleware returns a middleware that emits one structured slog line per request (method, path,
+// status, duration in seconds, and the requestId from [NewRequestIDMiddleware]). It logs /api/v1/health at
+// Debug — container HEALTHCHECK polls must not flood stdout at Info — and every other path at Info.
 //
-// Logging level:
-//   - /api/v1/health → slog.LevelDebug (container HEALTHCHECK polls must not flood stdout at INFO)
-//   - all other paths → slog.LevelInfo
-//
-// This middleware must sit *outside* the recovery middleware in the chain so that it observes the 500
-// status that recovery writes after a panic (acceptance criterion AC3).
+// It must sit *outside* the recovery middleware so it observes the 500 status that recovery writes after a
+// panic (acceptance criterion AC3).
 func NewAccessLogMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

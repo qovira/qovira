@@ -21,21 +21,18 @@ import (
 
 // HTTP server and graceful-shutdown constants. Kept together so promotion to config is a single, localized change.
 const (
-	// serverReadHeaderTimeout limits the time allowed to read request headers. Setting this prevents the
-	// Slowloris class of slow-client attacks (gosec G112).
+	// serverReadHeaderTimeout bounds the header read — the guard against Slowloris slow-client attacks (gosec G112).
 	serverReadHeaderTimeout = 10 * time.Second
 
-	// serverReadTimeout limits the time allowed to read the full request body.
+	// serverReadTimeout bounds reading the whole request (headers + body), unlike serverReadHeaderTimeout.
 	serverReadTimeout = 30 * time.Second
 
-	// serverWriteTimeout limits the time allowed to write the full response.
 	serverWriteTimeout = 30 * time.Second
 
-	// serverIdleTimeout is the maximum time to wait for the next request when keep-alives are enabled.
+	// serverIdleTimeout bounds how long a kept-alive connection waits for its next request.
 	serverIdleTimeout = 120 * time.Second
 
-	// shutdownGrace is the maximum time given to in-flight requests to complete after the shutdown signal is
-	// received before the server forcibly closes.
+	// shutdownGrace is the per-step budget for draining in-flight work before force-close.
 	shutdownGrace = 15 * time.Second
 )
 
@@ -53,46 +50,30 @@ type ServerShutdowner interface {
 	Close() error
 }
 
-// GracefulShutdown drains the hub and then the HTTP server in two sequential steps, each with its own
-// independent timeout budget (derived from ctx via context.WithoutCancel so that a cancelled root ctx does
-// not poison the budgets). The steps are intentionally ordered hub-first, server-second — see the inline
-// comment inside Run for the rationale.
-//
-// Hub timeout: if hub.Shutdown exhausts its budget the error is logged at Warn and we proceed — the server
-// shutdown step will force-close any SSE connections that did not drain in time.
-//
-// Server timeout: if srv.Shutdown exhausts its budget, srv.Close() is called to force-close all remaining
-// open connections, and GracefulShutdown returns nil. A deadline/timeout on the server side means the
-// connections are now force-closed — that is the documented fallback, not a Run-level failure. Only a
-// non-timeout error from srv.Shutdown is surfaced to the caller.
+// GracefulShutdown drains the hub, then the HTTP server, each within its own grace budget (derived via
+// context.WithoutCancel so a cancelled root ctx does not pre-expire them). The hub-first order is required
+// by Run's shutdown block. A hub-drain timeout is logged and tolerated; a server-shutdown timeout triggers
+// srv.Close() and returns nil — force-closing stragglers is the documented fallback, not an error. Only a
+// non-timeout srv.Shutdown error is returned to the caller.
 func GracefulShutdown(ctx context.Context, hub HubShutdowner, srv ServerShutdowner, grace time.Duration) error {
-	// Each step gets its own fresh budget. context.WithoutCancel ensures a cancelled root ctx (i.e. the
-	// shutdown signal itself) does not immediately expire these derived contexts — only the per-step timeout
-	// governs them.
 	hubCtx, hubCancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
 	defer hubCancel()
 
 	if err := hub.Shutdown(hubCtx); err != nil {
-		// A partial drain is acceptable: srv.Close() below will force-close any connections that did not drain.
-		// Log at Warn so operators can see wedged clients, but do not treat it as a Run-level failure.
+		// A partial drain is fine — the server step below force-closes any stragglers. Warn, don't fail.
 		slog.Warn("hub shutdown did not fully drain within budget — will force-close remainder via srv.Close()",
 			"err", err,
 		)
 	}
 
-	// Give the HTTP server its own independent budget. srv.Shutdown asks active connections to finish their
-	// current requests and then returns; for SSE connections that the hub already drained this returns
-	// immediately. For any that did not drain (e.g. non-SSE long-polling), srv.Shutdown will wait up to
-	// grace; if it still times out, srv.Close() actually force-closes the connections.
+	// SSE connections the hub already drained return immediately; any straggler waits up to grace.
 	srvCtx, srvCancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
 	defer srvCancel()
 
 	if err := srv.Shutdown(srvCtx); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			// The server-shutdown budget expired — force-close all remaining connections now. This is
-			// the correct fallback: net/http.Server.Shutdown does NOT interrupt active connections;
-			// only srv.Close() does. Log at Warn (not Error — this is an expected wedged-client scenario)
-			// and return nil so the caller (Run) does not treat a stuck client as a fatal error.
+			// Shutdown does not interrupt active connections — only Close() does. Expected wedged-client
+			// case, so Warn (not Error) and return nil rather than failing Run.
 			slog.Warn("srv.Shutdown timed out — force-closing remaining connections via srv.Close()")
 
 			if cerr := srv.Close(); cerr != nil {
@@ -133,16 +114,14 @@ func Run(ctx context.Context, cfg Config) error {
 
 	mux := http.NewServeMux()
 
-	// Mount the Huma API under /api/v1. Go 1.22 most-specific-pattern routing ensures /api/v1/... requests
-	// reach Huma before the SPA catch-all, so no manual prefix-stripping is needed.
+	// Mount the Huma API under /api/v1. Most-specific-pattern routing keeps /api/v1/... ahead of the SPA
+	// catch-all, so no prefix-stripping is needed.
 	api.New(mux, bi, logger)
 
-	// Construct the event hub. hub.Shutdown is called in the graceful-shutdown block below (before
-	// srv.Shutdown) to drain all open SSE connections before the process exits.
+	// The hub is drained before srv.Shutdown (see the shutdown block below) so SSE streams close cleanly.
 	hub := events.New(events.DefaultBufferSize)
 
-	// Mount the SSE endpoint. Go 1.22 most-specific-pattern routing sends GET /events to this handler
-	// and all other paths (including non-GET /events) to the SPA catch-all below.
+	// SSE endpoint; non-GET /events and every other path fall through to the SPA catch-all below.
 	mux.Handle("GET /events", events.NewHandler(hub, logger, events.DefaultTimings))
 
 	// All other paths — SPA handler with index.html fallback.
@@ -151,21 +130,9 @@ func Run(ctx context.Context, cfg Config) error {
 	// TODO(security): add CSP and X-Frame-Options / frame-ancestors before a real web client ships.
 	// X-Content-Type-Options: nosniff is now handled by NewSecurityHeadersMiddleware (outermost layer below).
 
-	// Compose the server-edge middleware chain. Layer order matters — each line wraps everything below it:
-	//
-	//   SecurityHeaders — outermost: sets X-Content-Type-Options: nosniff (and, once wired, CSP/frame-ancestors)
-	//                     on every response — SPA assets, API JSON, SSE streams, recovery 500s, and CORS
-	//                     preflights — so no response ever escapes without the baseline security headers.
-	//   MaxBytesHandler — body-size gate; pairs the 4 MiB Huma per-op cap with a server-edge backstop so
-	//                     bodies are rejected before any handler reads them.
-	//   RequestID       — injects the req_… correlation token into context and sets the Request-Id header;
-	//                     must sit outside everything that reads the ID (access-log, recovery, error edge).
-	//   AccessLog       — emits one structured slog line per request; must be outside recovery so it
-	//                     observes the 500 that recovery writes after a panic (AC3).
-	//   Recovery        — catches panics from the non-API surface and returns a generic 500; must be inside
-	//                     the access-log so the logged status is the recovered one.
-	//   CORS            — answers OPTIONS preflights before routing; must be inside recovery so a bug in
-	//                     the CORS logic is caught rather than dropping the connection.
+	// Server-edge middleware chain, applied inner→outer: the last wrap is the outermost layer and runs
+	// first on each request. The order is load-bearing — each constructor's doc states its own placement
+	// constraint.
 
 	// TODO(config): wire CORSConfig.AllowedOrigins from the instance config model (unit 9) so operators
 	// can configure allowed origins for their deployment without recompiling.
@@ -222,20 +189,10 @@ func Run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
-	// Graceful shutdown: the order here is intentionally inverted — hub.Shutdown runs BEFORE srv.Shutdown.
-	//
-	// Why: an SSE connection is never "idle" from net/http's perspective (it has an open, streaming response
-	// body that never naturally completes). Calling srv.Shutdown first would block on every open SSE stream
-	// until the shutdownGrace budget expired, then hard-close them — a silent mid-stream drop for every user.
-	//
-	// By draining the hub first, every connection goroutine receives the hub.Done() signal, writes a
-	// system.shutdown frame (so the client knows to reconnect), and returns — releasing its http.ResponseWriter
-	// and allowing net/http to mark the connection as idle. srv.Shutdown then finds no live connections and
-	// returns promptly.
-	//
-	// Each step gets its own independent timeout budget via GracefulShutdown — a hub drain timeout does NOT
-	// poison the server-shutdown budget, and a server-shutdown timeout triggers srv.Close() (which actually
-	// force-closes connections) rather than becoming a fatal Run error.
+	// Drain the hub BEFORE srv.Shutdown. An SSE connection never looks "idle" to net/http (its body streams
+	// indefinitely), so a server-first shutdown would block on every open stream until the grace budget
+	// expired, then hard-close them mid-stream. Draining the hub first makes each connection emit a
+	// system.shutdown frame and return, so srv.Shutdown then finds no live connections and exits promptly.
 	if err := GracefulShutdown(ctx, hub, srv, shutdownGrace); err != nil {
 		return err
 	}

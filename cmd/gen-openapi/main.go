@@ -2,7 +2,7 @@
 // reusing the same api.New registration that the production server runs. Running it via go generate (see
 // internal/api/generate.go) keeps the artifact and the live server in perfect sync — there is no separate
 // schema-definition step. The spec version is pinned to specVersion (not the build's ldflags identity) so the
-// committed YAML is byte-identical across machines; see that constant for the rationale.
+// committed YAML is byte-identical across machines.
 //
 // Output path: the generator walks up from its working directory to find go.mod and writes openapi.yaml
 // beside it. An optional -out flag overrides the path (used by the tests to redirect to a temp file).
