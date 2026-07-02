@@ -7,8 +7,7 @@ import (
 	"regexp"
 )
 
-// requestIDContextKey is the unexported key used to store the request ID in context.Context. Using a named
-// type prevents key collisions with other packages that store values in context.
+// requestIDContextKey keys the request ID in context; a named type avoids collisions with other packages.
 type requestIDContextKey struct{}
 
 // safeHeaderValueRE matches values that are safe to echo as HTTP header values: printable ASCII only
@@ -32,20 +31,17 @@ func generateRequestID() string {
 
 	raw := make([]byte, tokenBytes)
 	if _, err := rand.Read(raw); err != nil {
-		// crypto/rand failure is a fatal OS condition. Panic rather than silently returning a
-		// deterministic or zero token, which would give a false sense of randomness.
+		// crypto/rand failure is fatal: panic rather than hand back a low-entropy token that looks random.
 		panic("httpx: crypto/rand unavailable: " + err.Error())
 	}
 
 	// Encode each 5-bit group as a Crockford alphabet character. 10 bytes = 80 bits = 16 five-bit groups.
 	const bitsPerChar = 5
-	const mask = (1 << bitsPerChar) - 1 // 0x1F
+	const mask = (1 << bitsPerChar) - 1
 
 	result := make([]byte, 4+16) // "req_" + 16 characters
 	copy(result, "req_")
 
-	// Accumulate bits from the raw bytes and emit one Crockford character per 5 bits.
-	// We process in 5-character (25-bit) groups to keep the logic simple; 10 bytes = 16 characters exactly.
 	var acc uint64
 	var bits int
 	pos := 4
@@ -91,7 +87,6 @@ func NewRequestIDMiddleware(next http.Handler) http.Handler {
 		// the access logger) and the inner handler can rely on the header being present.
 		w.Header().Set("Request-Id", id)
 
-		// Store in context for downstream handlers (e.g. the error edge, access logger).
 		ctx := context.WithValue(r.Context(), requestIDContextKey{}, id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

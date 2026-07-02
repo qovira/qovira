@@ -1,0 +1,316 @@
+package events
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/qovira/qovira/internal/api/problem"
+	"github.com/qovira/qovira/internal/httpx"
+)
+
+// BroadcastTopic is the well-known topic that every anonymous SSE connection subscribes to. Once
+// authentication lands (unit 5), the handler will switch to a per-principal key derived from the
+// validated session token; this constant is the pre-auth stand-in.
+const BroadcastTopic = "broadcast"
+
+// Timings carries the tunable intervals for the SSE handler. Callers that need fast test cycles inject
+// small values; production passes DefaultTimings.
+//
+// Invariant: PingInterval must be strictly less than WriteDeadline so that a healthy connection always
+// resets its per-write deadline before it expires.
+//
+// TODO(config): promote these fields to the instance config model (unit 9) so operators can tune
+// heartbeat and deadline values for their deployment without recompiling.
+type Timings struct {
+	// PingInterval is how often the handler emits a system.ping heartbeat frame. Must be strictly
+	// less than WriteDeadline.
+	PingInterval time.Duration
+
+	// WriteDeadline is the per-flush write deadline applied via http.NewResponseController before
+	// each frame write. Rolling this forward on every flush lets a healthy stream outlive the
+	// server's global WriteTimeout while still bounding a wedged write.
+	WriteDeadline time.Duration
+
+	// RetryHint is the value emitted in the SSE "retry:" directive on connect. It tells the browser's
+	// EventSource how long to wait before reconnecting after a dropped connection.
+	RetryHint time.Duration
+}
+
+// DefaultTimings holds the production SSE handler timings (satisfying the Timings invariant).
+//
+// TODO(config): wire from the instance config model (unit 9) so operators can tune heartbeat
+// and deadline values for their deployment without recompiling.
+var DefaultTimings = Timings{
+	PingInterval:  15 * time.Second,
+	WriteDeadline: 30 * time.Second,
+	RetryHint:     3 * time.Second,
+}
+
+type readyPayload struct {
+	ConnectionID string `json:"connectionId"`
+}
+
+type pingPayload struct {
+	Time string `json:"time"`
+}
+
+type shutdownPayload struct {
+	RetryMs int64 `json:"retryMs"`
+}
+
+type handler struct {
+	hub    *Hub
+	log    *slog.Logger
+	timing Timings
+}
+
+// NewHandler returns an http.Handler that streams server-sent events. On connect it subscribes to
+// BroadcastTopic, verifies the writer supports Flush + SetWriteDeadline (writing a 500 problem+json if not),
+// sends the SSE headers and a system.ready frame, then runs a select loop over four cases: fan-out event,
+// heartbeat ping, hub shutdown, client disconnect. If t violates the Timings invariant, it falls back to
+// DefaultTimings and logs a Warn — a silent misconfiguration must never corrupt a live stream.
+func NewHandler(hub *Hub, log *slog.Logger, t Timings) http.Handler {
+	if t.PingInterval <= 0 || t.WriteDeadline <= 0 || t.RetryHint <= 0 || t.PingInterval >= t.WriteDeadline {
+		log.Warn("SSE: invalid Timings (PingInterval must be >0 and < WriteDeadline) — using DefaultTimings",
+			"pingInterval", t.PingInterval,
+			"writeDeadline", t.WriteDeadline,
+			"retryHint", t.RetryHint,
+		)
+
+		t = DefaultTimings
+	}
+
+	return &handler{hub: hub, log: log, timing: t}
+}
+
+// ServeHTTP implements http.Handler.
+func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rc := http.NewResponseController(w)
+
+	// Verify Flush and SetWriteDeadline support BEFORE any response byte (before WriteHeader), so a missing
+	// capability can still return a clean problem+json 500.
+	//
+	// SetWriteDeadline probe: setting the first rolling deadline (now + WriteDeadline) both verifies the capability
+	// and closes the connect-to-first-flush window; writeFrame rolls it forward on each flush. Not a zero time —
+	// that DISABLES the deadline, leaving the stream unprotected until the first flush and masking a broken rolling
+	// reset (the stream would then outlive the server WriteTimeout unnoticed).
+	//
+	// Flush probe: we walk the Unwrap chain for http.Flusher instead of calling rc.Flush() — the same check
+	// ResponseController.Flush() makes, minus its side effect of committing headers (a 200 ahead of our SSE headers).
+	connID := httpx.RequestID(r.Context())
+
+	if err := rc.SetWriteDeadline(time.Now().Add(h.timing.WriteDeadline)); err != nil {
+		h.log.ErrorContext(r.Context(), "SSE: writer does not support SetWriteDeadline — rejecting connect",
+			"requestId", connID,
+			"err", err,
+		)
+
+		d := problem.Internal("SSE streaming is not supported by this connection.")
+		d.RequestID = connID
+		problem.WriteJSON(w, d)
+
+		return
+	}
+
+	if !supportsFlusher(w) {
+		h.log.ErrorContext(r.Context(), "SSE: writer does not support Flush — rejecting connect",
+			"requestId", connID,
+		)
+
+		d := problem.Internal("SSE streaming is not supported by this connection.")
+		d.RequestID = connID
+		problem.WriteJSON(w, d)
+
+		return
+	}
+
+	// Register this connection with the hub BEFORE subscribing and before entering the loop. Three outcomes:
+	//   - connAdmitted:             proceed into the stream loop.
+	//   - connRejectedShuttingDown: clean EOF, no body — browser reconnects via the retry: hint.
+	//   - connRejectedAtCapacity:   503 problem+json with Retry-After — too many concurrent streams.
+	//
+	// We do NOT write a system.shutdown frame on the shutting-down path: SSE headers have not yet been
+	// sent (response uncommitted), so a clean EOF is the correct signal. The browser will reconnect.
+	switch h.hub.connStart() {
+	case connAdmitted:
+		defer h.hub.connDone()
+
+	case connRejectedShuttingDown:
+		h.log.DebugContext(r.Context(), "SSE: hub is shutting down — rejecting late connect", "requestId", connID)
+		return
+
+	case connRejectedAtCapacity:
+		h.log.WarnContext(r.Context(), "SSE: hub at connection capacity — rejecting connect", "requestId", connID)
+
+		d := problem.From(http.StatusServiceUnavailable,
+			"Too many open event streams; the server is at capacity. Please retry shortly.")
+		d.RequestID = connID
+
+		w.Header().Set("Retry-After", strconv.Itoa(int(h.timing.RetryHint.Seconds())))
+		problem.WriteJSON(w, d)
+
+		return
+	}
+
+	// Subscribe before writing the SSE headers so we cannot miss an event published between the header
+	// write and the select loop start.
+	sub := h.hub.Subscribe(BroadcastTopic)
+	defer sub.Unsubscribe()
+
+	// Connection: keep-alive is omitted intentionally — net/http manages it, and it is irrelevant under HTTP/2.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	// X-Accel-Buffering: no — deliberate exception to the house "no X--prefixed headers (RFC 6648)" rule.
+	// This is the de-facto nginx / reverse-proxy contract that disables response buffering for SSE; there
+	// is no standardized replacement header, so this exact name is required for the mechanism to work.
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	// Emit the retry: directive then the system.ready canary frame; both reach the client on writeFrame's flush.
+	retryMs := h.timing.RetryHint.Milliseconds()
+
+	if _, err := fmt.Fprintf(w, "retry:%d\n", retryMs); err != nil {
+		h.log.DebugContext(r.Context(), "SSE: write retry directive failed", "requestId", connID, "err", err)
+		return
+	}
+
+	if err := h.writeFrame(w, rc, Event{Type: "system.ready", Data: readyPayload{ConnectionID: connID}}); err != nil {
+		h.log.DebugContext(r.Context(), "SSE: write system.ready failed", "requestId", connID, "err", err)
+		return
+	}
+
+	ping := time.NewTicker(h.timing.PingInterval)
+	defer ping.Stop()
+
+	for {
+		select {
+		case e, ok := <-sub.C:
+			if !ok {
+				// The hub dropped this subscription (slow consumer). The client's EventSource will
+				// reconnect using the retry: hint we sent on connect.
+				h.log.InfoContext(r.Context(), "SSE: subscription dropped (slow consumer) — closing stream",
+					"requestId", connID,
+				)
+
+				return
+			}
+
+			if err := h.writeFrame(w, rc, e); err != nil {
+				h.log.DebugContext(r.Context(), "SSE: write event frame failed", "requestId", connID, "err", err)
+				return
+			}
+
+		case <-ping.C:
+			ts := time.Now().UTC().Format(time.RFC3339)
+			if err := h.writeFrame(w, rc, Event{Type: "system.ping", Data: pingPayload{Time: ts}}); err != nil {
+				h.log.DebugContext(r.Context(), "SSE: write ping frame failed", "requestId", connID, "err", err)
+				return
+			}
+
+		case <-h.hub.Done():
+			// Hub is shutting down. Write a system.shutdown frame directly to this connection's own
+			// writer — do NOT use hub.Publish, which would attempt to send into the subscriber map
+			// while the hub is tearing it down (a data race / use-after-teardown). Writing directly
+			// here is safe: this goroutine owns w and rc for the lifetime of ServeHTTP.
+			payload := shutdownPayload{RetryMs: h.timing.RetryHint.Milliseconds()}
+
+			if err := h.writeFrame(w, rc, Event{Type: "system.shutdown", Data: payload}); err != nil {
+				h.log.DebugContext(r.Context(), "SSE: write system.shutdown frame failed", "requestId", connID, "err", err)
+			}
+			// Return regardless of write error: the hub is shutting down and connDone (deferred above)
+			// will decrement the WaitGroup so Shutdown can proceed.
+			return
+
+		case <-r.Context().Done():
+			h.log.DebugContext(r.Context(), "SSE: client disconnected", "requestId", connID)
+			return
+		}
+	}
+}
+
+// writeFrame sets a rolling write deadline, marshals e.Data as JSON, emits an SSE frame
+// (event: / data: / blank-line) per the SSE specification, then flushes. Multi-line JSON payloads
+// are split across multiple data: lines as required by the SSE spec.
+//
+// The rolling SetWriteDeadline call before each flush is the key mechanism that lets a healthy stream
+// outlive the server's global WriteTimeout: each successful flush resets the deadline so the window
+// slides forward indefinitely. A wedged write still trips the bound (WriteDeadline).
+func (h *handler) writeFrame(w http.ResponseWriter, rc *http.ResponseController, e Event) error {
+	if err := rc.SetWriteDeadline(time.Now().Add(h.timing.WriteDeadline)); err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
+
+	data, err := json.Marshal(e.Data)
+	if err != nil {
+		return fmt.Errorf("marshal event data: %w", err)
+	}
+
+	// Build the whole frame, then write it in one call so the frame reaches the client atomically.
+	if _, err := w.Write(formatFrame(e.Type, data)); err != nil {
+		return fmt.Errorf("write frame: %w", err)
+	}
+
+	if err := rc.Flush(); err != nil {
+		return fmt.Errorf("flush: %w", err)
+	}
+
+	return nil
+}
+
+// formatFrame serializes an event type and its already-marshaled JSON data into a single SSE frame:
+//
+//	event: <type>\n
+//	data: <segment>\n   (one data: line per newline-separated segment of the payload)
+//	\n
+//
+// The newline split is required by the SSE spec: a raw newline inside a data: value reads as a field boundary
+// and would corrupt the stream. json.Marshal is compact today so system.* payloads yield a single data: line;
+// the split is defensive framing for any future payload with embedded newlines. No id: field is emitted — the
+// hub keeps no history, so a Last-Event-ID would only be ignored.
+func formatFrame(eventType string, data []byte) []byte {
+	// Pre-size for the common single-line frame; bytes.Buffer grows if a multi-line payload needs more.
+	var buf bytes.Buffer
+	buf.Grow(len("event: \n") + len(eventType) + len("data: \n") + len(data) + 1)
+
+	buf.WriteString("event: ")
+	buf.WriteString(eventType)
+	buf.WriteByte('\n')
+
+	for segment := range bytes.SplitSeq(data, []byte{'\n'}) {
+		buf.WriteString("data: ")
+		buf.Write(segment)
+		buf.WriteByte('\n')
+	}
+
+	buf.WriteByte('\n') // blank line terminates the frame
+
+	return buf.Bytes()
+}
+
+// supportsFlusher reports whether rw (or an http.ResponseWriter reached via Unwrap) implements
+// http.Flusher. This replicates the walk that http.ResponseController.Flush() performs internally but
+// without calling Flush(), which would implicitly commit the response headers before we have set the
+// SSE-specific ones.
+func supportsFlusher(rw http.ResponseWriter) bool {
+	type unwrapper interface {
+		Unwrap() http.ResponseWriter
+	}
+
+	for {
+		switch v := rw.(type) {
+		case interface{ FlushError() error }:
+			return true
+		case http.Flusher:
+			return true
+		case unwrapper:
+			rw = v.Unwrap()
+		default:
+			return false
+		}
+	}
+}

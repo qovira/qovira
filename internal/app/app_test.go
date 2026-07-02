@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,8 +16,6 @@ import (
 
 	"github.com/qovira/qovira/internal/app"
 )
-
-// ── buildLogger tests ────────────────────────────────────────────────────────
 
 func TestBuildLogger_JSONEmitsJSON(t *testing.T) {
 	t.Parallel()
@@ -136,8 +135,6 @@ func testConfig(level, format string) app.Config {
 	}
 }
 
-// ── Run tests ────────────────────────────────────────────────────────────────
-
 // freePort asks the OS for an available TCP port then releases it.
 func freePort(t *testing.T) string {
 	t.Helper()
@@ -156,18 +153,31 @@ func freePort(t *testing.T) string {
 	return addr
 }
 
-// waitReady polls url until it responds without error or the attempt budget is exhausted. Returns the last
-// response (may be nil).
+// waitReady polls url until it responds with a non-5xx status or the attempt budget is exhausted.
+// A >= 500 response is treated as not-yet-ready (transient startup error) and the poll continues.
+// Returns the last response that was deemed ready (may be nil if the server never became ready).
+// Bodies of discarded not-ready responses are drained and closed to avoid leaking connections.
 func waitReady(t *testing.T, client *http.Client, url string) *http.Response {
 	t.Helper()
 
 	for range 50 {
 		resp, err := client.Get(url) //nolint:noctx // test-only polling loop
-		if err == nil {
-			return resp
+		if err != nil {
+			time.Sleep(5 * time.Millisecond)
+			continue
 		}
 
-		time.Sleep(5 * time.Millisecond)
+		if resp.StatusCode >= 500 {
+			// Transient server-side error during startup — drain and discard, keep polling.
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+
+			time.Sleep(5 * time.Millisecond)
+
+			continue
+		}
+
+		return resp
 	}
 
 	return nil
@@ -329,5 +339,104 @@ func TestRun_SLOGIsSetAsDefault(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("Run did not return within 5 s")
+	}
+}
+
+// TestRun_PostEventsDoesNotStartSSEStream asserts a non-GET request never starts an SSE stream. POST /events
+// returns 200 from the SPA catch-all, not 405: Go's automatic 405 fires only when a method-less pattern like
+// "/events" is also registered, but here only "GET /events" and "/" exist, so the POST falls through to the
+// SPA handler. Either way, no SSE headers or streaming body are produced.
+func TestRun_PostEventsDoesNotStartSSEStream(t *testing.T) {
+	t.Parallel()
+
+	addr := freePort(t)
+	cfg := app.Config{Addr: addr, LogLevel: "error", LogFormat: "json"}
+
+	//nolint:testingcontext // need to cancel manually before test returns
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+
+	go func() {
+		runErr <- app.Run(ctx, cfg)
+	}()
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	healthURL := fmt.Sprintf("http://%s/api/v1/health", addr)
+
+	if resp := waitReady(t, client, healthURL); resp != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+
+	eventsURL := fmt.Sprintf("http://%s/events", addr)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, eventsURL, nil)
+	if err != nil {
+		t.Fatalf("build POST /events request: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /events: %v", err)
+	}
+
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	// The SSE handler must NOT have run: assert that Content-Type is NOT text/event-stream.
+	ct := resp.Header.Get("Content-Type")
+	if strings.Contains(ct, "text/event-stream") {
+		t.Errorf("POST /events: SSE handler must not run for non-GET — got Content-Type: %s", ct)
+	}
+
+	// Read the body with a deadline to detect any accidental streaming. A legitimate SPA or error
+	// response terminates immediately; an SSE stream would hang here.
+
+	// readResult carries scanner.Err() back so it's checked on the test goroutine, not the reader, whose
+	// t.Errorf would race the test's return on the timeout path below.
+	type readResult struct {
+		body string
+		err  error
+	}
+
+	bodyCh := make(chan readResult, 1)
+
+	go func() {
+		var sb strings.Builder
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			sb.WriteString(scanner.Text())
+			sb.WriteByte('\n')
+		}
+
+		bodyCh <- readResult{body: sb.String(), err: scanner.Err()}
+	}()
+
+	select {
+	case res := <-bodyCh:
+		if res.err != nil {
+			t.Errorf("POST /events: read response body: %v", res.err)
+		}
+
+		// Body read to completion — not an SSE stream.
+		t.Logf("POST /events → status=%d Content-Type=%q body-len=%d (SPA fallthrough confirmed, not SSE)",
+			resp.StatusCode, ct, len(res.body))
+	case <-time.After(2 * time.Second):
+		t.Error("POST /events: response body did not terminate — possible accidental SSE streaming")
+	}
+
+	cancel()
+
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("Run returned non-nil error after cancel: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Run did not return within 5 s after context cancel")
 	}
 }

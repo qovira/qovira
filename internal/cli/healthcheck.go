@@ -117,7 +117,6 @@ The probe timeout is resolved from --timeout or QOVIRA_HEALTHCHECK_TIMEOUT (defa
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var overrides app.FlagOverrides
 
-			// cmd.Flags() exposes the inherited persistent --addr flag once cobra has parsed it.
 			if cmd.Flags().Changed("addr") {
 				overrides.Addr = addr
 			}

@@ -24,10 +24,6 @@ import (
 // https://qovira.ai/errors/{slug}, where {slug} is the kebab-case form of the error code.
 const typeBase = "https://qovira.ai/errors/"
 
-// ---------------------------------------------------------------------------
-// Structs
-// ---------------------------------------------------------------------------
-
 // Details is the house RFC 9457 problem+json body. It implements huma.StatusError (GetStatus, Error),
 // huma.ContentTypeFilter (ContentType), and can be marshaled to JSON with the required field set.
 //
@@ -55,12 +51,12 @@ type FieldError struct {
 	Detail string `json:"detail"`
 }
 
-// Error implements the error interface; it returns the Detail field.
+// Error implements the error interface.
 func (d *Details) Error() string {
 	return d.Detail
 }
 
-// GetStatus implements huma.StatusError; it returns the HTTP status code.
+// GetStatus implements huma.StatusError.
 func (d *Details) GetStatus() int {
 	return d.Status
 }
@@ -74,19 +70,11 @@ func (d *Details) ContentType(ct string) string {
 	return ct
 }
 
-// ---------------------------------------------------------------------------
-// Error registry — five framework codes
-// ---------------------------------------------------------------------------
-
-// kind holds the static fields for a single error code in the registry.
 type kind struct {
-	code   string
-	title  string
-	status int
+	code  string
+	title string
 }
 
-// typeURI derives the type URI for a code by converting underscores to hyphens.
-// "validation_error" → "https://qovira.ai/errors/validation-error".
 func typeURI(code string) string {
 	return typeBase + strings.ReplaceAll(code, "_", "-")
 }
@@ -94,17 +82,12 @@ func typeURI(code string) string {
 // registry maps HTTP status codes to their house error kind. Only the five framework codes are registered;
 // From falls back gracefully for unknown codes.
 var registry = map[int]kind{
-	http.StatusUnprocessableEntity: {code: "validation_error", title: "Validation Error", status: http.StatusUnprocessableEntity},
-	http.StatusNotFound:            {code: "not_found", title: "Not Found", status: http.StatusNotFound},
-	http.StatusMethodNotAllowed:    {code: "method_not_allowed", title: "Method Not Allowed", status: http.StatusMethodNotAllowed},
-	http.StatusUnsupportedMediaType: {code: "unsupported_media_type", title: "Unsupported Media Type",
-		status: http.StatusUnsupportedMediaType},
-	http.StatusInternalServerError: {code: "internal_error", title: "Internal Error", status: http.StatusInternalServerError},
+	http.StatusUnprocessableEntity:  {code: "validation_error", title: "Validation Error"},
+	http.StatusNotFound:             {code: "not_found", title: "Not Found"},
+	http.StatusMethodNotAllowed:     {code: "method_not_allowed", title: "Method Not Allowed"},
+	http.StatusUnsupportedMediaType: {code: "unsupported_media_type", title: "Unsupported Media Type"},
+	http.StatusInternalServerError:  {code: "internal_error", title: "Internal Error"},
 }
-
-// ---------------------------------------------------------------------------
-// From — the central constructor
-// ---------------------------------------------------------------------------
 
 // From builds a *Details from the given HTTP status code and message. It looks up the registry for the
 // house code/title/type triple; unknown statuses get a sensible generic fallback (never panic). Each err
@@ -119,7 +102,7 @@ func From(status int, msg string, errs ...error) *Details {
 			text = "error"
 		}
 		code := strings.ReplaceAll(strings.ToLower(text), " ", "_")
-		k = kind{code: code, title: text, status: status}
+		k = kind{code: code, title: text}
 	}
 
 	d := &Details{
@@ -146,10 +129,6 @@ func From(status int, msg string, errs ...error) *Details {
 
 	return d
 }
-
-// ---------------------------------------------------------------------------
-// Constructor helpers
-// ---------------------------------------------------------------------------
 
 // NotFound builds a 404 *Details.
 func NotFound(detail string) *Details {
@@ -180,10 +159,6 @@ func Internal(detail string) *Details {
 	return From(http.StatusInternalServerError, detail)
 }
 
-// ---------------------------------------------------------------------------
-// WriteJSON — response writer helper for the fallback handler
-// ---------------------------------------------------------------------------
-
 // WriteJSON writes d as an application/problem+json response to w. Callers must set any extra headers
 // (e.g. Allow for 405) on w BEFORE calling WriteJSON, because WriteHeader flushes the header map.
 func WriteJSON(w http.ResponseWriter, d *Details) {
@@ -195,26 +170,14 @@ func WriteJSON(w http.ResponseWriter, d *Details) {
 	_ = enc.Encode(d)
 }
 
-// ---------------------------------------------------------------------------
-// locationToPointer — RFC 6901 JSON Pointer from a Huma location string.
-// ---------------------------------------------------------------------------
-
-// locationToPointer converts a Huma validation-error location string into an RFC 6901 JSON Pointer.
+// locationToPointer converts a Huma validation-error location ({prefix}.{rest}, prefix ∈ body/path/query/
+// header/cookie, rest using dot fields and [i] indices) into an RFC 6901 JSON Pointer. The full case table
+// lives in problem_test.go; the non-obvious bits:
 //
-// Huma location format:  {prefix}.{rest}   where prefix ∈ {body, path, query, header, cookie}
-// and rest uses dot-separated fields and bracket-enclosed array indices.
-//
-// Examples (all cases are covered by the test table in problem_test.go):
-//
-//	"body.items[0].dueDate"   → "/items/0/dueDate"
-//	"body.name"               → "/name"
-//	"body.friends[1].active"  → "/friends/1/active"
-//	"body.a[0][1]"            → "/a/0/1"
-//	"body"                    → ""          (whole-body error)
-//	"body.a~b"                → "/a~0b"     (RFC 6901: ~ escaped)
-//	"body.a/b"                → "/a~1b"     (RFC 6901: / escaped)
-//	"query.limit"             → "/limit"    (non-body: best-effort strip prefix)
-//	"path.thing-id"           → "/thing-id"
+//	"body.items[0].dueDate" → "/items/0/dueDate"   (fields and indices both become tokens)
+//	"body"                  → ""                     (whole-body error)
+//	"body.a~b"              → "/a~0b"                (RFC 6901: ~ and / escaped)
+//	"query.limit"           → "/limit"              (non-body: strip prefix best-effort)
 func locationToPointer(location string) string {
 	if location == "" {
 		return ""
@@ -228,10 +191,7 @@ func locationToPointer(location string) string {
 		return ""
 	}
 
-	// Convert the Huma dot+bracket path to an RFC 6901 pointer. Build token by token.
-	//
-	// Strategy: scan character by character accumulating tokens. Split on '.', '[', ']'.
-	// RFC 6901 escaping: replace '~' → '~0' and '/' → '~1' in each token.
+	// Convert the Huma dot+bracket path to an RFC 6901 pointer, one token at a time (split on '.', '[', ']').
 	var buf strings.Builder
 
 	var token strings.Builder
@@ -266,27 +226,9 @@ func locationToPointer(location string) string {
 	return buf.String()
 }
 
-// ---------------------------------------------------------------------------
-// messageToCode — classify Huma validation message text to house per-field codes.
-// ---------------------------------------------------------------------------
-
-// messageToCode maps a Huma validation error message to a house per-field error code. The patterns match
-// Huma's actual message strings from validation/messages.go v2.38.0.
-//
-// Matching precedence (checked in order):
-//  1. "expected required property" → required
-//  2. "expected length >=" / "<=" → min_length / max_length
-//  3. "expected number >=" / ">" → min; "<=" / "<" → max
-//  4. "expected array length >=" / "<=" → min / max
-//  5. isFormatMessage → format (checked before the generic "expected string to be" pattern guard)
-//  6. "expected string to match pattern" / "expected string to be {non-format suffix}" → pattern
-//  7. "expected value to be one of" → enum
-//  8. "expected boolean"/"number"/"integer"/"string"/"array"/"object" → type
-//  9. default → invalid
-//
-// Format is checked BEFORE the pattern fallback to avoid the precedence bug where "expected string to be
-// either …" or "expected string to be regex: …" (both real Huma format messages) were misclassified as
-// pattern because they don't start with "RFC ".
+// messageToCode maps a Huma validation message (as emitted by validation/messages.go in v2.38.0) to a house
+// per-field code by prefix-matching. The switch order is load-bearing: isFormatMessage is checked before the
+// generic "expected string to be" pattern guard, and unmatched messages fall through to "invalid".
 func messageToCode(message string) string {
 	switch {
 	case strings.HasPrefix(message, "expected required property"):
@@ -305,9 +247,6 @@ func messageToCode(message string) string {
 		return "min"
 	case strings.HasPrefix(message, "expected array length <="):
 		return "max"
-	// Format is checked before the generic "expected string to be" guard so that messages like
-	// "expected string to be either …" (MsgExpectedRFCIPAddr) and "expected string to be regex: …"
-	// (MsgExpectedRegexp) classify as format rather than pattern.
 	case isFormatMessage(message):
 		return "format"
 	case strings.HasPrefix(message, "expected string to match pattern"),
@@ -350,10 +289,6 @@ func isFormatMessage(msg string) bool {
 		strings.HasPrefix(rest, "base64") ||
 		strings.HasPrefix(rest, "regex:")
 }
-
-// ---------------------------------------------------------------------------
-// init — install the global huma.NewError override
-// ---------------------------------------------------------------------------
 
 // init sets huma.NewError to produce *Details so that every error Huma generates — validation (422),
 // unsupported media type (415), panics (500), and any future codes — emerges in the house problem+json

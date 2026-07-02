@@ -1,20 +1,10 @@
-// Package api builds the Qovira API surface: the Huma instance mounted under /api/v1 and the registered
-// operations. The mux is the caller's (the composition root's), so the SPA shares it.
-//
-// Every error the API produces — 422 validation, 415 unsupported media type, 500 panics, and routing-level
-// 404/405 — emerges as application/problem+json in the house RFC 9457 shape (type, title, status, detail,
-// code, requestId, and for validation an errors[] of RFC 6901 JSON Pointers with per-field codes). No
-// per-handler work is required:
-//
-//   - Huma errors (422, 415, 500) are shaped by the package-level huma.NewError override installed in
-//     internal/api/problem's init() function, and the requestId is injected by requestIDTransformer.
-//   - Routing-level 404/405 on /api/* paths that Huma's ServeMux adapter does not own are handled by
-//     newAPIFallback, registered after Huma operations so Go's most-specific-pattern routing keeps the
-//     exact Huma patterns winning.
-//
-// Go 1.22 most-specific-pattern routing on the shared ServeMux sends /api/v1/... requests (and Huma's own
-// /api/v1/openapi.json, /api/v1/docs) to Huma, while everything else falls through to the SPA catch-all
-// registered separately by the composition root. No manual prefix-stripping is needed.
+// Package api builds the Qovira API surface: the Huma instance mounted under /api/v1 and its operations, on
+// the caller's mux (shared with the SPA). Every error — Huma's 422/415/500 and the routing-level 404/405
+// from newAPIFallback — emerges as application/problem+json in the house RFC 9457 shape. Shaping is
+// centralized (see internal/api/problem and requestIDTransformer), so handlers do no per-error work.
+// Most-specific-pattern routing keeps /api/v1/... operations with Huma, routes any other /api/... path to the
+// /api/ fallback for a problem+json 404/405, and lets everything else fall through to the SPA catch-all — so no
+// prefix-stripping is needed.
 package api
 
 import (
@@ -29,11 +19,6 @@ import (
 	"github.com/qovira/qovira/internal/httpx"
 )
 
-// maxBodyBytes is the default maximum request-body size ceiling applied to every registered operation. The
-// health endpoint has no body and ignores this field; future body-reading endpoints inherit the ceiling unless
-// they override MaxBodyBytes explicitly in their Operation. It references [httpx.MaxBodyBytes] — the single
-// server-wide ceiling, also enforced at the server edge by http.MaxBytesHandler — so the per-operation cap
-// and the edge backstop can never drift. A single endpoint can override downward or upward as its contract demands.
 const maxBodyBytes = httpx.MaxBodyBytes
 
 // New builds the Huma API mounted on the caller's mux under the /api/v1 prefix, registers all operations,
@@ -57,10 +42,8 @@ func New(mux *http.ServeMux, bi buildinfo.Info, _ *slog.Logger) huma.API {
 
 	registerMeta(ha, bi)
 
-	// Register the /api/ subtree fallback AFTER Huma operations so Go 1.22's most-specific-pattern routing
-	// keeps the exact Huma patterns (e.g. "GET /api/v1/health") winning over the broader "/api/" pattern.
-	// The fallback handles routing-level 404 (unknown path) and 405 (known path, wrong method) for any
-	// request that reaches /api/... but was not claimed by a Huma-registered operation.
+	// Register the fallback AFTER Huma operations so most-specific-pattern routing keeps the exact Huma
+	// patterns winning over the broad "/api/" catch-all (see newAPIFallback).
 	mux.Handle("/api/", newAPIFallback(ha))
 
 	return ha
@@ -80,9 +63,6 @@ func requestIDTransformer(ctx huma.Context, _ string, v any) (any, error) {
 	return v, nil
 }
 
-// withMaxBodyBytes returns op with MaxBodyBytes set to maxBodyBytes when the caller did not specify one. This
-// is the house helper every file in this package should use instead of constructing huma.Operation directly —
-// it ensures the body-size ceiling is always applied without each registration callsite having to remember it.
 func withMaxBodyBytes(op huma.Operation) huma.Operation {
 	if op.MaxBodyBytes == 0 {
 		op.MaxBodyBytes = maxBodyBytes

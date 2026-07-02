@@ -1,0 +1,82 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/health"
+  method: GET
+  headers:
+    Accept: application/problem+json
+  body:
+    type: text
+    content: ""
+response:
+  statusCode: 200
+  statusText: OK
+  headers:
+    Content-Type: application/problem+json
+  body:
+    type: json
+    content: |-
+      {
+        "type": "string",
+        "title": "string",
+        "status": 6218,
+        "detail": "string",
+        "code": "string",
+        "requestId": "string",
+        "$schema": "https://sAvksjK.vemev.TNjBwUHKSwu,..qFM",
+        "errors": [
+          {
+            "pointer": "string",
+            "code": "string",
+            "detail": "string"
+          },
+          {
+            "pointer": "string",
+            "code": "string",
+            "detail": "string"
+          }
+        ],
+        "instance": "string"
+      }
+    $type: |-
+      {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "errors": {
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "instance": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "requestId"
+        ]
+      }
+order: 2000

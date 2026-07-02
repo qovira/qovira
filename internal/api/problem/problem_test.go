@@ -11,10 +11,6 @@ import (
 	"github.com/qovira/qovira/internal/api/problem"
 )
 
-// ---------------------------------------------------------------------------
-// Registry: From maps status → correct code / title / type / status fields.
-// ---------------------------------------------------------------------------
-
 func TestFrom_RegistryMapping(t *testing.T) {
 	t.Parallel()
 
@@ -75,10 +71,6 @@ func TestFrom_UnknownStatus(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// code ↔ type slug round-trip.
-// ---------------------------------------------------------------------------
-
 func TestCodeSlugRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -100,10 +92,6 @@ func TestCodeSlugRoundTrip(t *testing.T) {
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Details implements huma interfaces.
-// ---------------------------------------------------------------------------
 
 func TestDetails_HumaInterfaces(t *testing.T) {
 	t.Parallel()
@@ -132,10 +120,6 @@ func TestDetails_HumaInterfaces(t *testing.T) {
 		t.Errorf("ContentType(text/plain): want %q, got %q", "text/plain", got)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// From converts huma.ErrorDetailer errs into FieldErrors.
-// ---------------------------------------------------------------------------
 
 func TestFrom_FieldErrors(t *testing.T) {
 	t.Parallel()
@@ -173,10 +157,6 @@ func TestFrom_FieldErrors(t *testing.T) {
 		t.Errorf("errors[1].code: want %q, got %q", "min_length", d.Errors[1].Code)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// WriteJSON emits the correct content-type and status.
-// ---------------------------------------------------------------------------
 
 func TestWriteJSON(t *testing.T) {
 	t.Parallel()
@@ -217,10 +197,6 @@ func TestWriteJSON(t *testing.T) {
 		t.Errorf("requestId: want %q, got %v", "req_TEST123", payload["requestId"])
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Validation constructor populates errors array.
-// ---------------------------------------------------------------------------
 
 func TestValidation_WithFields(t *testing.T) {
 	t.Parallel()

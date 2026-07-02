@@ -1,15 +1,7 @@
 package api_test
 
 // conformance_test.go — contract-conformance tests that boot the real API over httptest and validate live
-// responses against the committed OpenAPI 3.1 spec using libopenapi-validator.
-//
-// Design goals:
-//   - Generic operation loop: operations are enumerated from the spec model, not hardcoded, so new endpoints
-//     are covered for free.
-//   - Server-prefix awareness: the spec has servers: [{url: /api/v1}]; libopenapi-validator strips that
-//     prefix when matching path keys, so the live request must use the full /api/v1/... path.
-//   - Error-body contract: undocumented fallback paths (404) are validated against the Details component
-//     schema extracted from the spec via the schema_validation sub-package.
+// responses against the committed OpenAPI 3.1 spec (libopenapi-validator).
 
 import (
 	"encoding/json"
@@ -25,10 +17,6 @@ import (
 	"github.com/pb33f/libopenapi-validator/schema_validation"
 	"github.com/pb33f/libopenapi/orderedmap"
 )
-
-// ----------------------------------------------------------------------------
-// Spec fixture
-// ----------------------------------------------------------------------------
 
 // fetchSpec fetches the YAML spec bytes from /api/v1/openapi.yaml on the given test server. Using the
 // served endpoint (rather than reading openapi.yaml from disk) simultaneously exercises the spec endpoint
@@ -53,10 +41,6 @@ func fetchSpec(t *testing.T, srv *httptest.Server) []byte {
 
 	return b
 }
-
-// ----------------------------------------------------------------------------
-// TestConformance_OperationResponses
-// ----------------------------------------------------------------------------
 
 // TestConformance_OperationResponses boots the real API, enumerates every registered operation from the
 // parsed spec model (so new endpoints are covered for free), issues a live request for each, and validates
@@ -154,10 +138,6 @@ func TestConformance_OperationResponses(t *testing.T) {
 		})
 	}
 }
-
-// ----------------------------------------------------------------------------
-// TestConformance_ErrorBodySchema
-// ----------------------------------------------------------------------------
 
 // TestConformance_ErrorBodySchema triggers a 404 on an unknown /api/v1 path and validates the response
 // body against the Details component schema extracted from the spec. The fallback-generated 404 is not

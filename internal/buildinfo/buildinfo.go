@@ -24,7 +24,7 @@ var (
 	BuildTime string
 )
 
-// Info carries resolved build identity. All fields are guaranteed non-empty after Resolve returns.
+// Info carries resolved build identity.
 type Info struct {
 	// Version is the semantic release tag (e.g. "v0.1.0"), or "(devel)" for unstamped builds.
 	Version string
@@ -34,25 +34,16 @@ type Info struct {
 	Commit string
 
 	// BuildTime is an RFC 3339 timestamp of when the binary was built. For an unstamped `go build` it falls
-	// back to the embedded commit timestamp (vcs.time); it is empty when neither exists (e.g. under `go run`),
-	// which Huma emits as "" — valid for the optional field.
+	// back to the embedded commit timestamp (vcs.time); it is empty when neither exists (e.g. under `go run`).
 	BuildTime string
 
 	// GoVersion is the Go toolchain version used to build the binary, sourced from runtime/debug.ReadBuildInfo.
 	GoVersion string
 }
 
-// Resolve returns a fully-populated Info. When the ldflags vars are set they win (the Commit is normalized to
-// its short form). When they are absent (empty strings), the function reads runtime/debug.ReadBuildInfo to
-// fill Commit, BuildTime, and GoVersion from the embedded VCS data, and marks Version as "(devel)".
-//
-// Pass the package-level vars as the seed; this separation makes it testable without touching package globals:
-//
-//	bi := buildinfo.Resolve(buildinfo.Info{
-//	    Version:   buildinfo.Version,
-//	    Commit:    buildinfo.Commit,
-//	    BuildTime: buildinfo.BuildTime,
-//	})
+// Resolve returns a fully-populated Info, reading runtime/debug.ReadBuildInfo for whatever ldflags did not
+// stamp. Callers seed it with the package-level vars (passed in rather than read directly, so the fallback
+// rules in resolve stay testable without touching globals).
 func Resolve(seed Info) Info {
 	var (
 		settings  []debug.BuildSetting
@@ -93,13 +84,10 @@ func resolve(seed Info, settings []debug.BuildSetting, goVersion string) Info {
 		out.GoVersion = "unknown"
 	}
 
-	// Version: ldflags value wins; fall back to "(devel)".
 	if out.Version == "" {
 		out.Version = "(devel)"
 	}
 
-	// Commit: an ldflags value wins, otherwise the embedded VCS revision; either way normalized to the short
-	// form the field documents. "unknown" when neither is available.
 	switch {
 	case out.Commit != "":
 		out.Commit = shortRevision(out.Commit, false)
@@ -109,9 +97,6 @@ func resolve(seed Info, settings []debug.BuildSetting, goVersion string) Info {
 		out.Commit = "unknown"
 	}
 
-	// BuildTime: an ldflags value wins; fall back to the commit timestamp the toolchain embedded (vcs.time),
-	// so an unstamped `go build` still reports an honest, if approximate, build time. Empty when neither
-	// exists (e.g. under `go run`), which serializes as "" — valid for the optional field.
 	if out.BuildTime == "" && vcsTime != "" {
 		out.BuildTime = vcsTime
 	}
@@ -119,15 +104,11 @@ func resolve(seed Info, settings []debug.BuildSetting, goVersion string) Info {
 	return out
 }
 
-// shortCommitLen is the number of leading hex characters kept from a full VCS revision in the development
-// fallback, matching git's conventional 7-character abbreviation (and the Commit field's documented example).
-// Stamped builds already pass a short revision via `git rev-parse --short`; this only abbreviates the full
-// 40-character hash that runtime/debug.ReadBuildInfo embeds.
+// shortCommitLen matches git's conventional 7-char abbreviation. It only abbreviates the full 40-char hash
+// runtime/debug.ReadBuildInfo embeds in dev builds; stamped builds already pass a short `git rev-parse --short`.
 const shortCommitLen = 7
 
-// shortRevision abbreviates a full VCS revision to shortCommitLen characters and appends "-dirty" when the
-// working tree was modified. A revision already at or below shortCommitLen is returned unchanged; an empty
-// revision yields an empty string (the caller substitutes "unknown").
+// shortRevision abbreviates rev to shortCommitLen characters and appends "-dirty" when the tree was modified.
 func shortRevision(rev string, dirty bool) string {
 	if rev == "" {
 		return ""

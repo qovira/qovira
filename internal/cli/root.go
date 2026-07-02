@@ -49,7 +49,6 @@ func ExecuteArgsWithOutput(args []string, out, errOut io.Writer) int {
 	return exitSuccess
 }
 
-// buildRoot constructs the cobra root command and attaches all subcommands.
 func buildRoot(out, errOut io.Writer) *cobra.Command {
 	var addr, logLevel, logFormat string
 

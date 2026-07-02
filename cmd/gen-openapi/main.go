@@ -1,17 +1,11 @@
 // Command gen-openapi generates the committed OpenAPI 3.1 spec (openapi.yaml) at the repository root by
 // reusing the same api.New registration that the production server runs. Running it via go generate (see
 // internal/api/generate.go) keeps the artifact and the live server in perfect sync — there is no separate
-// schema-definition step.
+// schema-definition step. The spec version is pinned to specVersion (not the build's ldflags identity) so the
+// committed YAML is byte-identical across machines.
 //
-// DETERMINISM: the spec version is a fixed named constant (specVersion), not the running build's identity.
-// This makes the committed artifact byte-identical across machines and build environments: the only variable
-// that reaches the Huma spec is bi.Version, which we control via specVersion. The running server continues
-// to serve its real bi.Version from ldflags; the committed YAML is immune to that variation. Bump
-// specVersion per API-version milestone (e.g. when /v2 ships or a breaking schema change is tagged).
-//
-// OUTPUT PATH: the generator walks UP from its working directory (the package directory where go generate
-// runs) to find go.mod and writes openapi.yaml beside it. An optional -out flag overrides the path (used
-// in main_test.go's TestRunWithOutFlag to redirect output to a temp file without touching the repo root).
+// Output path: the generator walks up from its working directory to find go.mod and writes openapi.yaml
+// beside it. An optional -out flag overrides the path (used by the tests to redirect to a temp file).
 package main
 
 import (
@@ -86,8 +80,7 @@ func generateYAML() ([]byte, error) {
 	// Discard logger — the generator does not produce request logs; only the fmt.Printf progress line above.
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	// Build identity passed to api.New: Version drives cfg title/version in the spec; Commit and BuildTime
-	// are intentionally empty because they do not appear in the spec and would break determinism if set.
+	// Only Version reaches the spec (as its title/version); Commit and BuildTime are left empty.
 	bi := buildinfo.Info{Version: specVersion}
 
 	ha := api.New(mux, bi, logger)

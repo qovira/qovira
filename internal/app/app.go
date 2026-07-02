@@ -15,28 +15,71 @@ import (
 
 	"github.com/qovira/qovira/internal/api"
 	"github.com/qovira/qovira/internal/buildinfo"
+	"github.com/qovira/qovira/internal/events"
 	"github.com/qovira/qovira/internal/httpx"
 )
 
 // HTTP server and graceful-shutdown constants. Kept together so promotion to config is a single, localized change.
 const (
-	// serverReadHeaderTimeout limits the time allowed to read request headers. Setting this prevents the
-	// Slowloris class of slow-client attacks (gosec G112).
 	serverReadHeaderTimeout = 10 * time.Second
-
-	// serverReadTimeout limits the time allowed to read the full request body.
-	serverReadTimeout = 30 * time.Second
-
-	// serverWriteTimeout limits the time allowed to write the full response.
-	serverWriteTimeout = 30 * time.Second
-
-	// serverIdleTimeout is the maximum time to wait for the next request when keep-alives are enabled.
-	serverIdleTimeout = 120 * time.Second
-
-	// shutdownGrace is the maximum time given to in-flight requests to complete after the shutdown signal is
-	// received before the server forcibly closes.
-	shutdownGrace = 15 * time.Second
+	serverReadTimeout       = 30 * time.Second
+	serverWriteTimeout      = 30 * time.Second
+	serverIdleTimeout       = 120 * time.Second
+	shutdownGrace           = 15 * time.Second
 )
+
+// HubShutdowner is the interface consumed by GracefulShutdown for the event hub drain step. It is satisfied
+// by *events.Hub; extracted here so graceful-shutdown logic can be unit-tested with a fake.
+type HubShutdowner interface {
+	Shutdown(ctx context.Context) error
+}
+
+// ServerShutdowner is the interface consumed by GracefulShutdown for the HTTP server drain and force-close
+// steps. It is satisfied by *http.Server; extracted here so graceful-shutdown logic can be unit-tested with
+// a fake.
+type ServerShutdowner interface {
+	Shutdown(ctx context.Context) error
+	Close() error
+}
+
+// GracefulShutdown drains the hub, then the HTTP server, each within its own grace budget (derived via
+// context.WithoutCancel so a cancelled root ctx does not pre-expire them). The hub-first order is required
+// by Run's shutdown block. A hub-drain timeout is logged and tolerated; a server-shutdown timeout triggers
+// srv.Close() and returns nil — force-closing stragglers is the documented fallback, not an error. Only a
+// non-timeout srv.Shutdown error is returned to the caller.
+func GracefulShutdown(ctx context.Context, hub HubShutdowner, srv ServerShutdowner, grace time.Duration) error {
+	hubCtx, hubCancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
+	defer hubCancel()
+
+	if err := hub.Shutdown(hubCtx); err != nil {
+		// A partial drain is fine — the server step below force-closes any stragglers. Warn, don't fail.
+		slog.Warn("hub shutdown did not fully drain within budget — will force-close remainder via srv.Close()",
+			"err", err,
+		)
+	}
+
+	// SSE connections the hub already drained return immediately; any straggler waits up to grace.
+	srvCtx, srvCancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
+	defer srvCancel()
+
+	if err := srv.Shutdown(srvCtx); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			// Shutdown does not interrupt active connections — only Close() does. Expected wedged-client
+			// case, so Warn (not Error) and return nil rather than failing Run.
+			slog.Warn("srv.Shutdown timed out — force-closing remaining connections via srv.Close()")
+
+			if cerr := srv.Close(); cerr != nil {
+				slog.Warn("srv.Close() after shutdown timeout returned error", "err", cerr)
+			}
+
+			return nil
+		}
+
+		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+
+	return nil
+}
 
 // Run is the application entry point. It builds the logger, resolves SPA assets, wires the HTTP server, and
 // blocks until ctx is cancelled, at which point it drains in-flight requests via [http.Server.Shutdown].
@@ -63,29 +106,19 @@ func Run(ctx context.Context, cfg Config) error {
 
 	mux := http.NewServeMux()
 
-	// Mount the Huma API under /api/v1. Go 1.22 most-specific-pattern routing ensures /api/v1/... requests
-	// reach Huma before the SPA catch-all, so no manual prefix-stripping is needed.
 	api.New(mux, bi, logger)
 
-	// All other paths — SPA handler with index.html fallback.
+	hub := events.New(events.DefaultBufferSize)
+
+	mux.Handle("GET /events", events.NewHandler(hub, logger, events.DefaultTimings))
 	mux.Handle("/", httpx.NewSPAHandler(assets))
 
-	// TODO(security): wrap mux in a security-headers middleware (X-Content-Type-Options: nosniff at minimum;
-	// add CSP + frame-ancestors) before a real web client ships. While only static placeholder assets are
-	// served this is defense-in-depth, not yet exploitable.
+	// TODO(security): add CSP and X-Frame-Options / frame-ancestors before a real web client ships.
+	// X-Content-Type-Options: nosniff is now handled by NewSecurityHeadersMiddleware (outermost layer below).
 
-	// Compose the server-edge middleware chain. Layer order matters — each line wraps everything below it:
-	//
-	//   MaxBytesHandler — outermost body-size gate; pairs the 4 MiB Huma per-op cap with a server-edge
-	//                     backstop so bodies are rejected before any handler reads them.
-	//   RequestID       — injects the req_… correlation token into context and sets the Request-Id header;
-	//                     must sit outside everything that reads the ID (access-log, recovery, error edge).
-	//   AccessLog       — emits one structured slog line per request; must be outside recovery so it
-	//                     observes the 500 that recovery writes after a panic (AC3).
-	//   Recovery        — catches panics from the non-API surface and returns a generic 500; must be inside
-	//                     the access-log so the logged status is the recovered one.
-	//   CORS            — answers OPTIONS preflights before routing; must be inside recovery so a bug in
-	//                     the CORS logic is caught rather than dropping the connection.
+	// Server-edge middleware chain, applied inner→outer: the last wrap is the outermost layer and runs
+	// first on each request. The order is load-bearing — each constructor's doc states its own placement
+	// constraint.
 
 	// TODO(config): wire CORSConfig.AllowedOrigins from the instance config model (unit 9) so operators
 	// can configure allowed origins for their deployment without recompiling.
@@ -98,9 +131,8 @@ func Run(ctx context.Context, cfg Config) error {
 	handler = httpx.NewRecoveryMiddleware(logger, handler)
 	handler = httpx.NewAccessLogMiddleware(logger, handler)
 	handler = httpx.NewRequestIDMiddleware(handler)
-	// http.MaxBytesHandler is the server-edge body-size backstop, paired with the 4 MiB Huma per-op cap.
-	// It ensures oversized bodies are rejected before any handler reads them, not just per-operation.
 	handler = http.MaxBytesHandler(handler, httpx.MaxBodyBytes)
+	handler = httpx.NewSecurityHeadersMiddleware(handler)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -120,7 +152,6 @@ func Run(ctx context.Context, cfg Config) error {
 
 	logger.Info("server listening", "addr", ln.Addr().String())
 
-	// Serve in a background goroutine so we can block on context cancellation.
 	serveErr := make(chan error, 1)
 
 	go func() {
@@ -131,7 +162,6 @@ func Run(ctx context.Context, cfg Config) error {
 		close(serveErr)
 	}()
 
-	// Block until the context is cancelled (SIGINT / SIGTERM via signal.NotifyContext) or the server fails.
 	select {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received, draining")
@@ -143,12 +173,12 @@ func Run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
-	// Graceful shutdown: give in-flight requests up to shutdownGrace to finish.
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
-	defer cancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("graceful shutdown: %w", err)
+	// Drain the hub BEFORE srv.Shutdown. An SSE connection never looks "idle" to net/http (its body streams
+	// indefinitely), so a server-first shutdown would block on every open stream until the grace budget
+	// expired, then hard-close them mid-stream. Draining the hub first makes each connection emit a
+	// system.shutdown frame and return, so srv.Shutdown then finds no live connections and exits promptly.
+	if err := GracefulShutdown(ctx, hub, srv, shutdownGrace); err != nil {
+		return err
 	}
 
 	// Surface a serve error that raced the shutdown signal: if Serve failed at the same instant ctx was

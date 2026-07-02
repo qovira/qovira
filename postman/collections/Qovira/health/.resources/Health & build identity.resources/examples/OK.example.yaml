@@ -1,0 +1,50 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/health"
+  method: GET
+  headers:
+    Accept: application/json
+  body:
+    type: text
+    content: ""
+response:
+  statusCode: 200
+  statusText: OK
+  headers:
+    Content-Type: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "status": "string",
+        "version": "string",
+        "commit": "string",
+        "buildTime": "1984-02-20T17:26:04.353Z",
+        "$schema": "https://JTgWEsYYHVrLDeGLCJQv.ipd1-nAV+fKDOf0qPVtkp.Z4fSoaGYPemKmnMo01ubMlkIT1a"
+      }
+    $type: |-
+      {
+        "type": "object",
+        "properties": {
+          "buildTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "commit",
+          "buildTime"
+        ]
+      }
+order: 1000

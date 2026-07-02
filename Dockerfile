@@ -20,8 +20,6 @@ RUN --mount=type=cache,target=/pnpm-store \
     pnpm config set store-dir /pnpm-store && \
     pnpm install --frozen-lockfile
 
-# Copy the rest of the web sources and run the build.
-# adapter-static emits to ../internal/httpx/webdist → /app/internal/httpx/webdist.
 COPY web/ ./
 RUN pnpm build
 
@@ -54,9 +52,7 @@ COPY --from=web /app/internal/httpx/webdist ./internal/httpx/webdist
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 
-# Build the binary with CGO_ENABLED=1, the embed_spa build tag, and the version ldflags stamped from the
-# build-args. -w -s strips DWARF/symbol tables to reduce binary size.
-# Cache mounts for the module cache and the build cache keep rebuilds fast.
+# -w -s strips the DWARF/symbol tables to shrink the binary; the cache mounts keep CGO rebuilds fast.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 go build -tags embed_spa \
