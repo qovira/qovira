@@ -1,0 +1,11 @@
+$kind: http-request
+description: Returns 200 when the server is accepting requests, along with the build identity (version, commit, buildTime).
+url: "{{baseUrl}}/health"
+method: GET
+headers:
+  Accept: application/json
+body:
+  type: text
+  content: ""
+examples: ./.resources/Health & build identity.resources/examples
+order: 1000
