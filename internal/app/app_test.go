@@ -395,7 +395,15 @@ func TestRun_PostEventsDoesNotStartSSEStream(t *testing.T) {
 
 	// Read the body with a deadline to detect any accidental streaming. A legitimate SPA or error
 	// response terminates immediately; an SSE stream would hang here.
-	bodyCh := make(chan string, 1)
+
+	// readResult carries scanner.Err() back so it's checked on the test goroutine, not the reader, whose
+	// t.Errorf would race the test's return on the timeout path below.
+	type readResult struct {
+		body string
+		err  error
+	}
+
+	bodyCh := make(chan readResult, 1)
 
 	go func() {
 		var sb strings.Builder
@@ -405,14 +413,18 @@ func TestRun_PostEventsDoesNotStartSSEStream(t *testing.T) {
 			sb.WriteByte('\n')
 		}
 
-		bodyCh <- sb.String()
+		bodyCh <- readResult{body: sb.String(), err: scanner.Err()}
 	}()
 
 	select {
-	case body := <-bodyCh:
+	case res := <-bodyCh:
+		if res.err != nil {
+			t.Errorf("POST /events: read response body: %v", res.err)
+		}
+
 		// Body read to completion — not an SSE stream.
 		t.Logf("POST /events → status=%d Content-Type=%q body-len=%d (SPA fallthrough confirmed, not SSE)",
-			resp.StatusCode, ct, len(body))
+			resp.StatusCode, ct, len(res.body))
 	case <-time.After(2 * time.Second):
 		t.Error("POST /events: response body did not terminate — possible accidental SSE streaming")
 	}

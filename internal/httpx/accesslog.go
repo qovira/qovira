@@ -6,9 +6,6 @@ import (
 	"time"
 )
 
-// healthPath is the well-known health-check URL. Container HEALTHCHECK polls (~every 30 s) would flood
-// stdout at INFO level; logging them at DEBUG lets operators set level=info in production and suppress the
-// noise while retaining observability when they debug at level=debug.
 const healthPath = "/api/v1/health"
 
 // statusRecorder wraps http.ResponseWriter to capture the status code written by the inner handler and

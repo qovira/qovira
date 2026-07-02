@@ -21,19 +21,11 @@ import (
 
 // HTTP server and graceful-shutdown constants. Kept together so promotion to config is a single, localized change.
 const (
-	// serverReadHeaderTimeout bounds the header read — the guard against Slowloris slow-client attacks (gosec G112).
 	serverReadHeaderTimeout = 10 * time.Second
-
-	// serverReadTimeout bounds reading the whole request (headers + body), unlike serverReadHeaderTimeout.
-	serverReadTimeout = 30 * time.Second
-
-	serverWriteTimeout = 30 * time.Second
-
-	// serverIdleTimeout bounds how long a kept-alive connection waits for its next request.
-	serverIdleTimeout = 120 * time.Second
-
-	// shutdownGrace is the per-step budget for draining in-flight work before force-close.
-	shutdownGrace = 15 * time.Second
+	serverReadTimeout       = 30 * time.Second
+	serverWriteTimeout      = 30 * time.Second
+	serverIdleTimeout       = 120 * time.Second
+	shutdownGrace           = 15 * time.Second
 )
 
 // HubShutdowner is the interface consumed by GracefulShutdown for the event hub drain step. It is satisfied
@@ -114,17 +106,11 @@ func Run(ctx context.Context, cfg Config) error {
 
 	mux := http.NewServeMux()
 
-	// Mount the Huma API under /api/v1. Most-specific-pattern routing keeps /api/v1/... ahead of the SPA
-	// catch-all, so no prefix-stripping is needed.
 	api.New(mux, bi, logger)
 
-	// The hub is drained before srv.Shutdown (see the shutdown block below) so SSE streams close cleanly.
 	hub := events.New(events.DefaultBufferSize)
 
-	// SSE endpoint; non-GET /events and every other path fall through to the SPA catch-all below.
 	mux.Handle("GET /events", events.NewHandler(hub, logger, events.DefaultTimings))
-
-	// All other paths — SPA handler with index.html fallback.
 	mux.Handle("/", httpx.NewSPAHandler(assets))
 
 	// TODO(security): add CSP and X-Frame-Options / frame-ancestors before a real web client ships.
@@ -166,7 +152,6 @@ func Run(ctx context.Context, cfg Config) error {
 
 	logger.Info("server listening", "addr", ln.Addr().String())
 
-	// Serve in a background goroutine so we can block on context cancellation.
 	serveErr := make(chan error, 1)
 
 	go func() {
@@ -177,7 +162,6 @@ func Run(ctx context.Context, cfg Config) error {
 		close(serveErr)
 	}()
 
-	// Block until the context is cancelled (SIGINT / SIGTERM via signal.NotifyContext) or the server fails.
 	select {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received, draining")

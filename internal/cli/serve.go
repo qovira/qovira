@@ -17,8 +17,6 @@ func newServeCmd(addr, logLevel, logFormat *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var overrides app.FlagOverrides
 
-			// cmd.Flags() exposes the inherited persistent flags once cobra has parsed them, so the
-			// parent command is not needed here to read whether they were explicitly set.
 			if cmd.Flags().Changed("addr") {
 				overrides.Addr = addr
 			}

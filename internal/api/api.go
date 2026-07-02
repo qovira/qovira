@@ -2,8 +2,9 @@
 // the caller's mux (shared with the SPA). Every error — Huma's 422/415/500 and the routing-level 404/405
 // from newAPIFallback — emerges as application/problem+json in the house RFC 9457 shape. Shaping is
 // centralized (see internal/api/problem and requestIDTransformer), so handlers do no per-error work.
-// Most-specific-pattern routing keeps /api/v1/... with Huma and lets everything else fall through to the SPA
-// catch-all, so no prefix-stripping is needed.
+// Most-specific-pattern routing keeps /api/v1/... operations with Huma, routes any other /api/... path to the
+// /api/ fallback for a problem+json 404/405, and lets everything else fall through to the SPA catch-all — so no
+// prefix-stripping is needed.
 package api
 
 import (
@@ -18,9 +19,6 @@ import (
 	"github.com/qovira/qovira/internal/httpx"
 )
 
-// maxBodyBytes is the default request-body ceiling for every registered operation. It aliases
-// [httpx.MaxBodyBytes] so the per-operation cap and the server-edge backstop (http.MaxBytesHandler) stay in
-// lockstep. An operation may override MaxBodyBytes as its contract demands.
 const maxBodyBytes = httpx.MaxBodyBytes
 
 // New builds the Huma API mounted on the caller's mux under the /api/v1 prefix, registers all operations,
@@ -65,8 +63,6 @@ func requestIDTransformer(ctx huma.Context, _ string, v any) (any, error) {
 	return v, nil
 }
 
-// withMaxBodyBytes returns op with MaxBodyBytes defaulted to maxBodyBytes when the caller left it unset, so
-// every operation inherits the body-size ceiling without each registration callsite repeating it.
 func withMaxBodyBytes(op huma.Operation) huma.Operation {
 	if op.MaxBodyBytes == 0 {
 		op.MaxBodyBytes = maxBodyBytes

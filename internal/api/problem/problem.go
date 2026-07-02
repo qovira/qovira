@@ -70,15 +70,11 @@ func (d *Details) ContentType(ct string) string {
 	return ct
 }
 
-// kind holds the static fields for a single error code in the registry.
 type kind struct {
-	code   string
-	title  string
-	status int
+	code  string
+	title string
 }
 
-// typeURI derives the type URI for a code by converting underscores to hyphens.
-// "validation_error" → "https://qovira.ai/errors/validation-error".
 func typeURI(code string) string {
 	return typeBase + strings.ReplaceAll(code, "_", "-")
 }
@@ -86,12 +82,11 @@ func typeURI(code string) string {
 // registry maps HTTP status codes to their house error kind. Only the five framework codes are registered;
 // From falls back gracefully for unknown codes.
 var registry = map[int]kind{
-	http.StatusUnprocessableEntity: {code: "validation_error", title: "Validation Error", status: http.StatusUnprocessableEntity},
-	http.StatusNotFound:            {code: "not_found", title: "Not Found", status: http.StatusNotFound},
-	http.StatusMethodNotAllowed:    {code: "method_not_allowed", title: "Method Not Allowed", status: http.StatusMethodNotAllowed},
-	http.StatusUnsupportedMediaType: {code: "unsupported_media_type", title: "Unsupported Media Type",
-		status: http.StatusUnsupportedMediaType},
-	http.StatusInternalServerError: {code: "internal_error", title: "Internal Error", status: http.StatusInternalServerError},
+	http.StatusUnprocessableEntity:  {code: "validation_error", title: "Validation Error"},
+	http.StatusNotFound:             {code: "not_found", title: "Not Found"},
+	http.StatusMethodNotAllowed:     {code: "method_not_allowed", title: "Method Not Allowed"},
+	http.StatusUnsupportedMediaType: {code: "unsupported_media_type", title: "Unsupported Media Type"},
+	http.StatusInternalServerError:  {code: "internal_error", title: "Internal Error"},
 }
 
 // From builds a *Details from the given HTTP status code and message. It looks up the registry for the
@@ -107,7 +102,7 @@ func From(status int, msg string, errs ...error) *Details {
 			text = "error"
 		}
 		code := strings.ReplaceAll(strings.ToLower(text), " ", "_")
-		k = kind{code: code, title: text, status: status}
+		k = kind{code: code, title: text}
 	}
 
 	d := &Details{

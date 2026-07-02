@@ -51,26 +51,18 @@ var DefaultTimings = Timings{
 	RetryHint:     3 * time.Second,
 }
 
-// readyPayload is the data field of a system.ready SSE frame. It carries the connection id so clients
-// can correlate log lines with their stream.
 type readyPayload struct {
 	ConnectionID string `json:"connectionId"`
 }
 
-// pingPayload is the data field of a system.ping SSE frame. The Time field is set at write to the
-// current wall-clock time in RFC 3339 UTC format.
 type pingPayload struct {
 	Time string `json:"time"`
 }
 
-// shutdownPayload is the data field of a system.shutdown SSE frame. RetryMs carries the reconnect hint
-// in milliseconds, mirroring the "retry:" directive sent on connect, so the client's EventSource can
-// schedule its reconnection attempt correctly even if it has already consumed the initial retry: directive.
 type shutdownPayload struct {
 	RetryMs int64 `json:"retryMs"`
 }
 
-// handler is the http.Handler that drives one SSE connection.
 type handler struct {
 	hub    *Hub
 	log    *slog.Logger
@@ -100,22 +92,16 @@ func NewHandler(hub *Hub, log *slog.Logger, t Timings) http.Handler {
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 
-	// Verify that the underlying ResponseWriter supports Flush and SetWriteDeadline BEFORE writing any
-	// response bytes. This must happen before WriteHeader so we can still send a clean problem+json 500
-	// if either capability is missing.
+	// Verify Flush and SetWriteDeadline support BEFORE any response byte (before WriteHeader), so a missing
+	// capability can still return a clean problem+json 500.
 	//
-	// SetWriteDeadline probe: set the first rolling write deadline (now + WriteDeadline). This both
-	// verifies the capability (an unsupported writer returns an error) and establishes the initial
-	// deadline, so there is no unbounded window between connect and the first flush. writeFrame rolls it
-	// forward on every subsequent flush. We deliberately do NOT probe with a zero time: that would
-	// DISABLE the deadline, leaving the connection unprotected until the first flush — and worse, it
-	// would mask a regression in the rolling reset, since the connection would then outlive the server's
-	// WriteTimeout even if writeFrame stopped resetting the deadline.
+	// SetWriteDeadline probe: setting the first rolling deadline (now + WriteDeadline) both verifies the capability
+	// and closes the connect-to-first-flush window; writeFrame rolls it forward on each flush. Not a zero time —
+	// that DISABLES the deadline, leaving the stream unprotected until the first flush and masking a broken rolling
+	// reset (the stream would then outlive the server WriteTimeout unnoticed).
 	//
-	// Flush probe: we cannot call rc.Flush() here because on a real net/http connection Flush implicitly
-	// commits headers (sending a 200 before our SSE headers are set). Instead we walk the Unwrap chain
-	// manually to detect the http.Flusher interface — the same check ResponseController.Flush() itself
-	// does, without the side effect.
+	// Flush probe: we walk the Unwrap chain for http.Flusher instead of calling rc.Flush() — the same check
+	// ResponseController.Flush() makes, minus its side effect of committing headers (a 200 ahead of our SSE headers).
 	connID := httpx.RequestID(r.Context())
 
 	if err := rc.SetWriteDeadline(time.Now().Add(h.timing.WriteDeadline)); err != nil {
@@ -176,8 +162,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sub := h.hub.Subscribe(BroadcastTopic)
 	defer sub.Unsubscribe()
 
-	// SSE response headers. Connection: keep-alive is omitted intentionally — net/http manages it, and
-	// it is irrelevant under HTTP/2.
+	// Connection: keep-alive is omitted intentionally — net/http manages it, and it is irrelevant under HTTP/2.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	// X-Accel-Buffering: no — deliberate exception to the house "no X--prefixed headers (RFC 6648)" rule.
@@ -186,8 +171,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	// Emit the retry: directive then the system.ready canary frame. These share the same flush.
-	// connID was resolved above during the capability checks; reuse it here.
+	// Emit the retry: directive then the system.ready canary frame; both reach the client on writeFrame's flush.
 	retryMs := h.timing.RetryHint.Milliseconds()
 
 	if _, err := fmt.Fprintf(w, "retry:%d\n", retryMs); err != nil {
